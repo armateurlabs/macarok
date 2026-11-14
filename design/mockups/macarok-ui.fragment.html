@@ -1,0 +1,569 @@
+<style>
+#macarok-designs { width:100%; }
+#macarok-designs [hidden] { display:none !important; }
+#macarok-designs .design-stage { min-height:910px; }
+#macarok-designs .am-window {
+  --am-bg:light-dark(#fdfdfd,#202124); --am-sidebar:light-dark(#edf0f2,#27292c);
+  --am-toolbar:light-dark(#f3f4f5,#292b2e); --am-raised:light-dark(#ffffff,#323438);
+  --am-ink:light-dark(#24272a,#edf0f2); --am-dim:light-dark(#62696f,#a3a9af);
+  --am-line:light-dark(#d9dde0,#3c3f43); --am-stripe:light-dark(#f5f6f7,#25272a);
+  --am-hover:light-dark(#e5e9ed,#363a3e); --am-selected:light-dark(#d7e8fa,#244b70);
+  --am-selected-ink:light-dark(#164f85,#e3f1ff); --am-accent:light-dark(#2477c7,#7fb8f0);
+  --am-positive:light-dark(#368250,#8fc29d); --am-soft:light-dark(#eef5fb,#273746);
+  color:var(--am-ink); background:var(--am-bg); border:1px solid var(--am-line);
+  border-radius:12px; overflow:clip; position:relative; isolation:isolate;
+  font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  box-shadow:0 8px 28px light-dark(#15202b12,#00000028); min-width:0;
+}
+#macarok-designs .am-window[data-appearance="light"] {color-scheme:light;}
+#macarok-designs .am-window[data-appearance="dark"] {color-scheme:dark;}
+#macarok-designs .am-window * {box-sizing:border-box;}
+#macarok-designs .am-window button, #macarok-designs .am-window input, #macarok-designs .am-window select {font:inherit; color:inherit;}
+#macarok-designs .am-window button {cursor:default;}
+#macarok-designs .am-window button:disabled {opacity:.45;}
+#macarok-designs .am-window button:focus-visible, #macarok-designs .am-window input:focus-visible, #macarok-designs .am-window select:focus-visible {outline:2px solid var(--am-accent);outline-offset:2px;}
+#macarok-designs .am-window button {border:0;background:none;border-radius:5px;}
+#macarok-designs .am-window button:hover {background:var(--am-hover);}
+#macarok-designs .am-window svg {width:16px;height:16px;stroke-width:1.65;flex-shrink:0;vertical-align:middle;}
+#macarok-designs .am-window p, #macarok-designs .am-window h1, #macarok-designs .am-window h2, #macarok-designs .am-window h3 {margin:0;}
+#macarok-designs .am-window h1 {font-size:24px;line-height:1.18;font-weight:600;letter-spacing:-.65px;}
+#macarok-designs .am-window h2 {font-size:15px;font-weight:600;letter-spacing:-.15px;}
+#macarok-designs .am-window h3 {font-size:13px;font-weight:600;}
+#macarok-designs .am-window .dim {color:var(--am-dim);}
+#macarok-designs .am-window .small {font-size:11px;}
+#macarok-designs .am-window .mono {font-variant-numeric:tabular-nums;}
+#macarok-designs .am-window .ellipsis {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+#macarok-designs .am-titlebar {height:40px;display:flex;align-items:center;gap:14px;padding:0 100px 0 14px;background:var(--am-toolbar);border-bottom:1px solid var(--am-line);}
+#macarok-designs .traffic {display:flex;gap:7px;flex-shrink:0;}
+#macarok-designs .traffic span {width:11px;height:11px;border-radius:100%;background:#f2635c;box-shadow:inset 0 0 0 1px #00000012;}
+#macarok-designs .traffic span:nth-child(2) {background:#edbd43;}
+#macarok-designs .traffic span:nth-child(3) {background:#5ab853;}
+#macarok-designs .app-name {font-weight:600;letter-spacing:-.15px;}
+#macarok-designs .window-subtitle {margin-left:auto;color:var(--am-dim);font-size:11px;}
+#macarok-designs .am-transport {display:grid;grid-template-columns:132px minmax(180px,1fr) 153px;gap:17px;align-items:center;padding:14px 16px;background:var(--am-toolbar);border-bottom:1px solid var(--am-line);min-height:87px;}
+#macarok-designs .transport-buttons {display:flex;gap:8px;align-items:center;}
+#macarok-designs .icon-button {display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:27px;padding:5px;flex-shrink:0;}
+#macarok-designs .transport-buttons .play-toggle {width:40px;height:40px;border:1px solid var(--am-line);background:var(--am-raised);border-radius:50%;box-shadow:0 1px 2px #0000000b;}
+#macarok-designs .transport-buttons .play-toggle svg {width:20px;height:20px;}
+#macarok-designs .transport-track {display:grid;grid-template-columns:40px minmax(0,1fr);gap:10px;align-items:center;}
+#macarok-designs .transport-copy {min-width:0;}
+#macarok-designs .transport-title {display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;}
+#macarok-designs .transport-title strong {font-weight:600;}
+#macarok-designs .seek-line {display:flex;align-items:center;gap:7px;margin-top:5px;font-size:10px;color:var(--am-dim);font-variant-numeric:tabular-nums;}
+#macarok-designs .am-window input[type="range"] {accent-color:var(--am-accent);width:100%;height:12px;min-width:0;margin:0;}
+#macarok-designs .transport-extras {display:flex;align-items:center;gap:5px;justify-content:flex-end;}
+#macarok-designs .transport-extras input {max-width:54px;}
+#macarok-designs .toolbar-rule {height:18px;width:1px;background:var(--am-line);margin:0 5px;}
+#macarok-designs .am-main {display:grid;grid-template-columns:var(--library-size,28%) minmax(0,1fr) 29%;min-height:650px;align-items:stretch;}
+#macarok-designs .am-window[data-layout="album"] {--library-size:24%;}
+#macarok-designs .am-window[data-layout="album"] {display:flex;flex-direction:column;}
+#macarok-designs .am-window[data-layout="album"]>.am-titlebar {order:0;}
+#macarok-designs .am-window[data-layout="album"]>.am-main {order:1;}
+#macarok-designs .am-window[data-layout="album"]>.am-transport {order:2;border-top:1px solid var(--am-line);border-bottom:0;}
+#macarok-designs .am-window[data-layout="album"]>.am-status {order:3;}
+#macarok-designs .am-window[data-layout="album"]>.sheet-slot {order:4;}
+#macarok-designs .library-pane {background:var(--am-sidebar);border-right:1px solid var(--am-line);padding:13px 10px;min-width:0;}
+#macarok-designs .source-select {display:flex;align-items:center;gap:8px;background:var(--am-raised);border:1px solid var(--am-line);border-radius:6px;padding:7px 8px;}
+#macarok-designs .source-select svg {color:var(--am-accent);}
+#macarok-designs .source-select select {background:transparent;border:0;min-width:0;width:100%;outline-offset:4px;font-weight:500;font-size:12px;}
+#macarok-designs .library-search {display:flex;align-items:center;gap:6px;border:1px solid var(--am-line);border-radius:6px;background:var(--am-bg);margin-top:11px;padding:5px 7px;}
+#macarok-designs .library-search svg {color:var(--am-dim);width:14px;}
+#macarok-designs .library-search input {width:100%;min-width:0;border:0;outline:0;background:none;font-size:12px;height:18px;}
+#macarok-designs .view-switch {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;margin:12px 0 15px;}
+#macarok-designs .view-switch button {padding:5px 2px;font-size:11px;color:var(--am-dim);text-align:center;}
+#macarok-designs .view-switch button[aria-current="page"] {color:var(--am-selected-ink);background:var(--am-selected);font-weight:600;}
+#macarok-designs .library-caption {display:flex;align-items:center;justify-content:space-between;gap:6px;margin:0 4px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--am-dim);}
+#macarok-designs .library-caption .icon-button {width:21px;height:20px;min-width:0;}
+#macarok-designs .library-list {display:flex;flex-direction:column;gap:2px;min-width:0;}
+#macarok-designs .library-row {width:100%;display:flex;align-items:center;gap:7px;min-height:29px;text-align:left;padding:5px 7px;min-width:0;}
+#macarok-designs .library-row>span:first-of-type:not(.cover) {flex:1;}
+#macarok-designs .library-row svg {width:14px;height:14px;color:var(--am-dim);}
+#macarok-designs .library-row .row-count {color:var(--am-dim);font-size:11px;margin-left:auto;flex-shrink:0;}
+#macarok-designs .library-row.selected {background:var(--am-selected);color:var(--am-selected-ink);}
+#macarok-designs .library-row.selected svg {color:inherit;}
+#macarok-designs .library-row.child {padding-left:24px;font-size:12px;}
+#macarok-designs .library-row.deep {padding-left:45px;font-size:11px;min-height:26px;}
+#macarok-designs .album-row {padding:6px;gap:9px;}
+#macarok-designs .album-row .album-text {display:flex;flex-direction:column;min-width:0;flex:1;}
+#macarok-designs .library-bottom {margin-top:17px;padding:12px 6px 0;border-top:1px solid var(--am-line);}
+#macarok-designs .library-bottom p {font-size:11px;color:var(--am-dim);}
+#macarok-designs .library-shortcut {display:flex;align-items:center;gap:7px;margin-top:8px;width:100%;padding:5px 0;color:var(--am-dim);font-size:11px;text-align:left;}
+#macarok-designs .context-pane {padding:0;min-width:0;}
+#macarok-designs .context-toolbar, #macarok-designs .queue-toolbar {display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:45px;padding:8px 14px;border-bottom:1px solid var(--am-line);}
+#macarok-designs .context-toolbar h2,#macarok-designs .queue-toolbar h2 {font-size:12px;font-weight:600;}
+#macarok-designs .context-content {padding:17px 17px 13px;}
+#macarok-designs .context-kicker {color:var(--am-dim);font-size:10px;letter-spacing:1px;text-transform:uppercase;margin-bottom:9px;}
+#macarok-designs .now-hero {display:grid;grid-template-columns:112px minmax(0,1fr);gap:15px;align-items:center;}
+#macarok-designs .now-hero h1 {font-size:20px;}
+#macarok-designs .now-hero .artist-link {color:var(--am-accent);font-size:12px;padding:0;margin:7px 0 2px;text-align:left;}
+#macarok-designs .now-hero .dim {font-size:11px;}
+#macarok-designs .file-badge {display:inline-block;border:1px solid var(--am-line);border-radius:3px;padding:1px 5px;margin-top:8px;font-size:9px;letter-spacing:.4px;color:var(--am-dim);white-space:nowrap;}
+#macarok-designs .context-tabs {display:flex;align-items:center;gap:17px;border-bottom:1px solid var(--am-line);margin-top:21px;}
+#macarok-designs .context-tabs button {position:relative;padding:7px 0 9px;border-radius:0;font-size:12px;color:var(--am-dim);}
+#macarok-designs .context-tabs button[aria-selected="true"] {color:var(--am-ink);font-weight:600;}
+#macarok-designs .context-tabs button[aria-selected="true"]:after {content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--am-accent);}
+#macarok-designs .context-section {padding:17px 0 0;}
+#macarok-designs .context-section h3 {margin-bottom:9px;}
+#macarok-designs .fact-grid {display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:12px 0;border-bottom:1px solid var(--am-line);}
+#macarok-designs .fact-grid span {display:block;font-size:10px;color:var(--am-dim);margin-bottom:2px;}
+#macarok-designs .fact-grid strong {font-weight:500;font-size:12px;}
+#macarok-designs .context-body-copy {font-size:12px;color:var(--am-dim);line-height:1.65;}
+#macarok-designs .context-action {display:flex;align-items:center;gap:5px;color:var(--am-accent);font-size:11px;padding:5px 0;margin-top:7px;}
+#macarok-designs .related-albums {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+#macarok-designs .album-tile {display:block;padding:0;text-align:left;min-width:0;border-radius:4px;}
+#macarok-designs .album-tile .cover {width:100%;height:auto;aspect-ratio:1;border-radius:4px;}
+#macarok-designs .album-tile strong {font-weight:500;font-size:11px;display:block;margin-top:6px;}
+#macarok-designs .album-tile .dim {font-size:10px;display:block;margin-top:1px;}
+#macarok-designs .context-footer {margin-top:15px;padding-top:11px;border-top:1px solid var(--am-line);display:flex;align-items:center;justify-content:space-between;gap:7px;font-size:10px;color:var(--am-dim);}
+#macarok-designs .context-footer span {display:flex;align-items:center;gap:5px;}
+#macarok-designs .context-footer svg {width:12px;height:12px;}
+#macarok-designs .tag-list {display:grid;grid-template-columns:90px minmax(0,1fr);font-size:11px;gap:0;}
+#macarok-designs .tag-list dt,#macarok-designs .tag-list dd {padding:7px 0;border-bottom:1px solid var(--am-line);margin:0;overflow-wrap:anywhere;}
+#macarok-designs .tag-list dt {color:var(--am-dim);}
+#macarok-designs .empty-lyrics {padding:30px 0 25px;display:flex;align-items:center;flex-direction:column;text-align:center;gap:9px;color:var(--am-dim);}
+#macarok-designs .empty-lyrics>svg {width:25px;height:25px;}
+#macarok-designs .empty-lyrics p {font-size:12px;max-width:220px;}
+#macarok-designs .queue-pane {border-left:1px solid var(--am-line);min-width:0;background:var(--am-bg);}
+#macarok-designs .queue-tools {display:flex;align-items:center;gap:2px;}
+#macarok-designs .am-window .repeat-toggle {color:var(--am-dim);}
+#macarok-designs .am-window .repeat-toggle[aria-pressed="true"] {background:var(--am-selected);color:var(--am-selected-ink);}
+#macarok-designs .queue-album-heading {padding:14px 12px 10px;display:flex;gap:9px;align-items:center;}
+#macarok-designs .queue-album-heading strong {font-size:11px;font-weight:600;display:block;}
+#macarok-designs .queue-album-heading .dim {font-size:10px;}
+#macarok-designs .queue-track {width:100%;display:grid;grid-template-columns:18px minmax(0,1fr) 30px;align-items:center;text-align:left;gap:5px;padding:8px 10px;border-radius:0;min-height:42px;}
+#macarok-designs .queue-track:nth-child(even) {background:var(--am-stripe);}
+#macarok-designs .queue-track .track-num {font-size:10px;text-align:center;color:var(--am-dim);}
+#macarok-designs .queue-track .track-num svg {width:13px;height:13px;color:var(--am-accent);}
+#macarok-designs .queue-track strong {display:block;font-size:11px;font-weight:400;}
+#macarok-designs .queue-track .track-artist {font-size:10px;color:var(--am-dim);display:block;margin-top:1px;}
+#macarok-designs .queue-track .track-duration {font-size:10px;color:var(--am-dim);text-align:right;font-variant-numeric:tabular-nums;}
+#macarok-designs .queue-track.current {background:var(--am-selected);color:var(--am-selected-ink);}
+#macarok-designs .queue-track.current strong {font-weight:600;}
+#macarok-designs .queue-track.current .track-duration,#macarok-designs .queue-track.current .track-artist {color:inherit;opacity:.8;}
+#macarok-designs .queue-note {display:flex;align-items:center;gap:6px;padding:10px 12px;border-top:1px solid var(--am-line);color:var(--am-dim);font-size:10px;}
+#macarok-designs .queue-note svg {width:12px;height:12px;}
+#macarok-designs .am-status {border-top:1px solid var(--am-line);background:var(--am-toolbar);padding:6px 12px;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--am-dim);gap:10px;min-height:29px;}
+#macarok-designs .am-status .status-message {display:flex;align-items:center;gap:6px;min-width:0;}
+#macarok-designs .am-status svg {width:12px;height:12px;}
+#macarok-designs .home-heading {margin-bottom:18px;}
+#macarok-designs .home-heading p {color:var(--am-dim);font-size:11px;margin-top:4px;}
+#macarok-designs .home-section {margin-top:21px;}
+#macarok-designs .section-heading {display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:10px;}
+#macarok-designs .section-heading select {border:0;background:transparent;color:var(--am-dim);font-size:10px;max-width:95px;}
+#macarok-designs .recent-track {display:flex;align-items:center;gap:9px;width:100%;padding:7px 0;border-bottom:1px solid var(--am-line);text-align:left;}
+#macarok-designs .recent-track>span {min-width:0;flex:1;}
+#macarok-designs .recent-track strong {font-size:11px;font-weight:500;display:block;}
+#macarok-designs .recent-track .dim {font-size:10px;display:block;}
+#macarok-designs .recent-track .recent-time {font-size:10px;flex:0 0 auto;color:var(--am-dim);}
+#macarok-designs .album-hero {display:flex;align-items:center;gap:12px;margin-bottom:15px;}
+#macarok-designs .album-hero h1 {font-size:20px;}
+#macarok-designs .album-hero p {font-size:11px;color:var(--am-dim);margin-top:4px;}
+#macarok-designs .action-row {display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:12px 0;}
+#macarok-designs .am-button {display:inline-flex;align-items:center;justify-content:center;gap:5px;background:var(--am-raised) !important;border:1px solid var(--am-line) !important;border-radius:5px;padding:5px 9px;font-size:11px;min-height:27px;}
+#macarok-designs .am-button.primary {background:var(--am-accent) !important;border-color:var(--am-accent) !important;color:light-dark(#ffffff,#102b43);}
+#macarok-designs .album-track {display:grid;grid-template-columns:19px minmax(0,1fr) 31px;gap:5px;width:100%;padding:7px 5px;text-align:left;border-radius:0;font-size:11px;}
+#macarok-designs .album-track:nth-child(even) {background:var(--am-stripe);}
+#macarok-designs .album-track.current {color:var(--am-selected-ink);background:var(--am-selected);}
+#macarok-designs .album-track .number,#macarok-designs .album-track .time {color:var(--am-dim);font-size:10px;font-variant-numeric:tabular-nums;}
+#macarok-designs .album-track .time {text-align:right;}
+#macarok-designs .cue-info {margin-top:14px;background:var(--am-soft);padding:9px 10px;border-radius:5px;font-size:10px;display:flex;gap:7px;color:var(--am-dim);}
+#macarok-designs .cue-info svg {width:14px;height:14px;color:var(--am-accent);}
+#macarok-designs .cover {width:40px;height:40px;position:relative;overflow:hidden;flex-shrink:0;isolation:isolate;border-radius:3px;box-shadow:inset 0 0 0 1px #00000014;background:#536b6c;}
+#macarok-designs .cover:before,#macarok-designs .cover:after {content:"";position:absolute;pointer-events:none;}
+#macarok-designs .cover .cover-lettering {position:absolute;z-index:3;top:9%;left:8%;right:8%;font-size:9px;line-height:1.1;color:#fff;font-weight:600;letter-spacing:1px;text-transform:uppercase;text-shadow:0 1px 5px #00000030;}
+#macarok-designs .cover .cover-lettering small {display:block;margin-top:4px;font-size:6px;letter-spacing:.8px;opacity:.8;}
+#macarok-designs .cover:not(.large-cover) .cover-lettering {display:none;}
+#macarok-designs .large-cover {width:112px;height:112px;border-radius:5px;}
+#macarok-designs .cover[data-art="campfire"] {background:linear-gradient(150deg,#355952 0%,#9cbaaa 35%,#607b72 50%,#bdc9a2 75%,#537d81 100%);}
+#macarok-designs .cover[data-art="campfire"]:before {inset:25% -15% -30%;background:linear-gradient(135deg,#95bdb7a0,#476e5db0 50%,#bbceaf);transform:rotate(-14deg);filter:blur(6px);}
+#macarok-designs .cover[data-art="campfire"]:after {inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,#244f3d15 3px);}
+#macarok-designs .cover[data-art="geogaddi"] {background:repeating-conic-gradient(from 15deg at 50% 55%,#c65120 0deg 30deg,#e8ac53 30deg 60deg,#853a25 60deg 90deg);}
+#macarok-designs .cover[data-art="geogaddi"]:before {width:48%;height:48%;border:10px solid #e0b57c80;border-radius:50%;left:26%;top:26%;background:#722d20;}
+#macarok-designs .cover[data-art="rainbows"] {background:repeating-linear-gradient(151deg,#17363e 0%,#263638 13%,#eb6139 15%,#ae331c 21%,#e5b65e 24%,#24393b 33%);}
+#macarok-designs .cover[data-art="rainbows"]:after {inset:0;background:repeating-linear-gradient(25deg,transparent 0 8px,#e78b6d50 9px 10px);}
+#macarok-designs .cover[data-art="migration"] {background:linear-gradient(145deg,#eac9c3,#b9bac3 55%,#787b95);}
+#macarok-designs .cover[data-art="migration"]:before {inset:35% -20% -30%;background:#353d65;clip-path:polygon(0 70%,30% 0,45% 50%,68% 10%,100% 80%,100% 100%,0 100%);}
+#macarok-designs .cover[data-art="migration"]:after {width:26%;height:26%;border-radius:50%;background:#edcf8d;top:20%;right:18%;}
+#macarok-designs .cover[data-art="spaces"] {background:#cbbda5;}
+#macarok-designs .cover[data-art="spaces"]:before {width:60%;height:160%;left:24%;top:-20%;background:repeating-linear-gradient(90deg,#223f4a 0 3px,#86968e 4px 7px);transform:rotate(24deg);}
+#macarok-designs .cover[data-art="spaces"]:after {width:48%;height:48%;border:9px solid #f2dbc0aa;border-radius:50%;top:30%;left:30%;}
+#macarok-designs .cover[data-art="fourtet"] {background:radial-gradient(ellipse at 50% 50%,#dddfc8 0 10%,#202b29 10% 18%,#a6bb8c 18% 20%,#182725 20% 32%,#b8c69b 32% 34%,#172121 34% 48%,#d3dbc0 48% 49%,#1a2724 49%);}
+#macarok-designs .cover[data-art="darkside"] {background:#17191b;}
+#macarok-designs .cover[data-art="darkside"]:before {width:53%;height:53%;left:24%;top:20%;background:linear-gradient(125deg,#e3e5d8 0 43%,#1d2020 44%);clip-path:polygon(50% 0,100% 90%,0 90%);}
+#macarok-designs .cover[data-art="darkside"]:after {height:14%;width:70%;left:48%;top:49%;background:linear-gradient(#e15151 0% 17%,#e79c4b 17% 33%,#f0d86d 33% 50%,#6fb47a 50% 67%,#6d9bcb 67% 83%,#9b78a5 83%);transform:rotate(15deg);}
+#macarok-designs .cover[data-art="mezzanine"] {background:radial-gradient(ellipse at 54% 45%,#506c41,#171e19 45%,#0d1211);}
+#macarok-designs .cover[data-art="mezzanine"]:before {height:73%;width:33%;top:15%;left:34%;border-radius:45% 45% 35% 35%;background:repeating-linear-gradient(90deg,#0d2114 0 4px,#768a4d 5px 6px);transform:rotate(-22deg);}
+#macarok-designs .cover[data-art="podcast"] {background:#d8895c;}
+#macarok-designs .cover[data-art="podcast"]:before {inset:20%;border:5px solid #f9e7cb;border-radius:50%;}
+#macarok-designs .cover[data-art="podcast"]:after {height:65%;width:4px;background:#f9e7cb;top:18%;left:48%;transform:rotate(35deg);}
+#macarok-designs .am-sheet-backdrop {position:absolute;inset:40px 0 0;background:light-dark(#17232f33,#00000077);z-index:10;display:flex;align-items:flex-start;justify-content:center;padding:32px 18px;}
+#macarok-designs .am-sheet {width:min(540px,100%);border-radius:10px;background:var(--am-toolbar);border:1px solid var(--am-line);box-shadow:0 15px 70px #00000040;overflow:hidden;}
+#macarok-designs .sheet-header {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 18px;border-bottom:1px solid var(--am-line);}
+#macarok-designs .settings-tabs {display:flex;gap:4px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--am-line);}
+#macarok-designs .settings-tabs button {padding:5px 8px;font-size:11px;color:var(--am-dim);}
+#macarok-designs .settings-tabs button.active {background:var(--am-selected);color:var(--am-selected-ink);}
+#macarok-designs .sheet-content {padding:18px;}
+#macarok-designs .settings-group {border:1px solid var(--am-line);border-radius:7px;background:var(--am-bg);padding:0 12px;margin-top:10px;}
+#macarok-designs .setting-row {padding:12px 0;display:flex;align-items:center;justify-content:space-between;gap:15px;border-bottom:1px solid var(--am-line);font-size:12px;}
+#macarok-designs .setting-row:last-child {border-bottom:0;}
+#macarok-designs .setting-row small {display:block;font-size:10px;color:var(--am-dim);margin-top:3px;}
+#macarok-designs .setting-row select, #macarok-designs .setting-row input[type="number"] {border:1px solid var(--am-line);border-radius:5px;background:var(--am-raised);padding:4px 6px;font-size:11px;max-width:200px;}
+#macarok-designs .shortcut-key {display:inline-block;padding:3px 7px;min-width:62px;text-align:center;border:1px solid var(--am-line);border-radius:5px;background:var(--am-toolbar);font-size:11px;color:var(--am-ink);}
+#macarok-designs .sheet-footer {padding:12px 18px;border-top:1px solid var(--am-line);display:flex;justify-content:flex-end;gap:7px;}
+#macarok-designs .sheet-note {margin-top:12px !important;font-size:11px;color:var(--am-dim);}
+#macarok-designs .metadata-form {display:grid;grid-template-columns:90px minmax(0,1fr);align-items:center;gap:11px;font-size:12px;}
+#macarok-designs .metadata-form label {color:var(--am-dim);}
+#macarok-designs .metadata-form input {width:100%;border:1px solid var(--am-line);border-radius:5px;background:var(--am-bg);padding:6px 8px;}
+#macarok-designs .artwork-choices {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+#macarok-designs .artwork-choice {padding:7px;border:1px solid var(--am-line) !important;text-align:left;}
+#macarok-designs .artwork-choice.selected {outline:2px solid var(--am-accent);outline-offset:0;}
+#macarok-designs .artwork-choice .cover {width:100%;height:auto;aspect-ratio:1;}
+#macarok-designs .artwork-choice span {font-size:10px;display:block;margin-top:6px;}
+@media(min-width:761px) {#macarok-designs .am-window[data-layout="album"] .now-hero {grid-template-columns:130px minmax(0,1fr);} #macarok-designs .am-window[data-layout="album"] .now-hero>.cover {width:130px;height:130px;}}
+@media(max-width:900px) and (min-width:761px) {#macarok-designs .now-hero {display:block;} #macarok-designs .now-hero>.cover {float:left;margin:0 12px 9px 0;width:85px;height:85px;} #macarok-designs .now-hero:after {content:"";display:block;clear:both;} #macarok-designs .am-transport {grid-template-columns:105px minmax(0,1fr) 120px;gap:10px;} #macarok-designs .transport-buttons {gap:3px;} #macarok-designs .transport-extras input {max-width:34px;} #macarok-designs .context-content {padding:14px 12px;}}
+@media(max-width:760px) {#macarok-designs .design-stage {min-height:1600px;} #macarok-designs .am-main {grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);} #macarok-designs .queue-pane {grid-column:1/-1;border-left:0;border-top:1px solid var(--am-line);} #macarok-designs .queue-list {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));} #macarok-designs .queue-album-heading {padding-top:10px;} #macarok-designs .am-transport {grid-template-columns:105px minmax(0,1fr);gap:10px;} #macarok-designs .transport-extras {grid-column:1/-1;justify-content:flex-end;} #macarok-designs .am-titlebar {padding-right:100px;gap:10px;} #macarok-designs .window-subtitle {display:none;} #macarok-designs .am-sheet-backdrop {padding:20px 10px;} #macarok-designs .now-hero {display:block;} #macarok-designs .now-hero>.cover {width:100%;height:auto;aspect-ratio:1;max-width:140px;margin-bottom:12px;} #macarok-designs .now-hero h1 {font-size:20px;} #macarok-designs .related-albums {grid-template-columns:repeat(2,minmax(0,1fr));} #macarok-designs .related-albums .album-tile:nth-child(3) {display:none;} #macarok-designs .context-tabs {gap:12px;}}
+@media(max-width:480px) {#macarok-designs .design-stage {min-height:2150px;} #macarok-designs .am-main {grid-template-columns:minmax(0,1fr);} #macarok-designs .library-pane {border-right:0;border-bottom:1px solid var(--am-line);} #macarok-designs .library-list {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;} #macarok-designs .library-list .library-row.child,#macarok-designs .library-list .library-row.deep {padding-left:7px;} #macarok-designs .view-switch {grid-template-columns:repeat(6,minmax(0,1fr));} #macarok-designs .library-bottom {margin-top:10px;padding-top:8px;} #macarok-designs .context-content {padding:16px;} #macarok-designs .now-hero {display:grid;grid-template-columns:105px minmax(0,1fr);} #macarok-designs .now-hero>.cover {width:105px;height:105px;margin:0;} #macarok-designs .related-albums {grid-template-columns:repeat(3,minmax(0,1fr));} #macarok-designs .related-albums .album-tile:nth-child(3) {display:block;} #macarok-designs .context-tabs {justify-content:space-between;gap:8px;} #macarok-designs .queue-list {display:block;} #macarok-designs .am-transport {grid-template-columns:95px minmax(0,1fr);gap:6px;padding:12px 9px;} #macarok-designs .transport-track {grid-template-columns:minmax(0,1fr);} #macarok-designs .transport-track>.cover {display:none;} #macarok-designs .transport-title {display:block;} #macarok-designs .transport-title>.dim {display:none;} #macarok-designs .seek-line {gap:4px;} #macarok-designs .am-status {align-items:flex-start;flex-direction:column;gap:3px;} #macarok-designs .fact-grid {gap:3px;} #macarok-designs .artwork-choices {gap:6px;} #macarok-designs .setting-row {gap:8px;} #macarok-designs .setting-row select {max-width:145px;} #macarok-designs .metadata-form {grid-template-columns:65px minmax(0,1fr);} #macarok-designs .am-sheet-backdrop {padding:12px 6px;} #macarok-designs .sheet-content {padding:14px;} }
+@media(prefers-reduced-motion:no-preference) {#macarok-designs .am-window button {transition:background .12s ease;}}
+</style>
+<div id="macarok-designs" class="viz-carousel" aria-label="Macarok interface designs">
+  <section class="design-stage" data-variant="Collection" aria-label="Collection: a compact library and listening context">
+    <div id="macarok-collection" class="am-window" data-layout="collection" data-appearance="system" aria-label="Macarok Collection design"></div>
+  </section>
+  <section class="design-stage" data-variant="Albums" aria-label="Albums: an album-led library and home view" hidden>
+    <div id="macarok-albums" class="am-window" data-layout="album" data-appearance="system" aria-label="Macarok Albums design"></div>
+  </section>
+</div>
+<script>
+(() => {
+  const root = document.getElementById('macarok-designs');
+  const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const icon = name => `<i data-lucide="${name}" aria-hidden="true"></i>`;
+  const albums = [
+    {id:'campfire',artist:'Boards of Canada',title:'The Campfire Headphase',year:2005,art:'campfire',format:'FLAC',source:'local',genre:'Electronic',tracks:[['Chromakey Dreamcoat','5:28'],['Satellite Anthem Icarus','6:10'],['Peacock Tail','5:24'],['Dayvan Cowboy','5:00'],['A Moment of Clarity','0:51'],["’84 Pontiac Dream",'3:49'],['Sherbet Head','2:41'],['Oscar See Through Red Eye','5:08'],['Ataronchronon','1:14'],['Hey Saturday Sun','4:56'],['Constants Are Changing','1:42'],['Slow This Bird Down','6:09'],['Tears from the Compound Eye','4:03'],['Farewell Fire','8:26']]},
+    {id:'geogaddi',artist:'Boards of Canada',title:'Geogaddi',year:2002,art:'geogaddi',format:'FLAC',source:'local',genre:'Electronic',tracks:[['Ready Lets Go','0:59'],['Music Is Math','5:21'],['Beware the Friendly Stranger','0:37'],['Gyroscope','3:34'],['Dandelion','1:15'],['Sunshine Recorder','6:12']]},
+    {id:'rainbows',artist:'Radiohead',title:'In Rainbows',year:2007,art:'rainbows',format:'MP3',source:'local',genre:'Alternative',tracks:[['15 Step','3:58'],['Bodysnatchers','4:02'],['Nude','4:15'],['Weird Fishes / Arpeggi','5:18'],['All I Need','3:48'],['Faust Arp','2:09'],['Reckoner','4:50'],['House of Cards','5:28'],['Jigsaw Falling into Place','4:09'],['Videotape','4:39']]},
+    {id:'migration',artist:'Bonobo',title:'Migration',year:2017,art:'migration',format:'FLAC',source:'local',genre:'Electronic',tracks:[['Migration','5:27'],['Break Apart','4:34'],['Outlier','7:55'],['Grains','4:28'],['Second Sun','3:43'],['Bambro Koyo Ganda','5:02']]},
+    {id:'spaces',artist:'Nils Frahm',title:'Spaces',year:2013,art:'spaces',format:'FLAC',source:'local',genre:'Modern Classical',tracks:[['An Aborted Beginning','1:34'],['Says','8:18'],['Said and Done','9:35'],['Went Missing','4:59'],['Familiar','5:38'],['Improvisation for Coughs and a Cell Phone','6:43']]},
+    {id:'fourtet',artist:'Four Tet',title:'There Is Love in You',year:2010,art:'fourtet',format:'OGG',source:'local',genre:'Electronic',tracks:[['Angel Echoes','4:00'],['Love Cry','9:13'],['Circling','5:18'],['Pablo’s Heart','0:11'],['Sing','6:48'],['This Unfolds','7:47']]},
+    {id:'darkside',artist:'Pink Floyd',title:'The Dark Side of the Moon',year:1973,art:'darkside',format:'FLAC',cue:true,source:'local',genre:'Progressive Rock',tracks:[['Speak to Me','1:08'],['Breathe (In the Air)','2:49'],['On the Run','3:51'],['Time','6:50'],['The Great Gig in the Sky','4:44'],['Money','6:23'],['Us and Them','7:49'],['Any Colour You Like','3:26'],['Brain Damage','3:47'],['Eclipse','2:12']]},
+    {id:'mezzanine',artist:'Massive Attack',title:'Mezzanine',year:1998,art:'mezzanine',format:'OPUS',source:'local',genre:'Trip Hop',tracks:[['Angel','6:19'],['Risingson','4:58'],['Teardrop','5:30'],['Inertia Creeps','5:56'],['Exchange','4:11'],['Dissolved Girl','6:07']]},
+    {id:'server-spaces',artist:'Nils Frahm',title:'Spaces',year:2013,art:'spaces',format:'FLAC',source:'subsonic',genre:'Modern Classical',tracks:[['An Aborted Beginning','1:34'],['Says','8:18'],['Said and Done','9:35'],['Went Missing','4:59'],['Familiar','5:38'],['Over There, It’s Raining','3:06']]},
+    {id:'server-fourtet',artist:'Four Tet',title:'There Is Love in You',year:2010,art:'fourtet',format:'OGG',source:'subsonic',genre:'Electronic',tracks:[['Angel Echoes','4:00'],['Love Cry','9:13'],['Circling','5:18'],['Sing','6:48']]},
+    {id:'server-migration',artist:'Bonobo',title:'Migration',year:2017,art:'migration',format:'FLAC',source:'subsonic',genre:'Electronic',tracks:[['Migration','5:27'],['Break Apart','4:34'],['Outlier','7:55'],['Grains','4:28']]},
+    {id:'podcast-1',artist:'Song Exploder',title:'Inside the song',year:2026,art:'podcast',format:'MP3',source:'podcasts',genre:'Music',tracks:[['A song, taken apart','26:18'],['Finding the first note','31:40'],['Behind the arrangement','24:12']]},
+    {id:'podcast-2',artist:'The Listening Room',title:'The Listening Room',year:2026,art:'fourtet',format:'MP3',source:'podcasts',genre:'Music',tracks:[['The art of the album','42:16'],['Listening without distraction','36:08']]}
+  ];
+  const byID = id => albums.find(album => album.id === id) || albums[0];
+  const seconds = duration => duration.split(':').reduce((sum,part) => sum*60+Number(part),0);
+  const clock = total => `${Math.floor(total/60)}:${String(Math.floor(total%60)).padStart(2,'0')}`;
+  const cover = (album,large=false) => `<div class="cover${large?' large-cover':''}" data-art="${album.art}" role="img" aria-label="${escapeHTML(album.title)} artwork study"><span class="cover-lettering">${escapeHTML(album.artist)}<small>${escapeHTML(album.title)}</small></span></div>`;
+  const makeEntry = (album,index) => ({albumID:album.id,index,source:album.source});
+  const sourceNames = {local:'Local Files',subsonic:'Home · OpenSubsonic',podcasts:'Podcasts'};
+  const biographies = {
+    'Boards of Canada':'The Scottish duo of Michael Sandison and Marcus Eoin. Warm analogue textures, shifting rhythms, and melodies that feel half remembered.',
+    'Radiohead':'The English band’s seventh studio album brings intricate rhythms, intimate arrangements, and a warmer, more immediate sound.',
+    'Pink Floyd':'A continuous album in ten movements. The CUE sheet preserves the track boundaries within a single lossless audio file.',
+    'Nils Frahm':'Piano, electronics, and the space between them. This collection draws on recordings made in concert over two years.'
+  };
+  const instances = [];
+  function makePlayer(app,layout) {
+    const catalog=albums.map(album=>({...album,tracks:album.tracks.map(track=>[...track])}));
+    const byID=id=>catalog.find(album=>album.id===id)||catalog[0];
+    const saved = window.openai?.widgetState?.privateContent?.[layout];
+    const state = {source:'local',view:layout==='album'?'home':'artists',selected:'campfire',selectedTrack:3,context:layout==='album'?'home':'track',tab:'overview',playing:true,current:3,progress:154,query:'',top:'Albums',appearance:'system',buffer:'Automatic',bufferSeconds:20,doubleClick:'Add to active playlist',sheet:null,settingsTab:'General',status:'Library is up to date',artChoice:'embedded',folder:'Electronic',queue:byID('campfire').tracks.slice(0,10).map((_,index)=>makeEntry(byID('campfire'),index)),...saved};
+    state.source = sourceNames[state.source] ? state.source : 'local';
+    state.repeat = ['none','playlist','track'].includes(state.repeat) ? state.repeat : 'none';
+    state.queue = Array.isArray(state.queue) && state.queue.length ? state.queue.filter(entry=>byID(entry.albumID).tracks[entry.index]) : byID('campfire').tracks.slice(0,10).map((_,index)=>makeEntry(byID('campfire'),index));
+    const ownAlbums = () => catalog.filter(album=>album.source===state.source);
+    const chosen = () => byID(state.selected);
+    const currentEntry = () => state.queue[state.current] || state.queue[0];
+    const currentAlbum = () => currentEntry() ? byID(currentEntry().albumID) : chosen();
+    const currentTrack = () => currentEntry() ? currentAlbum().tracks[currentEntry().index] : chosen().tracks[0];
+    const viewLabels = ['Home','Artists','Albums','Years','Folders','Tags'];
+    app.innerHTML = `<div class="am-titlebar"><div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div><span class="app-name">Macarok</span><span class="window-subtitle">Your music. In good company.</span></div>
+      <div class="am-transport"></div>
+      <div class="am-main">
+        <aside class="library-pane" aria-label="Music library"><label class="source-select">${icon('hard-drive')}<select data-field="source" aria-label="Library source"><option value="local">Local Files</option><option value="subsonic">Home · OpenSubsonic</option><option value="podcasts">Podcasts</option></select></label><label class="library-search">${icon('search')}<input type="search" data-field="search" aria-label="Search selected source" placeholder="Search this library"><span class="small dim">⌘F</span></label><nav class="view-switch" aria-label="Library views"></nav><div class="library-caption"><span class="library-heading"></span><button class="icon-button" data-action="shuffle-library" aria-label="Shuffle this library" data-tooltip="Shuffle this library">${icon('shuffle')}</button></div><div class="library-list"></div><div class="library-bottom"></div></aside>
+        <main class="context-pane" aria-label="Listening context"><div class="context-toolbar"></div><div class="context-content"></div></main>
+        <aside class="queue-pane" aria-label="Active playlist"><div class="queue-toolbar"><h2>Active Playlist <span class="queue-count dim"></span></h2><div class="queue-tools"><button class="icon-button" data-action="shuffle-queue" aria-label="Shuffle playlist" data-tooltip="Shuffle playlist">${icon('shuffle')}</button><button class="icon-button repeat-toggle" data-action="repeat" aria-label="Repeat mode: None" aria-pressed="false" data-tooltip="Repeat: None · Next: Playlist">${icon('repeat')}</button><button class="icon-button" data-action="save-playlist" aria-label="Save playlist" data-tooltip="Save playlist">${icon('list-plus')}</button></div></div><div class="queue-album-heading"></div><div class="queue-list"></div><div class="queue-note">${icon('mouse-pointer-2')}<span>Double-click a track to play</span></div></aside>
+      </div><div class="am-status"><span class="status-message" role="status" aria-live="polite"></span><span class="status-right mono"></span></div><div class="sheet-slot"></div>`;
+    const q = selector => app.querySelector(selector);
+    let selectionTimer;
+    function scheduleSelection() {
+      clearTimeout(selectionTimer);
+      selectionTimer=setTimeout(()=>{library();context();icons();persist();},320);
+    }
+    function persist() {
+      if (!window.openai?.setWidgetState) return;
+      const previous = window.openai.widgetState?.privateContent || {};
+      window.openai.setWidgetState({modelContent:{design:layout,appearance:state.appearance,source:sourceNames[state.source],view:state.view,repeat:state.repeat},privateContent:{...previous,[layout]:{source:state.source,view:state.view,selected:state.selected,selectedTrack:state.selectedTrack,context:state.context,tab:state.tab,playing:state.playing,current:state.current,progress:state.progress,top:state.top,appearance:state.appearance,buffer:state.buffer,bufferSeconds:state.bufferSeconds,doubleClick:state.doubleClick,repeat:state.repeat,queue:state.queue.slice(0,80)}}}).catch(()=>{});
+    }
+    function icons() { if(globalThis.lucide) globalThis.lucide.createIcons({root:app,attrs:{width:16,height:16}}); }
+    function transport() {
+      const album=currentAlbum(),track=currentTrack();
+      q('.window-subtitle').textContent=`${album.title} — ${album.artist}`;
+      q('.am-transport').innerHTML=`<div class="transport-buttons"><button class="icon-button" data-action="previous" aria-label="Previous track">${icon('skip-back')}</button><button class="icon-button play-toggle" data-action="play" aria-label="${state.playing?'Pause':'Play'}">${icon(state.playing?'pause':'play')}</button><button class="icon-button" data-action="next" aria-label="Next track">${icon('skip-forward')}</button></div><div class="transport-track">${cover(album)}<div class="transport-copy"><div class="transport-title"><strong class="ellipsis">${escapeHTML(track[0])}</strong><span class="dim small ellipsis">${escapeHTML(album.artist)}</span></div><div class="seek-line"><span class="elapsed">${clock(state.progress)}</span><input type="range" min="0" max="${seconds(track[1])}" value="${Math.min(state.progress,seconds(track[1]))}" data-field="seek" aria-label="Playback position"><span>${track[1]}</span></div></div></div><div class="transport-extras">${icon('volume-1')}<input type="range" min="0" max="100" value="70" aria-label="Volume"><span class="toolbar-rule"></span><button class="icon-button" data-action="appearance" aria-label="Cycle appearance: ${state.appearance}" data-tooltip="Appearance: ${state.appearance}">${icon(state.appearance==='dark'?'moon':state.appearance==='light'?'sun':'monitor')}</button><button class="icon-button" data-action="settings" aria-label="Open settings" data-tooltip="Settings">${icon('settings-2')}</button></div>`;
+    }
+    function listRow(label,action,value,options={}) {
+      const {depth='',selected=false,count='',symbol='disc-3',album=null}=options;
+      return `<button class="library-row ${depth} ${selected?'selected':''} ${album?'album-row':''}" data-action="${action}" data-value="${escapeHTML(value)}" data-tooltip="${escapeHTML(label)}" ${selected?'aria-pressed="true"':''}>${album?cover(album):icon(symbol)}<span class="${album?'album-text':'ellipsis'}">${album?`<span class="ellipsis">${escapeHTML(label)}</span><span class="small dim">${escapeHTML(album.artist)} · ${album.year}</span>`:escapeHTML(label)}</span>${count!==''?`<span class="row-count">${count}</span>`:''}</button>`;
+    }
+    function library() {
+      const items=ownAlbums(),selected=chosen();
+      q('[data-field="source"]').value=state.source;
+      q('.source-select>svg, .source-select>i[data-lucide]')?.remove();
+      q('.source-select').insertAdjacentHTML('afterbegin',icon(state.source==='local'?'hard-drive':state.source==='subsonic'?'server':'podcast'));
+      q('.view-switch').innerHTML=viewLabels.map(label=>`<button data-action="view" data-value="${label.toLowerCase()}" ${state.view===label.toLowerCase()?'aria-current="page"':''}>${label}</button>`).join('');
+      q('.library-heading').textContent=state.query?'Search results':state.view==='home'?(layout==='album'?'Browse albums':'Your library'):state.view;
+      const scopeButton=q('.library-caption button');
+      scopeButton.dataset.action=state.view==='folders'?'shuffle-folder':'shuffle-library';
+      scopeButton.setAttribute('aria-label',state.view==='folders'?'Shuffle selected folder':'Shuffle this library');
+      scopeButton.dataset.tooltip=state.view==='folders'?'Shuffle selected folder':'Shuffle this library';
+      let rows='';
+      if(state.query) {
+        const term=state.query.toLocaleLowerCase();
+        items.forEach(album=>album.tracks.forEach((track,index)=>{if(`${track[0]} ${album.title} ${album.artist}`.toLocaleLowerCase().includes(term)) rows+=listRow(track[0],'select-track',`${album.id}:${index}`,{symbol:'music-2',selected:state.selected===album.id&&state.selectedTrack===index});}));
+        if(!rows) rows='<p class="dim small" style="padding:8px">No tracks found in this source.</p>';
+      } else if(state.view==='home'&&layout==='album') {
+        rows=items.map(album=>listRow(album.title,'album',album.id,{album,selected:album.id===state.selected})).join('');
+      } else if(state.view==='artists'||state.view==='home') {
+        const artists=[...new Set(items.map(album=>album.artist))].sort();
+        artists.forEach(artist=>{
+          const artistAlbums=items.filter(album=>album.artist===artist),expanded=selected.artist===artist;
+          rows+=listRow(artist,'artist',artist,{symbol:expanded?'chevron-down':'chevron-right',selected:expanded,count:artistAlbums.length});
+          if(expanded) artistAlbums.forEach(album=>{
+            rows+=listRow(album.title,'album',album.id,{depth:'child',symbol:'disc-3',selected:false,count:album.cue?'CUE':album.year});
+            if(layout==='collection'&&album.id===state.selected) album.tracks.slice(0,5).forEach((track,index)=>{rows+=listRow(track[0],'select-track',`${album.id}:${index}`,{depth:'deep',symbol:'music-2',selected:state.selectedTrack===index&&state.context==='track'});});
+          });
+        });
+      } else if(state.view==='albums') {
+        rows=items.map(album=>listRow(album.title,'album',album.id,{album,selected:album.id===state.selected})).join('');
+      } else if(state.view==='years') {
+        [...new Set(items.map(album=>album.year))].sort((a,b)=>b-a).forEach(year=>{
+          rows+=listRow(String(year),'year',year,{symbol:year===selected.year?'chevron-down':'chevron-right',selected:year===selected.year,count:items.filter(album=>album.year===year).length});
+          if(year===selected.year) items.filter(album=>album.year===year).forEach(album=>{rows+=listRow(album.title,'album',album.id,{depth:'child',symbol:'disc-3'});});
+        });
+      } else if(state.view==='folders') {
+        rows+=listRow(state.source==='local'?'Music':state.source==='subsonic'?'Music library':'Downloaded episodes','folder','root',{symbol:'folder-open',count:items.length});
+        const groups=state.source==='local'?['Electronic','Alternative','Progressive Rock','Modern Classical','Trip Hop']:[...new Set(items.map(album=>album.genre))];
+        groups.forEach(genre=>{
+          const matching=items.filter(album=>album.genre===genre);
+          rows+=listRow(genre,'folder',genre,{depth:'child',symbol:genre===state.folder?'folder-open':'folder',selected:genre===state.folder,count:matching.length});
+          if(genre===state.folder) matching.forEach(album=>{rows+=listRow(album.title,'album',album.id,{depth:'deep',symbol:'disc-3',count:album.cue?'CUE':''});});
+        });
+      } else if(state.view==='tags') {
+        rows+=listRow('Genre','tag-group','genre',{symbol:'chevron-down'});
+        [...new Set(items.map(album=>album.genre))].forEach(genre=>{rows+=listRow(genre,'genre',genre,{depth:'child',symbol:'tag',selected:selected.genre===genre,count:items.filter(album=>album.genre===genre).length});});
+        rows+=listRow('File format','tag-group','format',{symbol:'chevron-down'});
+        [...new Set(items.map(album=>album.format))].forEach(format=>{rows+=listRow(format==='OGG'?'Ogg Vorbis':format==='OPUS'?'Ogg Opus':format,'format',format,{depth:'child',symbol:'file-audio',count:items.filter(album=>album.format===format).length});});
+      }
+      q('.library-list').innerHTML=rows;
+      const total=items.reduce((sum,album)=>sum+album.tracks.length,0);
+      q('.library-bottom').innerHTML=`<p>${items.length} ${state.source==='podcasts'?'shows':'albums'} · ${total} ${state.source==='podcasts'?'episodes':'tracks'}</p><button class="library-shortcut" data-action="${state.source==='subsonic'?'source-settings':'refresh'}">${icon(state.source==='subsonic'?'shield-check':'refresh-cw')}<span>${state.source==='subsonic'?'HTTPS · Trusted certificate':state.source==='podcasts'?'Refresh feeds':'Scan for changes'}</span></button>`;
+    }
+    function tile(album) {return `<button class="album-tile" data-action="album" data-value="${album.id}">${cover(album,true)}<strong class="ellipsis" data-tooltip="${escapeHTML(album.title)}">${escapeHTML(album.title)}</strong><span class="dim ellipsis">${escapeHTML(album.artist)}</span></button>`;}
+    function home() {
+      const items=ownAlbums(),recent=[...items].reverse().slice(0,3);
+      const topItems=state.top==='Artists'?[...new Map(items.map(a=>[a.artist,a])).values()].slice(0,3):items.slice(0,3);
+      return `<div class="home-heading"><div class="context-kicker">${escapeHTML(sourceNames[state.source])}</div><h1>Good evening.</h1><p>A little closer to your music.</p></div><section class="home-section"><div class="section-heading"><h3>Recently Added</h3><span class="small dim">This week</span></div><div class="related-albums">${recent.map(tile).join('')}</div></section><section class="home-section"><div class="section-heading"><h3>Recently Played</h3></div>${items.slice(0,2).map((album,index)=>`<button class="recent-track" data-action="select-track" data-value="${album.id}:${Math.min(1,album.tracks.length-1)}">${cover(album)}<span><strong class="ellipsis">${escapeHTML(album.tracks[Math.min(1,album.tracks.length-1)][0])}</strong><span class="dim ellipsis">${escapeHTML(album.artist)} · ${escapeHTML(album.title)}</span></span><span class="recent-time">${index?'Yesterday':'1 hour ago'}</span></button>`).join('')}</section><section class="home-section"><div class="section-heading"><h3>Most Played</h3><select data-field="top" aria-label="Most played category">${['Albums','Tracks','Artists'].map(value=>`<option ${state.top===value?'selected':''}>${value}</option>`).join('')}</select></div>${topItems.map((album,index)=>`<button class="recent-track" data-action="${state.top==='Artists'?'artist':state.top==='Tracks'?'select-track':'album'}" data-value="${state.top==='Artists'?escapeHTML(album.artist):state.top==='Tracks'?`${album.id}:0`:album.id}"><span class="dim small" style="flex:0 0 13px">${index+1}</span>${cover(album)}<span><strong class="ellipsis">${escapeHTML(state.top==='Artists'?album.artist:state.top==='Tracks'?album.tracks[0][0]:album.title)}</strong><span class="dim ellipsis">${escapeHTML(state.top==='Artists'?`${items.filter(a=>a.artist===album.artist).length} albums`:album.artist)}</span></span><span class="recent-time">${[48,32,26][index]} plays</span></button>`).join('')}</section>`;
+    }
+    function albumView(album) {
+      return `<div class="context-kicker">${state.source==='podcasts'?'Podcast':'Album'} · ${album.year}</div><div class="album-hero">${cover(album,true)}<div><h1>${escapeHTML(album.title)}</h1><p>${escapeHTML(album.artist)}</p><p>${album.tracks.length} ${state.source==='podcasts'?'episodes':'tracks'} · ${clock(album.tracks.reduce((sum,t)=>sum+seconds(t[1]),0))}</p><span class="file-badge">${album.cue?'CUE + FLAC':album.format==='OGG'?'OGG VORBIS':album.format==='OPUS'?'OGG OPUS':album.format}</span></div></div><div class="action-row"><button class="am-button primary" data-action="add-album">${icon('list-plus')} Add to Playlist</button><button class="am-button" data-action="shuffle-album">${icon('shuffle')} Shuffle</button><button class="icon-button" data-action="metadata" aria-label="Edit album metadata">${icon('square-pen')}</button></div><div>${album.tracks.map((track,index)=>`<button class="album-track ${state.selectedTrack===index?'current':''}" data-action="select-track" data-value="${album.id}:${index}"><span class="number">${String(index+1).padStart(2,'0')}</span><span class="ellipsis">${escapeHTML(track[0])}</span><span class="time">${track[1]}</span></button>`).join('')}</div>${album.cue?`<div class="cue-info">${icon('file-audio')}<span>10 tracks · one FLAC file<br>Track boundaries from <strong>album.cue</strong></span></div>`:''}<div class="context-footer"><span>${icon('mouse-pointer-2')} Double-click to add to playlist</span><button class="icon-button" data-action="artwork" aria-label="Choose album artwork">${icon('image')}</button></div>`;
+    }
+    function trackView(album) {
+      const index=Math.min(state.selectedTrack,album.tracks.length-1),track=album.tracks[index];
+      const samePlaying=currentEntry()?.albumID===album.id&&currentEntry()?.index===index;
+      let detail='';
+      if(state.tab==='overview') {
+        const others=ownAlbums().filter(other=>other.id!==album.id).slice(0,3);
+        detail=`<div class="fact-grid"><div><span>Played</span><strong>${index===3?24:12} times</strong></div><div><span>Last played</span><strong>Yesterday</strong></div><div><span>Rating</span><strong aria-label="Four out of five stars">★★★★<span style="display:inline;color:var(--am-dim)">☆</span></strong></div></div><section class="context-section"><h3>About ${escapeHTML(album.artist)}</h3><p class="context-body-copy">${escapeHTML(biographies[album.artist]||`${album.title} is part of your ${sourceNames[state.source]} collection. Explore the album, edit its metadata, or add more tracks to your playlist.`)}</p><button class="context-action" data-action="artist" data-value="${escapeHTML(album.artist)}">View artist ${icon('arrow-up-right')}</button></section><section class="context-section"><h3>In your collection</h3><div class="related-albums">${others.map(tile).join('')}</div></section>`;
+      } else if(state.tab==='lyrics') {
+        detail=`<div class="empty-lyrics">${icon('text-quote')}<strong>${album.artist==='Boards of Canada'||album.artist==='Nils Frahm'?'Instrumental track':'No lyrics attached'}</strong><p>${album.artist==='Boards of Canada'||album.artist==='Nils Frahm'?'No lyrics for this recording.':'Lyrics have not been added to this file.'}</p><button class="am-button" data-action="find-lyrics">${icon('search')} Find Lyrics</button></div><div class="context-section"><h3>Track details</h3><p class="context-body-copy">${escapeHTML(album.artist)} · ${escapeHTML(album.title)}<br>${album.year} · ${track[1]}</p></div>`;
+      } else {
+        const start=album.tracks.slice(0,index).reduce((sum,t)=>sum+seconds(t[1]),0);
+        const fields=[['Title',track[0]],['Artist',album.artist],['Album',album.title],['Year',album.year],['Genre',album.genre],['Track',`${index+1} / ${album.tracks.length}`],['Format',album.format==='OGG'?'Ogg Vorbis':album.format==='OPUS'?'Ogg Opus':`${album.format} · ${album.format==='FLAC'?'16-bit / 44.1 kHz':'320 kbps'}`],['File',album.cue?'album.flac':`${String(index+1).padStart(2,'0')} ${track[0]}.${album.format==='FLAC'?'flac':album.format==='MP3'?'mp3':'ogg'}`],...(album.cue?[['CUE sheet','album.cue'],['Segment',`${clock(start)} – ${clock(start+seconds(track[1]))}`]]:[])];
+        detail=`<dl class="tag-list">${fields.map(([key,value])=>`<dt>${key}</dt><dd>${escapeHTML(value)}</dd>`).join('')}</dl><div class="action-row"><button class="am-button" data-action="metadata">${icon('square-pen')} Edit Metadata</button><button class="am-button" data-action="artwork">${icon('image')} Artwork</button></div>`;
+      }
+      return `<div class="context-kicker">${samePlaying?'Now Playing':'Selected Track'}</div><div class="now-hero">${cover(album,true)}<div><h1>${escapeHTML(track[0])}</h1><button class="artist-link" data-action="artist" data-value="${escapeHTML(album.artist)}">${escapeHTML(album.artist)}</button><p class="dim">${escapeHTML(album.title)}</p><p class="dim">${album.year} · ${album.genre}</p><span class="file-badge">${album.cue?'CUE + FLAC':album.format==='OGG'?'OGG VORBIS':album.format==='OPUS'?'OGG OPUS':album.format==='FLAC'?'FLAC · 16 / 44.1':album.format}</span></div></div><nav class="context-tabs" aria-label="Track context">${['Overview','Lyrics','Tags'].map(tab=>`<button data-action="context-tab" data-value="${tab.toLowerCase()}" aria-selected="${state.tab===tab.toLowerCase()}">${tab}</button>`).join('')}</nav>${detail}<div class="context-footer"><span>${icon(album.source==='local'?'hard-drive':album.source==='subsonic'?'server':'podcast')}${escapeHTML(sourceNames[album.source])}</span><button class="context-action" data-action="album" data-value="${album.id}" style="margin:0">View album ${icon('arrow-right')}</button></div>`;
+    }
+    function context() {
+      q('.context-toolbar').innerHTML=`<h2>${state.context==='home'?'Home':state.context==='album'?'Album':state.context==='artist'?'Artist':'Listening Context'}</h2><div class="queue-tools">${state.context!=='home'?`<button class="icon-button" data-action="home" aria-label="Go to home" data-tooltip="Home">${icon('house')}</button>`:''}<button class="icon-button" data-action="now-playing" aria-label="Show current track" data-tooltip="Show current track">${icon('audio-lines')}</button><button class="icon-button" data-action="metadata" aria-label="Edit metadata" data-tooltip="Edit metadata">${icon('square-pen')}</button></div>`;
+      const album=chosen();
+      if(state.context==='home') q('.context-content').innerHTML=home();
+      else if(state.context==='album') q('.context-content').innerHTML=albumView(album);
+      else if(state.context==='artist') {
+        const artistAlbums=ownAlbums().filter(other=>other.artist===album.artist);
+        q('.context-content').innerHTML=`<div class="context-kicker">Artist</div><h1>${escapeHTML(album.artist)}</h1><p class="dim small" style="margin-top:6px">${artistAlbums.length} albums · ${artistAlbums.reduce((sum,a)=>sum+a.tracks.length,0)} tracks in this source</p><div class="action-row"><button class="am-button primary" data-action="shuffle-artist">${icon('shuffle')} Shuffle Artist</button><button class="am-button" data-action="add-artist">${icon('list-plus')} Add to Playlist</button></div><p class="context-body-copy">${escapeHTML(biographies[album.artist]||`Browse ${album.artist} in your collection.`)}</p><section class="context-section"><h3>Albums</h3>${artistAlbums.map(other=>`<button class="recent-track" data-action="album" data-value="${other.id}">${cover(other)}<span><strong>${escapeHTML(other.title)}</strong><span class="dim">${other.year} · ${other.tracks.length} tracks</span></span>${icon('chevron-right')}</button>`).join('')}</section>`;
+      } else q('.context-content').innerHTML=trackView(album);
+    }
+    function queue() {
+      const repeatLabel={none:'None',playlist:'Playlist',track:'Track'};
+      const nextRepeat={none:'playlist',playlist:'track',track:'none'};
+      const repeatButton=q('[data-action="repeat"]');
+      repeatButton.setAttribute('aria-pressed',String(state.repeat!=='none'));
+      repeatButton.setAttribute('aria-label',`Repeat mode: ${repeatLabel[state.repeat]}`);
+      repeatButton.dataset.tooltip=`Repeat: ${repeatLabel[state.repeat]} · Next: ${repeatLabel[nextRepeat[state.repeat]]}`;
+      repeatButton.innerHTML=icon(state.repeat==='track'?'repeat-1':'repeat');
+      q('.queue-count').textContent=`· ${state.queue.length}`;
+      const album=currentAlbum();
+      q('.queue-album-heading').innerHTML=`${cover(album)}<div style="min-width:0"><strong class="ellipsis">${escapeHTML(album.title)}</strong><span class="dim ellipsis">${escapeHTML(album.artist)}</span></div>`;
+      const offset=state.queueOffset||0;
+      q('.queue-list').innerHTML=state.queue.slice(offset,offset+12).map((entry,localIndex)=>{
+        const index=localIndex+offset;
+        const entryAlbum=byID(entry.albumID),track=entryAlbum.tracks[entry.index];
+        return `<button class="queue-track ${index===state.current?'current':''}" data-action="queue-track" data-value="${index}" ${index===state.current?'aria-current="true"':''}><span class="track-num">${index===state.current?icon(state.playing?'audio-lines':'pause'):String(index+1).padStart(2,'0')}</span><span style="min-width:0"><strong class="ellipsis" data-tooltip="${escapeHTML(track[0])}">${escapeHTML(track[0])}</strong><span class="track-artist ellipsis">${escapeHTML(entryAlbum.artist)}${entryAlbum.cue?' · CUE':''}${entry.source!=='local'?` · ${entry.source==='subsonic'?'Server':'Podcast'}`:''}</span></span><span class="track-duration">${track[1]}</span></button>`;
+      }).join('')+(state.queue.length>12?`<button class="library-shortcut" data-action="queue-more" style="padding:10px 15px">${icon('list-music')} ${offset+12<state.queue.length?`${state.queue.length-offset-12} more tracks`:'Back to the beginning'}</button>`:'');
+    }
+    function status(message) {
+      if(message)state.status=message;
+      q('.status-message').innerHTML=`${icon('check')}<span class="ellipsis">${escapeHTML(state.status)}</span>`;
+      const total=state.queue.reduce((sum,entry)=>sum+seconds(byID(entry.albumID).tracks[entry.index][1]),0);
+      q('.status-right').textContent=`${state.queue.length} tracks · ${clock(total)}`;
+    }
+    function generalSettings() {return `<h3>Appearance & behavior</h3><div class="settings-group"><label class="setting-row"><span>Appearance<small>Match your Mac or choose an appearance.</small></span><select data-field="appearance">${['System','Light','Dark'].map(value=>`<option value="${value.toLowerCase()}" ${state.appearance===value.toLowerCase()?'selected':''}>${value}</option>`).join('')}</select></label><label class="setting-row"><span>Double-click in library</span><select data-field="doubleClick"><option ${state.doubleClick==='Add to active playlist'?'selected':''}>Add to active playlist</option><option ${state.doubleClick==='Play now'?'selected':''}>Play now</option></select></label></div>`;}
+    function playbackSettings() {return `<h3>Streaming</h3><div class="settings-group"><label class="setting-row"><span>Streaming buffer<small>Keep more audio ready before playback.</small></span><select data-field="buffer"><option ${state.buffer==='Automatic'?'selected':''}>Automatic</option><option ${state.buffer==='Custom'?'selected':''}>Custom</option></select></label>${state.buffer==='Custom'?`<label class="setting-row"><span>Target buffer duration</span><span><input type="number" min="1" max="120" value="${state.bufferSeconds}" data-field="bufferSeconds" aria-label="Buffer duration in seconds" style="width:65px"> seconds</span></label>`:''}<div class="setting-row"><span>Streaming quality</span><span class="dim">Original</span></div></div><p class="sheet-note">Original quality is used whenever the source provides it.</p>`;}
+    function shortcutsSettings() {return `<h3>Keyboard Shortcuts</h3><div class="settings-group"><div class="setting-row"><span>Mac media keys<small>Play / pause, previous, and next.</small></span><span class="dim">Enabled</span></div><div class="setting-row"><span>Play / pause <small>In app · outside text fields</small></span><button class="shortcut-key" data-action="record-shortcut" data-value="Play / pause">Space</button></div><div class="setting-row"><span>Play / pause <small>Global</small></span><button class="shortcut-key" data-action="record-shortcut" data-value="Global play / pause">Record…</button></div><div class="setting-row"><span>Next track <small>In app</small></span><button class="shortcut-key" data-action="record-shortcut" data-value="Next track">⌘ →</button></div><div class="setting-row"><span>Add to playlist <small>In app</small></span><button class="shortcut-key" data-action="record-shortcut" data-value="Add to playlist">⌘ ↩</button></div></div>`;}
+    function sourceSettings() {return `<h3>Home · OpenSubsonic</h3><div class="settings-group"><div class="setting-row"><span>Server URL</span><span class="dim">https://music.home:4533</span></div><div class="setting-row"><span>Connection</span><span style="color:var(--am-positive)">${icon('shield-check')} Connected</span></div><div class="setting-row"><span>Certificate<small>Self-signed · accepted for this server.</small></span><button class="am-button" data-action="certificate">View Certificate</button></div></div><p class="sheet-note">HTTP and HTTPS servers are supported. Certificate trust is saved separately for each server.</p>`;}
+    function sheet() {
+      const slot=q('.sheet-slot');
+      if(!state.sheet){slot.innerHTML='';return;}
+      let title='Settings',body='',footer='<button class="am-button primary" data-action="close-sheet">Done</button>';
+      if(state.sheet==='settings') {
+        body=`<nav class="settings-tabs" aria-label="Settings sections">${['General','Playback','Shortcuts','Sources'].map(tab=>`<button class="${state.settingsTab===tab?'active':''}" data-action="settings-tab" data-value="${tab}">${tab}</button>`).join('')}</nav><div class="sheet-content">${state.settingsTab==='General'?generalSettings():state.settingsTab==='Playback'?playbackSettings():state.settingsTab==='Shortcuts'?shortcutsSettings():sourceSettings()}</div>`;
+      } else if(state.sheet==='metadata') {
+        const album=chosen(),track=album.tracks[state.selectedTrack]||album.tracks[0];
+        title='Edit Metadata';
+        body=`<div class="sheet-content"><div class="metadata-form"><label for="${app.id}-title">Title</label><input id="${app.id}-title" data-edit="title" value="${escapeHTML(track[0])}"><label for="${app.id}-artist">Artist</label><input id="${app.id}-artist" data-edit="artist" value="${escapeHTML(album.artist)}"><label for="${app.id}-album">Album</label><input id="${app.id}-album" data-edit="album" value="${escapeHTML(album.title)}"><label for="${app.id}-year">Year</label><input id="${app.id}-year" data-edit="year" value="${album.year}"><label>Artwork</label><button class="am-button" data-action="artwork">${icon('image')} Choose Artwork</button></div><p class="sheet-note">${album.cue?'Track titles are saved to album.cue. Shared album tags and artwork are saved to album.flac.':album.source==='local'?'Save changes to the file and update your library.':'This source supports local library edits. Writing to the original file requires file access.'}</p></div>`;
+        footer=`<button class="am-button" data-action="close-sheet">Cancel</button><button class="am-button primary" data-action="save-metadata">${album.source==='local'?'Save to Files':'Save to Library'}</button>`;
+      } else if(state.sheet==='artwork') {
+        const album=chosen();title='Choose Artwork';
+        body=`<div class="sheet-content"><div class="artwork-choices">${[['embedded','Embedded','Current artwork'],['folder','Local folder','cover.jpg'],['web','Cover Art Archive','Front cover']].map(([id,label,detail])=>`<button class="artwork-choice ${state.artChoice===id?'selected':''}" data-action="art-choice" data-value="${id}">${cover(album,true)}<span>${label}</span><span class="dim">${detail}</span></button>`).join('')}</div><label class="setting-row"><span>Embed artwork in audio files</span><input type="checkbox" checked data-field="embedArt"></label><label class="setting-row"><span>Also save as cover.jpg</span><input type="checkbox" data-field="sidecarArt"></label></div>`;
+        footer='<button class="am-button" data-action="close-sheet">Cancel</button><button class="am-button primary" data-action="save-artwork">Use Artwork</button>';
+      } else if(state.sheet==='certificate') {
+        title='Server Certificate';body='<div class="sheet-content"><h3>music.home</h3><dl class="tag-list"><dt>Issued by</dt><dd>Home Music Server</dd><dt>Connection</dt><dd>HTTPS · Self-signed</dd><dt>Trust</dt><dd>Accepted for music.home:4533</dd><dt>Fingerprint</dt><dd class="mono">SHA-256 · 7C:28:94:A1:03:8B:6F:2E:…</dd></dl><p class="sheet-note">A changed certificate will require a new decision.</p></div>';
+      } else if(state.sheet==='playlist') {
+        title='Save Playlist';body=`<div class="sheet-content"><div class="metadata-form"><label for="${app.id}-playlist">Name</label><input id="${app.id}-playlist" value="Evening listening"></div><p class="sheet-note">${state.queue.length} tracks · M3U playlist</p></div>`;footer='<button class="am-button" data-action="close-sheet">Cancel</button><button class="am-button primary" data-action="save-playlist-confirm">Save Playlist</button>';
+      }
+      slot.innerHTML=`<div class="am-sheet-backdrop"><section class="am-sheet" role="dialog" aria-modal="true" aria-label="${title}"><header class="sheet-header"><h2>${title}</h2><button class="icon-button" data-action="close-sheet" aria-label="Close dialog">${icon('x')}</button></header>${body}<footer class="sheet-footer">${footer}</footer></section></div>`;
+      q('.am-main').inert=true;q('.am-transport').inert=true;
+    }
+    function render() {
+      app.dataset.appearance=state.appearance;
+      transport();library();context();queue();status();
+      q('.am-main').inert=!!state.sheet;q('.am-transport').inert=!!state.sheet;
+      sheet();icons();
+    }
+    function update(message) {if(message)state.status=message;render();persist();}
+    function append(entries) {
+      const count=entries.length;
+      state.queue.push(...entries);
+      update(`Added ${count===1?'“'+byID(entries[0].albumID).tracks[entries[0].index][0]+'”':count+' tracks'} to the active playlist`);
+    }
+    function shuffled(entries) {const copy=[...entries];for(let i=copy.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[copy[i],copy[j]]=[copy[j],copy[i]];}return copy;}
+    function groupEntries(items) {return items.flatMap(album=>album.tracks.map((_,index)=>makeEntry(album,index)));}
+    function startQueue(index) {
+      state.current=index;state.queueOffset=Math.floor(index/12)*12;state.playing=true;state.progress=0;
+      const entry=currentEntry();state.selected=entry.albumID;state.selectedTrack=entry.index;state.context='track';
+      update(`Playing “${currentTrack()[0]}”`);
+    }
+    app.addEventListener('click',event=>{
+      const button=event.target.closest('button[data-action]');if(!button)return;
+      const action=button.dataset.action,value=button.dataset.value;
+      if(action==='queue-track') {status('Double-click a playlist track to play it');icons();return;}
+      if(action==='play') {state.playing=!state.playing;update(state.playing?'Playback resumed':'Playback paused');}
+      else if(action==='next')startQueue((state.current+1)%state.queue.length);
+      else if(action==='previous')startQueue((state.current-1+state.queue.length)%state.queue.length);
+      else if(action==='appearance'){state.appearance=state.appearance==='system'?'light':state.appearance==='light'?'dark':'system';update();}
+      else if(action==='settings'||action==='source-settings'){state.sheet='settings';if(action==='source-settings')state.settingsTab='Sources';render();q('.am-sheet button')?.focus();}
+      else if(action==='close-sheet'){state.sheet=null;render();q('[data-action="settings"]')?.focus();}
+      else if(action==='settings-tab'){state.settingsTab=value;sheet();icons();}
+      else if(action==='context-tab'){state.tab=value;context();icons();persist();}
+      else if(action==='certificate'){state.sheet='certificate';sheet();icons();}
+      else if(action==='view'){state.view=value;state.query='';q('[data-field="search"]').value='';state.context=value==='home'?'home':value==='artists'?'artist':'album';update();}
+      else if(action==='home'){state.view='home';state.context='home';update();}
+      else if(action==='album'){state.selected=value;state.selectedTrack=0;state.context='album';if(chosen().source!==state.source)state.source=chosen().source;scheduleSelection();}
+      else if(action==='select-track'){
+        const [id,index]=value.split(':');state.selected=id;state.selectedTrack=Number(index);
+        state.context='track';
+        scheduleSelection();
+      }
+      else if(action==='artist'){const album=ownAlbums().find(other=>other.artist===value);if(album)state.selected=album.id;state.view='artists';state.context='artist';update();}
+      else if(action==='year'){const album=ownAlbums().find(other=>other.year===Number(value));if(album)state.selected=album.id;state.context='album';update();}
+      else if(action==='genre'||action==='format'){const album=ownAlbums().find(other=>other[action]===value);if(album){state.selected=album.id;state.selectedTrack=0;}state.context='album';update();}
+      else if(action==='folder'){state.folder=value==='root'?ownAlbums()[0].genre:value;const album=ownAlbums().find(other=>other.genre===state.folder);if(album)state.selected=album.id;state.context='album';update();}
+      else if(action==='tag-group'){update(value==='format'?'Browse tracks by file format':'Browse tracks by genre');}
+      else if(action==='now-playing'){const entry=currentEntry();state.selected=entry.albumID;state.selectedTrack=entry.index;state.context='track';update();}
+      else if(action==='add-album'){append(groupEntries([chosen()]));}
+      else if(action==='add-artist'){append(groupEntries(ownAlbums().filter(album=>album.artist===chosen().artist)));}
+      else if(['shuffle-library','shuffle-album','shuffle-artist','shuffle-folder'].includes(action)){
+        const items=action==='shuffle-library'?ownAlbums():action==='shuffle-folder'?ownAlbums().filter(album=>album.genre===state.folder):action==='shuffle-artist'?ownAlbums().filter(album=>album.artist===chosen().artist):[chosen()];
+        state.queue=shuffled(groupEntries(items));state.current=0;state.queueOffset=0;startQueue(0);
+      }
+      else if(action==='shuffle-queue'){const current=currentEntry();state.queue=[current,...shuffled(state.queue.filter((_,index)=>index!==state.current))];state.current=0;update('Playlist shuffled');}
+      else if(action==='repeat'){
+        state.repeat={none:'playlist',playlist:'track',track:'none'}[state.repeat];
+        queue();status({none:'Repeat off',playlist:'Repeat playlist',track:'Repeat current track'}[state.repeat]);icons();persist();
+      }
+      else if(action==='metadata'||action==='artwork'){state.sheet=action;render();q('.am-sheet input, .am-sheet button')?.focus();}
+      else if(action==='save-metadata'){
+        const album=chosen(),track=album.tracks[state.selectedTrack]||album.tracks[0];
+        track[0]=q('[data-edit="title"]').value||track[0];album.artist=q('[data-edit="artist"]').value||album.artist;album.title=q('[data-edit="album"]').value||album.title;album.year=Number(q('[data-edit="year"]').value)||album.year;
+        state.sheet=null;update(`Metadata changes previewed for “${track[0]}”`);
+      }
+      else if(action==='art-choice'){state.artChoice=value;sheet();icons();}
+      else if(action==='save-artwork'){state.sheet=null;update('Artwork selection saved in this preview');}
+      else if(action==='find-lyrics'){status('No lyrics found for this recording');icons();}
+      else if(action==='refresh'){status(state.source==='podcasts'?'Podcast feeds are up to date':'Library scan complete · no new files');icons();}
+      else if(action==='save-playlist'){state.sheet='playlist';render();}
+      else if(action==='save-playlist-confirm'){state.sheet=null;update('Playlist saved in this preview');}
+      else if(action==='queue-more'){state.queueOffset=(state.queueOffset||0)+12<state.queue.length?(state.queueOffset||0)+12:0;update('Showing more playlist tracks');}
+      else if(action==='record-shortcut'){
+        button.textContent='Press keys…';button.dataset.recording='true';
+        const record=keyEvent=>{keyEvent.preventDefault();keyEvent.stopPropagation();if(['Meta','Control','Alt','Shift'].includes(keyEvent.key))return;if(keyEvent.key==='Escape'){button.textContent='Record…';}else{const key=[keyEvent.metaKey?'⌘':'',keyEvent.ctrlKey?'⌃':'',keyEvent.altKey?'⌥':'',keyEvent.shiftKey?'⇧':'',keyEvent.key===' '?'Space':keyEvent.key.length===1?keyEvent.key.toUpperCase():keyEvent.key].join(' ');button.textContent=key;}delete button.dataset.recording;app.removeEventListener('keydown',record,true);};
+        app.addEventListener('keydown',record,true);button.focus();
+      }
+    });
+    app.addEventListener('dblclick',event=>{
+      const button=event.target.closest('button[data-action]');if(!button)return;
+      clearTimeout(selectionTimer);
+      if(button.dataset.action==='queue-track'){startQueue(Number(button.dataset.value));return;}
+      if(button.dataset.action==='select-track'){
+        const[id,index]=button.dataset.value.split(':'),entry=makeEntry(byID(id),Number(index));
+        state.queue.push(entry);
+        if(state.doubleClick==='Play now'){startQueue(state.queue.length-1);}else update(`Added “${byID(id).tracks[Number(index)][0]}” to the active playlist`);
+      }else if(button.dataset.action==='album')append(groupEntries([byID(button.dataset.value)]));
+    });
+    app.addEventListener('input',event=>{
+      const field=event.target.dataset.field;
+      if(field==='search'){state.query=event.target.value;library();icons();}
+      if(field==='seek'){state.progress=Number(event.target.value);q('.elapsed').textContent=clock(state.progress);}
+    });
+    app.addEventListener('change',event=>{
+      const field=event.target.dataset.field,value=event.target.value;
+      if(field==='source'){state.source=value;state.selected=ownAlbums()[0].id;state.selectedTrack=0;state.query='';q('[data-field="search"]').value='';state.context=state.view==='home'?'home':'album';state.folder=ownAlbums()[0].genre;update(`Browsing ${sourceNames[state.source]}`);}
+      else if(field==='top'){state.top=value;context();icons();persist();}
+      else if(['appearance','buffer','doubleClick'].includes(field)){state[field]=value;render();persist();}
+      else if(field==='bufferSeconds'){state.bufferSeconds=Math.max(1,Math.min(120,Number(value)||20));event.target.value=state.bufferSeconds;persist();}
+    });
+    app.addEventListener('keydown',event=>{
+      if(event.key==='Escape'&&state.sheet){state.sheet=null;render();return;}
+      if(event.key==='Tab'&&state.sheet){const focusable=[...q('.am-sheet').querySelectorAll('button,input,select')].filter(element=>!element.disabled);const first=focusable[0],last=focusable[focusable.length-1];if(event.shiftKey&&document.activeElement===first){last.focus();event.preventDefault();}else if(!event.shiftKey&&document.activeElement===last){first.focus();event.preventDefault();}return;}
+      if(state.sheet)return;
+      if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='f'){event.preventDefault();q('[data-field="search"]').focus();return;}
+      if(/INPUT|SELECT|TEXTAREA/.test(event.target.tagName))return;
+      if(event.code==='Space'){event.preventDefault();state.playing=!state.playing;update(state.playing?'Playback resumed':'Playback paused');}
+    });
+    render();
+    const design={libraryWidth:layout==='album'?24:28,density:'Compact'};
+    if(globalThis.Tweak){const tweak=new Tweak({container:app,onChange:()=>{app.style.setProperty('--library-size',`${design.libraryWidth}%`);app.dataset.appearance=state.appearance;persist();}});tweak.addSlider(design,'libraryWidth',{label:'Library panel width',min:22,max:35,step:1,unit:'%'});tweak.addSelect(state,'appearance',{label:'Appearance',options:[{label:'System',value:'system'},{label:'Light',value:'light'},{label:'Dark',value:'dark'}]});}
+    instances.push({app,state,render});
+  }
+  makePlayer(document.getElementById('macarok-collection'),'collection');
+  makePlayer(document.getElementById('macarok-albums'),'album');
+  window.addEventListener('openai:set_globals',event=>{
+    const saved=event.detail?.globals?.widgetState?.privateContent;
+    if(!saved)return;
+    instances.forEach(instance=>{const data=saved[instance.app.dataset.layout];if(data?.appearance){instance.state.appearance=data.appearance;instance.app.dataset.appearance=data.appearance;}});
+  });
+})();
+</script>

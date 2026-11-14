@@ -1,0 +1,32 @@
+{
+  "originHash" : "f904f42f3409cf9aa62c66a2770683406c47675ef6bc526147c6edb0588da202",
+  "pins" : [
+    {
+      "identity" : "cxxtaglib",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sbooth/CXXTagLib.git",
+      "state" : {
+        "revision" : "9e499ea0a69d107791ac0a2fe9d6a59cf401c6f9"
+      }
+    },
+    {
+      "identity" : "grdb.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/groue/GRDB.swift.git",
+      "state" : {
+        "revision" : "92a554cd0d5e8d67cb18993c6054e73fe42c066c",
+        "version" : "7.12.0"
+      }
+    },
+    {
+      "identity" : "keyboardshortcuts",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sindresorhus/KeyboardShortcuts.git",
+      "state" : {
+        "revision" : "772133d9dbe800fdac0473226822994c5c162c58",
+        "version" : "3.1.0"
+      }
+    }
+  ],
+  "version" : 3
+}

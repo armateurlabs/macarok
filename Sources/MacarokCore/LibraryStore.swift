@@ -1,0 +1,355 @@
+import Foundation
+import GRDB
+
+public enum LibraryStoreError: LocalizedError {
+    case trackNotFound(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .trackNotFound: "The track is no longer present in the library."
+        }
+    }
+}
+
+/// SQLite is the durable home of the index and user data. Reads can run while a scan writes.
+public final class LibraryStore: @unchecked Sendable {
+    public let database: DatabasePool
+
+    public static var defaultURL: URL {
+        let directory: URL
+        if let path = ProcessInfo.processInfo.environment["MACAROK_DATA_DIRECTORY"], !path.isEmpty {
+            directory = URL(fileURLWithPath: path, isDirectory: true)
+        } else {
+            directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Macarok", isDirectory: true)
+        }
+        return directory.appendingPathComponent("library.sqlite")
+    }
+
+    public init(url: URL = LibraryStore.defaultURL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var configuration = Configuration()
+        configuration.prepareDatabase { db in
+            try db.execute(sql: "PRAGMA foreign_keys = ON")
+        }
+        database = try DatabasePool(path: url.path, configuration: configuration)
+        var migrator = DatabaseMigrator()
+        migrator.registerMigration("library-v1") { db in
+            try db.execute(sql: """
+                CREATE TABLE sources (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    kind TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    location TEXT NOT NULL,
+                    createdAt DATETIME NOT NULL,
+                    bookmarkData BLOB
+                );
+                CREATE TABLE tracks (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    sourceID TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+                    albumID TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT NOT NULL,
+                    albumArtist TEXT NOT NULL,
+                    album TEXT NOT NULL,
+                    year INTEGER,
+                    genre TEXT,
+                    trackNumber INTEGER,
+                    discNumber INTEGER,
+                    duration DOUBLE NOT NULL DEFAULT 0,
+                    fileURL TEXT,
+                    remoteID TEXT,
+                    format TEXT NOT NULL,
+                    artworkPath TEXT,
+                    cuePath TEXT,
+                    startTime DOUBLE,
+                    endTime DOUBLE,
+                    addedAt DATETIME NOT NULL,
+                    lastPlayedAt DATETIME,
+                    playCount INTEGER NOT NULL DEFAULT 0,
+                    rating INTEGER NOT NULL DEFAULT 0 CHECK(rating BETWEEN 0 AND 5),
+                    isAvailable BOOLEAN NOT NULL DEFAULT 1,
+                    metadataLocked BOOLEAN NOT NULL DEFAULT 0
+                );
+                CREATE INDEX tracks_source ON tracks(sourceID, isAvailable);
+                CREATE INDEX tracks_album ON tracks(sourceID, albumID);
+                CREATE INDEX tracks_lastPlayed ON tracks(sourceID, lastPlayedAt);
+                CREATE VIRTUAL TABLE trackSearch USING fts5(
+                    title, artist, album, albumArtist, genre,
+                    content = 'tracks', content_rowid = 'rowid',
+                    tokenize = 'unicode61 remove_diacritics 2'
+                );
+                CREATE TRIGGER tracks_search_insert AFTER INSERT ON tracks BEGIN
+                    INSERT INTO trackSearch(rowid, title, artist, album, albumArtist, genre)
+                    VALUES (new.rowid, new.title, new.artist, new.album, new.albumArtist, new.genre);
+                END;
+                CREATE TRIGGER tracks_search_delete AFTER DELETE ON tracks BEGIN
+                    INSERT INTO trackSearch(trackSearch, rowid, title, artist, album, albumArtist, genre)
+                    VALUES ('delete', old.rowid, old.title, old.artist, old.album, old.albumArtist, old.genre);
+                END;
+                CREATE TRIGGER tracks_search_update AFTER UPDATE OF title, artist, album, albumArtist, genre ON tracks BEGIN
+                    INSERT INTO trackSearch(trackSearch, rowid, title, artist, album, albumArtist, genre)
+                    VALUES ('delete', old.rowid, old.title, old.artist, old.album, old.albumArtist, old.genre);
+                    INSERT INTO trackSearch(rowid, title, artist, album, albumArtist, genre)
+                    VALUES (new.rowid, new.title, new.artist, new.album, new.albumArtist, new.genre);
+                END;
+                CREATE TABLE playlists (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    name TEXT NOT NULL,
+                    createdAt DATETIME NOT NULL,
+                    updatedAt DATETIME NOT NULL
+                );
+                CREATE TABLE playlistEntries (
+                    id INTEGER PRIMARY KEY,
+                    playlistID TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                    trackID TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL
+                );
+                CREATE INDEX playlistEntries_order ON playlistEntries(playlistID, position);
+                CREATE TABLE listeningHistory (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    trackID TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    playedAt DATETIME NOT NULL
+                );
+                CREATE INDEX listeningHistory_date ON listeningHistory(playedAt);
+                CREATE TABLE appState (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value BLOB NOT NULL
+                );
+                """)
+        }
+        migrator.registerMigration("library-v2-remote-paths") { db in
+            try db.execute(sql: "ALTER TABLE tracks ADD COLUMN remotePath TEXT")
+            try db.execute(sql: "ALTER TABLE tracks ADD COLUMN coverArtID TEXT")
+        }
+        try migrator.migrate(database)
+    }
+
+    public func sources() throws -> [SourceRecord] {
+        try database.read { try SourceRecord.fetchAll($0, sql: "SELECT * FROM sources ORDER BY createdAt, name COLLATE NOCASE") }
+    }
+
+    public func saveSource(_ source: SourceRecord) throws {
+        try database.write { try source.save($0) }
+    }
+
+    public func deleteSource(id: String) throws {
+        try database.write { db in
+            try db.execute(sql: "DELETE FROM sources WHERE id = ?", arguments: [id])
+        }
+    }
+
+    public func tracks(sourceID: String, query: String = "") throws -> [TrackRecord] {
+        let search = Self.searchPattern(query)
+        return try database.read { db in
+            let values: [TrackRecord]
+            if let search {
+                values = try TrackRecord.fetchAll(db, sql: """
+                    SELECT tracks.* FROM tracks
+                    JOIN trackSearch ON trackSearch.rowid = tracks.rowid
+                    WHERE tracks.sourceID = ? AND tracks.isAvailable = 1 AND trackSearch MATCH ?
+                    """, arguments: [sourceID, search])
+            } else {
+                values = try TrackRecord.fetchAll(db, sql: "SELECT * FROM tracks WHERE sourceID = ? AND isAvailable = 1", arguments: [sourceID])
+            }
+            return values.sorted(by: TrackRecord.libraryOrder)
+        }
+    }
+
+    public func allTracks() throws -> [TrackRecord] {
+        try database.read { try TrackRecord.fetchAll($0).sorted(by: TrackRecord.libraryOrder) }
+    }
+
+    public func track(id: String) throws -> TrackRecord? {
+        try database.read { try TrackRecord.fetchOne($0, key: id) }
+    }
+
+    public func albums(sourceID: String, query: String = "") throws -> [AlbumRecord] {
+        let tracks = try tracks(sourceID: sourceID, query: query)
+        return Dictionary(grouping: tracks, by: \.albumID).values.map(AlbumRecord.init)
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    public func artists(sourceID: String, query: String = "") throws -> [ArtistSummary] {
+        let tracks = try tracks(sourceID: sourceID, query: query)
+        return Dictionary(grouping: tracks, by: \.albumArtist).map { name, tracks in
+            ArtistSummary(name: name, sourceID: sourceID, tracks: tracks)
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Scans update their index fields, while user statistics and locked corrections survive.
+    public func upsertTracks(_ tracks: [TrackRecord]) throws {
+        try database.write { db in
+            for track in tracks { try Self.saveIndexedTrack(track, db: db) }
+        }
+    }
+
+    public func replaceSourceTracks(sourceID: String, with tracks: [TrackRecord]) throws {
+        try database.write { db in
+            try db.execute(sql: "UPDATE tracks SET isAvailable = 0 WHERE sourceID = ?", arguments: [sourceID])
+            for track in tracks where track.sourceID == sourceID {
+                var value = track
+                value.isAvailable = true
+                try Self.saveIndexedTrack(value, db: db)
+            }
+        }
+    }
+
+    /// A missing file remains addressable by playlists and history, but leaves normal library views.
+    public func reconcileTracks(sourceID: String, activeIDs: Set<String>) throws {
+        try database.write { db in
+            try db.execute(sql: "UPDATE tracks SET isAvailable = 0 WHERE sourceID = ?", arguments: [sourceID])
+            let ids = Array(activeIDs)
+            for offset in stride(from: 0, to: ids.count, by: 400) {
+                let chunk = Array(ids[offset..<min(offset + 400, ids.count)])
+                let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+                try db.execute(sql: "UPDATE tracks SET isAvailable = 1 WHERE sourceID = ? AND id IN (\(placeholders))",
+                               arguments: StatementArguments([sourceID] + chunk))
+            }
+        }
+    }
+
+    public func reconcileTracks(sourceID: String, activeIDs: [String]) throws {
+        try reconcileTracks(sourceID: sourceID, activeIDs: Set(activeIDs))
+    }
+
+    public func updateTrackMetadata(_ track: TrackRecord) throws {
+        try database.write { db in
+            var updated = track
+            if let existing = try TrackRecord.fetchOne(db, key: track.id) {
+                updated.addedAt = existing.addedAt
+                updated.lastPlayedAt = existing.lastPlayedAt
+                updated.playCount = existing.playCount
+                updated.rating = existing.rating
+            }
+            updated.metadataLocked = true
+            if let previous = try TrackRecord.fetchOne(db, key: track.id),
+               updated.albumID == previous.albumID,
+               previous.album != updated.album || previous.albumArtist != updated.albumArtist {
+                updated.albumID = StableID.make(updated.sourceID, updated.albumArtist, updated.album, previous.albumID)
+            }
+            try updated.save(db)
+        }
+    }
+
+    public func setMetadataLocked(trackID: String, locked: Bool) throws {
+        try database.write { db in
+            try db.execute(sql: "UPDATE tracks SET metadataLocked = ? WHERE id = ?", arguments: [locked, trackID])
+        }
+    }
+
+    public func setRating(trackID: String, rating: Int) throws {
+        try database.write { db in
+            try db.execute(sql: "UPDATE tracks SET rating = ? WHERE id = ?", arguments: [min(5, max(0, rating)), trackID])
+        }
+    }
+
+    public func recordPlay(trackID: String, at date: Date = Date()) throws {
+        try database.write { db in
+            guard try TrackRecord.fetchOne(db, key: trackID) != nil else { throw LibraryStoreError.trackNotFound(trackID) }
+            try db.execute(sql: "UPDATE tracks SET playCount = playCount + 1, lastPlayedAt = ? WHERE id = ?", arguments: [date, trackID])
+            try db.execute(sql: "INSERT INTO listeningHistory(id, trackID, playedAt) VALUES (?, ?, ?)", arguments: [UUID().uuidString, trackID, date])
+        }
+    }
+
+    public func recentlyAdded(sourceID: String, limit: Int = 20) throws -> [TrackRecord] {
+        Array(try tracks(sourceID: sourceID).sorted { $0.addedAt > $1.addedAt }.prefix(max(0, limit)))
+    }
+
+    public func recentlyPlayed(sourceID: String, limit: Int = 20) throws -> [TrackRecord] {
+        Array(try tracks(sourceID: sourceID).filter { $0.lastPlayedAt != nil }
+            .sorted { $0.lastPlayedAt! > $1.lastPlayedAt! }.prefix(max(0, limit)))
+    }
+
+    public func mostPlayed(sourceID: String, limit: Int = 20) throws -> [TrackRecord] {
+        Array(try tracks(sourceID: sourceID).filter { $0.playCount > 0 }
+            .sorted { $0.playCount == $1.playCount ? TrackRecord.libraryOrder($0, $1) : $0.playCount > $1.playCount }
+            .prefix(max(0, limit)))
+    }
+
+    public func playlists() throws -> [PlaylistRecord] {
+        try database.read { try PlaylistRecord.fetchAll($0, sql: "SELECT * FROM playlists ORDER BY updatedAt DESC, name COLLATE NOCASE") }
+    }
+
+    @discardableResult
+    public func savePlaylist(name: String, trackIDs: [String], id: String = UUID().uuidString) throws -> PlaylistRecord {
+        try database.write { db in
+            let existing = try PlaylistRecord.fetchOne(db, key: id)
+            let playlist = PlaylistRecord(id: id, name: name, createdAt: existing?.createdAt ?? Date(), updatedAt: Date())
+            try playlist.save(db)
+            try db.execute(sql: "DELETE FROM playlistEntries WHERE playlistID = ?", arguments: [id])
+            for (position, trackID) in trackIDs.enumerated() {
+                guard try TrackRecord.fetchOne(db, key: trackID) != nil else { continue }
+                try db.execute(sql: "INSERT INTO playlistEntries(playlistID, trackID, position) VALUES (?, ?, ?)", arguments: [id, trackID, position])
+            }
+            return playlist
+        }
+    }
+
+    public func playlistTracks(id: String) throws -> [TrackRecord] {
+        try database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT tracks.* FROM tracks JOIN playlistEntries ON tracks.id = playlistEntries.trackID
+                WHERE playlistEntries.playlistID = ? ORDER BY playlistEntries.position
+                """, arguments: [id])
+        }
+    }
+
+    public func deletePlaylist(id: String) throws {
+        try database.write { try $0.execute(sql: "DELETE FROM playlists WHERE id = ?", arguments: [id]) }
+    }
+
+    public func saveQueue(trackIDs: [String], currentIndex: Int, position: Double) throws {
+        let snapshot = PlaybackQueueSnapshot(trackIDs: trackIDs, currentIndex: currentIndex, position: position)
+        try setValue(JSONEncoder().encode(snapshot), forKey: "playbackQueue")
+    }
+
+    public func loadQueue() throws -> PlaybackQueueSnapshot? {
+        guard let data = try value(forKey: "playbackQueue") else { return nil }
+        return try JSONDecoder().decode(PlaybackQueueSnapshot.self, from: data)
+    }
+
+    public func setValue(_ data: Data?, forKey key: String) throws {
+        try database.write { db in
+            if let data {
+                try db.execute(sql: "INSERT INTO appState(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", arguments: [key, data])
+            } else {
+                try db.execute(sql: "DELETE FROM appState WHERE key = ?", arguments: [key])
+            }
+        }
+    }
+
+    public func value(forKey key: String) throws -> Data? {
+        try database.read { try Data.fetchOne($0, sql: "SELECT value FROM appState WHERE key = ?", arguments: [key]) }
+    }
+
+    private static func saveIndexedTrack(_ incoming: TrackRecord, db: Database) throws {
+        var track = incoming
+        if let previous = try TrackRecord.fetchOne(db, key: incoming.id) {
+            track.addedAt = previous.addedAt
+            track.playCount = previous.playCount
+            track.lastPlayedAt = previous.lastPlayedAt
+            track.rating = previous.rating
+            track.metadataLocked = previous.metadataLocked
+            if previous.metadataLocked {
+                track.title = previous.title
+                track.artist = previous.artist
+                track.albumArtist = previous.albumArtist
+                track.album = previous.album
+                track.albumID = previous.albumID
+                track.year = previous.year
+                track.genre = previous.genre
+                track.trackNumber = previous.trackNumber
+                track.discNumber = previous.discNumber
+                track.artworkPath = previous.artworkPath ?? incoming.artworkPath
+            }
+        }
+        try track.save(db)
+    }
+
+    private static func searchPattern(_ query: String) -> String? {
+        let tokens = query.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return nil }
+        return tokens.prefix(20).map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"*" }.joined(separator: " AND ")
+    }
+}
