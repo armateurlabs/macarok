@@ -22,6 +22,8 @@ A single click inspects an item. Double-clicking a library track appends it to t
 
 Right-click a track, album, or artist to choose Play Now. It appends the selection to the active playlist and immediately starts its first track. Album and artist actions resolve the complete selection even when search shows only some matching tracks.
 
+Clear Playlist removes every entry except the current one, preserving its playback state and position. This also keeps a paused or still-loading current track. Without a current entry, it empties the playlist.
+
 Search retains the selected library presentation: artist/album hierarchy, albums, years, folders, or tags. The query persists across tabs; clearing it restores the complete source catalog. Home listening history remains scoped to the complete selected source.
 
 ## Sources and connections

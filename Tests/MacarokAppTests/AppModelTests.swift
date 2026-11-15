@@ -221,19 +221,6 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(try fixture.store.loadQueue()?.position, 0)
     }
 
-    func testClearingQueueCancelsPlaybackBeforeItsTaskStarts() async throws {
-        let fixture = try makeFixture()
-        defer { fixture.removeFiles() }
-        await fixture.model.start()
-        fixture.model.add([fixture.localTracks[0]], play: true)
-        fixture.model.clearQueue()
-        try await Task.sleep(for: .milliseconds(80))
-        XCTAssertTrue(fixture.model.queue.isEmpty)
-        XCTAssertNil(fixture.model.currentTrack)
-        XCTAssertEqual(fixture.model.player.state, .stopped)
-        XCTAssertNil(fixture.model.message, "A cancelled playback task must not report a missing-file error after clearing.")
-    }
-
     func testOlderCancelledRefreshCannotFinishNewRefresh() async throws {
         let gate = ScanGate()
         let fixture = try makeFixture(localScan: { source, progress in

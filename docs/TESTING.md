@@ -65,6 +65,8 @@ Verify that the track count matches `.macarok-demo.json`; the continuous album s
 
 Double-clicking a library track should append it without interrupting playback. Double-clicking a queue entry should play that entry. Verify repeat cycles through None, Playlist, and Track; check next/previous, position seeking, media keys, and custom shortcuts. Confirm that typing spaces in a search field does not pause playback.
 
+Clear Playlist should keep only the current queue entry and leave its playback position and playing/paused state intact. It must also keep a track that is still opening. Without a current entry, the playlist should become empty. Restarting should restore the retained track and position.
+
 Right-click tracks, albums, and artists in the library and Home lists. Play Now should append the selection and start it immediately. Search for part of an album, switch library tabs, and confirm that each tab keeps its normal grouping and the query remains visible. Choosing Play Now for a matching album or artist should include its complete track list.
 
 Open each codec-check file and verify playback advances without an error. For CUE tracks, inspect tags and confirm that playback starts and ends at the selected segment. Export an M3U playlist and import it again to verify that segment boundaries survive.

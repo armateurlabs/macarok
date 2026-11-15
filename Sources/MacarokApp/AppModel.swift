@@ -405,7 +405,17 @@ final class AppModel {
         if deletingCurrent { playbackTask?.cancel(); player.stop(); activeStream?.close(); currentQueueID = nil; restorePosition = 0; updateNowPlaying() }
         saveQueue()
     }
-    func clearQueue() { playbackTask?.cancel(); player.stop(); activeStream?.close(); queue = []; currentQueueID = nil; restorePosition = 0; saveQueue(); updateNowPlaying() }
+    func clearQueue() {
+        if let current = queue.first(where: { $0.id == currentQueueID }) {
+            queue = [current]
+            selectedQueueID = current.id
+            saveQueue()
+        } else {
+            playbackTask?.cancel(); player.stop(); activeStream?.close(); activeStream = nil
+            queue = []; currentQueueID = nil; selectedQueueID = nil; restorePosition = 0
+            saveQueue(); updateNowPlaying()
+        }
+    }
     func cycleRepeat() { settings.repeatMode = settings.repeatMode.next }
 
     func saveQueue() {
