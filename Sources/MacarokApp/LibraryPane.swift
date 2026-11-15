@@ -91,32 +91,53 @@ struct LibraryPane: View {
     }
 }
 
-struct FolderNode: Identifiable {
-    var id: String
-    var name: String
-    var children: [FolderNode]?
-}
-
 struct FolderLibrary: View {
     @Bindable var model: AppModel
+    @State private var nodes: [FolderNode] = []
+    @State private var loadedSourceID: String?
+    @State private var isLoading = false
+
     var body: some View {
-        OutlineGroup(nodes, children: \.children) { node in
-            Label(node.name, systemImage: "folder").font(.system(size: 12)).contentShape(Rectangle()).onTapGesture { model.selectedFolder = node.id; model.contextPage = .folder }
-                .contextMenu { Button("Shuffle Folder") { model.shuffle(model.tracksInFolder(node.id)) }; Button("Add Folder to Playlist") { model.add(model.tracksInFolder(node.id)) } }
+        Section {
+            if loadedSourceID == model.sourceID, !nodes.isEmpty {
+                OutlineGroup(nodes, children: \.children) { node in
+                    Label(node.name, systemImage: "folder").font(.system(size: 12)).contentShape(Rectangle()).onTapGesture { model.selectedFolder = node.id; model.contextPage = .folder }
+                        .contextMenu { Button("Shuffle Folder") { model.shuffle(model.tracksInFolder(node.id)) }; Button("Add Folder to Playlist") { model.add(model.tracksInFolder(node.id)) } }
+                }
+            }
+            if isLoading || loadedSourceID != model.sourceID {
+                ProgressView("Loading folders…").controlSize(.small).font(.caption)
+            }
+        }
+        .task(id: FolderSnapshotID(sourceID: model.sourceID, revision: model.libraryRevision)) {
+            let sourceID = model.sourceID
+            let revision = model.libraryRevision
+            let tracks = model.tracks
+            let sources = model.selectedSource.map { [$0] } ?? []
+            let rootName = model.selectedSource?.name ?? "Music"
+            isLoading = true
+            let task = Task.detached(priority: .userInitiated) {
+                try LibraryFolderIndex.build(tracks: tracks, sources: sources, rootName: rootName)
+            }
+            do {
+                let result = try await withTaskCancellationHandler {
+                    try await task.value
+                } onCancel: { task.cancel() }
+                guard !Task.isCancelled, model.sourceID == sourceID, model.libraryRevision == revision else { return }
+                nodes = result
+                loadedSourceID = sourceID
+                isLoading = false
+            } catch {
+                guard !Task.isCancelled, model.sourceID == sourceID, model.libraryRevision == revision else { return }
+                isLoading = false
+            }
         }
     }
-    private var nodes: [FolderNode] {
-        func build(_ prefix: String) -> [FolderNode] {
-            let paths = Set(model.tracks.map { model.folderPath($0) })
-            let names = Set(paths.compactMap { path -> String? in
-                let relative = prefix.isEmpty ? path : path.hasPrefix(prefix + "/") ? String(path.dropFirst(prefix.count + 1)) : ""
-                return relative.split(separator: "/").first.map(String.init)
-            })
-            return names.sorted().map { name in let full = prefix.isEmpty ? name : prefix + "/" + name; let children = build(full); return FolderNode(id: full, name: name, children: children.isEmpty ? nil : children) }
-        }
-        let children = build("")
-        return [FolderNode(id: "", name: model.selectedSource?.name ?? "Music", children: children.isEmpty ? nil : children)]
-    }
+}
+
+private struct FolderSnapshotID: Hashable {
+    let sourceID: String?
+    let revision: Int
 }
 
 extension Notification.Name { static let macarokFocusSearch = Notification.Name("Macarok.focusSearch") }

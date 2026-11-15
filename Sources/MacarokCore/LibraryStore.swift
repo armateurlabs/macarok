@@ -198,13 +198,24 @@ public final class LibraryStore: @unchecked Sendable {
     /// A missing file remains addressable by playlists and history, but leaves normal library views.
     public func reconcileTracks(sourceID: String, activeIDs: Set<String>) throws {
         try database.write { db in
-            try db.execute(sql: "UPDATE tracks SET isAvailable = 0 WHERE sourceID = ?", arguments: [sourceID])
-            let ids = Array(activeIDs)
-            for offset in stride(from: 0, to: ids.count, by: 400) {
-                let chunk = Array(ids[offset..<min(offset + 400, ids.count)])
-                let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
-                try db.execute(sql: "UPDATE tracks SET isAvailable = 1 WHERE sourceID = ? AND id IN (\(placeholders))",
-                               arguments: StatementArguments([sourceID] + chunk))
+            let rows = try Row.fetchAll(db, sql: "SELECT id, isAvailable FROM tracks WHERE sourceID = ?", arguments: [sourceID])
+            var missing: [String] = []
+            var restored: [String] = []
+            for row in rows {
+                let id: String = row["id"]
+                let isAvailable: Bool = row["isAvailable"]
+                let shouldBeAvailable = activeIDs.contains(id)
+                if isAvailable && !shouldBeAvailable { missing.append(id) }
+                else if !isAvailable && shouldBeAvailable { restored.append(id) }
+            }
+            // Progressive imports already saved available tracks. Only changed availability needs a write.
+            for (availability, ids) in [(0, missing), (1, restored)] {
+                for offset in stride(from: 0, to: ids.count, by: 400) {
+                    let chunk = Array(ids[offset..<min(offset + 400, ids.count)])
+                    let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+                    try db.execute(sql: "UPDATE tracks SET isAvailable = \(availability) WHERE sourceID = ? AND id IN (\(placeholders))",
+                                   arguments: StatementArguments([sourceID] + chunk))
+                }
             }
         }
     }
@@ -331,6 +342,10 @@ public final class LibraryStore: @unchecked Sendable {
             track.lastPlayedAt = previous.lastPlayedAt
             track.rating = previous.rating
             track.metadataLocked = previous.metadataLocked
+            if incoming.artworkPath == nil, incoming.remoteID != nil,
+               incoming.remoteID == previous.remoteID, incoming.coverArtID == previous.coverArtID {
+                track.artworkPath = previous.artworkPath
+            }
             if previous.metadataLocked {
                 track.title = previous.title
                 track.artist = previous.artist

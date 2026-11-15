@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import XCTest
 @testable import MacarokCore
 
@@ -98,6 +99,103 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(try store.albums(sourceID: source.id).map(\.id), [edited.albumID])
         XCTAssertEqual(try store.track(id: edited.id)?.playCount, 1)
         XCTAssertEqual(try store.playlistTracks(id: playlist.id).map(\.id), [edited.id])
+    }
+
+    func testReconciliationWritesOnlyAvailabilityChangesAndPreservesSourceUserData() throws {
+        let folder = try temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = try LibraryStore(url: folder.appendingPathComponent("test.sqlite"))
+        let source = SourceRecord(id: "server", kind: .openSubsonic, name: "Server", location: "https://music.example")
+        let other = SourceRecord(id: "other", kind: .openSubsonic, name: "Other", location: "https://other.example")
+        try store.saveSource(source)
+        try store.saveSource(other)
+        let playedAt = Date(timeIntervalSince1970: 1_000)
+        try store.upsertTracks([
+            TrackRecord(id: "unchanged", sourceID: source.id, title: "Keep title", artist: "Keep artist", genre: "Keep genre"),
+            TrackRecord(id: "missing", sourceID: source.id, title: "Saved track"),
+            TrackRecord(id: "restored", sourceID: source.id, isAvailable: false),
+            TrackRecord(id: "still-missing", sourceID: source.id, isAvailable: false),
+            TrackRecord(id: "other-source", sourceID: other.id)
+        ])
+        try store.recordPlay(trackID: "missing", at: playedAt)
+        try store.setRating(trackID: "missing", rating: 4)
+        let playlist = try store.savePlaylist(name: "Preserve missing", trackIDs: ["missing", "missing"])
+        try store.database.write { db in
+            try db.execute(sql: """
+                CREATE TABLE availabilityAudit (trackID TEXT NOT NULL);
+                CREATE TRIGGER auditAvailability AFTER UPDATE OF isAvailable ON tracks BEGIN
+                    INSERT INTO availabilityAudit(trackID) VALUES (new.id);
+                END;
+                """)
+        }
+
+        let active: Set<String> = ["unchanged", "restored", "unknown", "other-source"]
+        try store.reconcileTracks(sourceID: source.id, activeIDs: active)
+
+        let writes = try store.database.read { try String.fetchAll($0, sql: "SELECT trackID FROM availabilityAudit ORDER BY trackID") }
+        XCTAssertEqual(writes, ["missing", "restored"], "Unchanged rows and another source must not be rewritten.")
+        XCTAssertEqual(Set(try store.tracks(sourceID: source.id).map(\.id)), ["unchanged", "restored"])
+        XCTAssertEqual(try store.tracks(sourceID: other.id).map(\.id), ["other-source"])
+        let missing = try XCTUnwrap(store.track(id: "missing"))
+        XCTAssertEqual(missing.title, "Saved track")
+        XCTAssertEqual(missing.playCount, 1)
+        XCTAssertEqual(missing.lastPlayedAt, playedAt)
+        XCTAssertEqual(missing.rating, 4)
+        XCTAssertEqual(try store.playlistTracks(id: playlist.id).map(\.id), ["missing", "missing"])
+        let unchanged = try XCTUnwrap(store.track(id: "unchanged"))
+        XCTAssertEqual(unchanged.artist, "Keep artist")
+        XCTAssertEqual(unchanged.genre, "Keep genre")
+
+        try store.reconcileTracks(sourceID: source.id, activeIDs: active)
+        let repeatedWrites = try store.database.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM availabilityAudit") }
+        XCTAssertEqual(repeatedWrites, 2, "An unchanged successful import must not update availability again.")
+    }
+
+    func testRemoteArtworkCacheSurvivesUnchangedCoverAndInvalidatesChangedCover() throws {
+        let folder = try temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = try LibraryStore(url: folder.appendingPathComponent("test.sqlite"))
+        let source = SourceRecord(kind: .openSubsonic, name: "Server", location: "https://music.example")
+        try store.saveSource(source)
+        var track = TrackRecord(id: "remote", sourceID: source.id, title: "Original", remoteID: "song-1",
+                                coverArtID: "cover-1", artworkPath: "/cache/cover-1.image")
+        try store.upsertTracks([track])
+
+        track.title = "Updated server title"
+        track.artworkPath = nil
+        try store.upsertTracks([track])
+        XCTAssertEqual(try store.track(id: track.id)?.title, "Updated server title")
+        XCTAssertEqual(try store.track(id: track.id)?.artworkPath, "/cache/cover-1.image")
+        XCTAssertEqual(try store.track(id: track.id)?.metadataLocked, false)
+
+        track.coverArtID = "cover-2"
+        try store.upsertTracks([track])
+        XCTAssertNil(try store.track(id: track.id)?.artworkPath, "A different cover identifier must invalidate an unlocked cached image.")
+    }
+
+    func testArtworkRefreshPreservesLockedRemoteOverlayButClearsRemovedLocalArtwork() throws {
+        let folder = try temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = try LibraryStore(url: folder.appendingPathComponent("test.sqlite"))
+        let remote = SourceRecord(kind: .openSubsonic, name: "Server", location: "https://music.example")
+        let local = SourceRecord(kind: .local, name: "Local", location: folder.absoluteString)
+        try store.saveSource(remote)
+        try store.saveSource(local)
+        var remoteTrack = TrackRecord(id: "remote", sourceID: remote.id, title: "My title", remoteID: "song-1",
+                                      coverArtID: "cover-1", artworkPath: "/cache/my-cover.image")
+        var localTrack = TrackRecord(id: "local", sourceID: local.id, artworkPath: "/cache/local-cover.image")
+        try store.upsertTracks([remoteTrack, localTrack])
+        try store.updateTrackMetadata(remoteTrack)
+
+        remoteTrack.title = "Server title"
+        remoteTrack.coverArtID = "cover-2"
+        remoteTrack.artworkPath = nil
+        localTrack.artworkPath = nil
+        try store.upsertTracks([remoteTrack, localTrack])
+
+        XCTAssertEqual(try store.track(id: remoteTrack.id)?.artworkPath, "/cache/my-cover.image")
+        XCTAssertEqual(try store.track(id: remoteTrack.id)?.title, "My title")
+        XCTAssertNil(try store.track(id: localTrack.id)?.artworkPath, "Removed local artwork must not be preserved just because its optional cover ID is still nil.")
     }
 
     private func temporaryFolder() throws -> URL {

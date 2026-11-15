@@ -30,11 +30,13 @@ Support HTTP and HTTPS. Self-signed certificates require explicit acceptance, re
 
 ### Current OpenSubsonic catalog loading
 
-Connecting a server currently retrieves its album list in pages of 500, then requests each album's tracks sequentially. Macarok accumulates the result and writes the metadata to SQLite after the entire retrieval succeeds. On the first connection, tracks therefore appear only after this initial catalog import finishes. This does not request a server-side file scan.
+Connecting a server retrieves its album list in pages of 500. Each page's albums are imported before requesting the next page. Each completed album is committed immediately to SQLite, and the first album is published before the next request. Later UI updates are coalesced to roughly 750 ms, with catalog snapshots read off the main thread. Browsing, search, and adding tracks to the queue are available while the rest of the catalog loads. This does not request a server-side file scan.
 
 SQLite retains the indexed titles, artists, albums, tags, durations, remote IDs, paths, and cover references. Startup and source switching display this cached catalog immediately; an explicit Refresh currently repeats the complete metadata traversal. Audio files are requested only for playback, through an in-memory streaming buffer. Cover images are fetched on demand and stored in the separate Artwork cache.
 
-Progressive catalog publication is not implemented yet. It could retain the SQLite index while making completed batches available during the initial import; missing-track reconciliation must still wait for a successful complete retrieval.
+Cancellation or a later request failure keeps both the previous cache and newly committed albums usable. Missing-track reconciliation runs only after a successful complete retrieval and updates only availability differences. An interrupted import remains marked incomplete across restarts; Refresh traverses the catalog again. Remote cover caches survive refresh while their cover IDs remain unchanged.
+
+Folder browsing builds a cancellable snapshot off the main thread. Each track path is resolved once and its folder prefixes are assembled in one pass, rather than rescanning every track for each folder. A source/revision guard prevents an older snapshot from appearing after a source change or a newer catalog update.
 
 ## Playback and controls
 

@@ -8,6 +8,22 @@ public struct OpenSubsonicError: LocalizedError, Sendable {
     public var errorDescription: String? { message }
 }
 
+private actor RemoteLibraryCollection {
+    private var tracks: [RemoteTrack] = []
+    private var completed = 0
+    private var reportedTotal = false
+
+    func append(_ batch: [RemoteTrack], completed: Int, total: Int?) {
+        tracks.append(contentsOf: batch)
+        self.completed = completed
+        reportedTotal = total != nil
+    }
+
+    func result() -> (tracks: [RemoteTrack], completed: Int, reportedTotal: Bool) {
+        (tracks, completed, reportedTotal)
+    }
+}
+
 public struct RemoteArtist: Identifiable, Sendable, Equatable {
     public var id: String
     public var name: String
@@ -160,24 +176,45 @@ public struct OpenSubsonicClient: Sendable {
     }
 
     public func fetchLibrary(sourceID: String, progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> [RemoteTrack] {
-        var allAlbums: [RemoteAlbum] = []
+        let collection = RemoteLibraryCollection()
+        try await streamLibrary(sourceID: sourceID) { tracks, completed, total in
+            await collection.append(tracks, completed: completed, total: total)
+            // The legacy callback cannot represent an unknown total. Report only known totals.
+            if let total { progress?(completed, total) }
+        }
+        let result = await collection.result()
+        if !result.reportedTotal { progress?(result.completed, result.completed) }
+        return result.tracks
+    }
+
+    /// Publishes each completed album before requesting the next album or catalog page.
+    /// The consumer is awaited so it can persist a batch before further network work begins.
+    /// The total remains unknown until a short catalog page establishes the end of the list.
+    public func streamLibrary(sourceID: String,
+                              receiveBatch: @escaping @Sendable ([RemoteTrack], Int, Int?) async throws -> Void) async throws {
         var seen = Set<String>()
         var offset = 0
+        var completed = 0
         while true {
             try Task.checkCancellation()
             let page = try await albums(offset: offset)
+            try Task.checkCancellation()
             let new = page.filter { seen.insert($0.id).inserted }
-            allAlbums.append(contentsOf: new)
-            if page.count < 500 || new.isEmpty { break }
+            let isFinalPage = page.count < 500
+            // A server that ignores offset must not turn a partial import into a complete snapshot.
+            guard isFinalPage || !new.isEmpty else { throw SourceNetworkError.invalidResponse }
+            let total: Int? = isFinalPage ? seen.count : nil
+            for album in new {
+                try Task.checkCancellation()
+                let tracks = try await songs(albumID: album.id)
+                try Task.checkCancellation()
+                completed += 1
+                try await receiveBatch(tracks, completed, total)
+                try Task.checkCancellation()
+            }
+            if isFinalPage { return }
             offset += page.count
         }
-        var tracks: [RemoteTrack] = []
-        for (index, album) in allAlbums.enumerated() {
-            try Task.checkCancellation()
-            tracks.append(contentsOf: try await songs(albumID: album.id))
-            progress?(index + 1, allAlbums.count)
-        }
-        return tracks
     }
 
     public func search(_ query: String, count: Int = 100) async throws -> [RemoteTrack] {

@@ -12,6 +12,8 @@ The suite also exercises actual VLCKit playback of synthetic MP3, FLAC, Vorbis, 
 
 `WindowLayoutTests` verifies that all three panels fill the native hosting window when resized, including startup without sources, an empty source, an empty queue, and unmatched search results. It checks actual split-view geometry in both appearances without imposing a fixed-size SwiftUI root.
 
+Progressive catalog tests gate API responses and controller batches to prove that tracks are persisted, searchable, and queueable before completion. They cover cancellation, later request failures, stale refresh generations, source changes, and success-only reconciliation. Folder tests include a synthetic 30,000-track, 7,000-folder catalog and cancellation; the folder tree is built off the main thread.
+
 To exercise the optional real fingerprint helper as well:
 
 ```sh

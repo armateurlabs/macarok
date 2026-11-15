@@ -115,30 +115,16 @@ extension AppModel {
 
     /// Paths are relative to a source, never manufactured from tags.
     func folderPath(_ track: TrackRecord) -> String {
-        if let path = track.remotePath, !path.isEmpty {
-            return normalizedFolder((path.replacingOccurrences(of: "\\", with: "/") as NSString).deletingLastPathComponent)
-        }
-        guard let url = track.url, url.isFileURL else { return "" }
-        let parent = url.standardizedFileURL.deletingLastPathComponent()
-        guard let source = sources.first(where: { $0.id == track.sourceID }), let sourceURL = source.url else {
-            return normalizedFolder(parent.lastPathComponent)
-        }
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory)
-        let base = (exists && isDirectory.boolValue) || sourceURL.hasDirectoryPath
-            ? sourceURL.standardizedFileURL : sourceURL.standardizedFileURL.deletingLastPathComponent()
-        if parent.path == base.path { return "" }
-        let prefix = base.path.hasSuffix("/") ? base.path : base.path + "/"
-        if parent.path.hasPrefix(prefix) { return normalizedFolder(String(parent.path.dropFirst(prefix.count))) }
-        // Explicit playlists can reference files outside their own directory.
-        return normalizedFolder(parent.path)
+        let matchingSources = track.remotePath?.isEmpty == false ? [] : sources.filter { $0.id == track.sourceID }
+        return LibraryFolderPathResolver(sources: matchingSources).folderPath(track)
     }
 
     func tracksInFolder(_ path: String) -> [TrackRecord] {
-        let folder = normalizedFolder(path)
+        let folder = LibraryFolderPathResolver.normalize(path)
         guard !folder.isEmpty else { return displayedTracks }
+        let resolver = LibraryFolderPathResolver(sources: selectedSource.map { [$0] } ?? [])
         return displayedTracks.filter { track in
-            let parent = folderPath(track)
+            let parent = resolver.folderPath(track)
             return parent == folder || parent.hasPrefix(folder + "/")
         }
     }
@@ -207,7 +193,4 @@ extension AppModel {
         } catch { fail("Could not save the playlist", error.localizedDescription) }
     }
 
-    private func normalizedFolder(_ path: String) -> String {
-        path.replacingOccurrences(of: "\\", with: "/").split(separator: "/").filter { $0 != "." }.joined(separator: "/")
-    }
 }
