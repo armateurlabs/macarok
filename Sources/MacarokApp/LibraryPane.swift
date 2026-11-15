@@ -16,7 +16,15 @@ struct LibraryPane: View {
                 TextField("Search this library", text: $model.search).textFieldStyle(.roundedBorder).focused($searchFocused)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
                     ForEach(LibraryView.allCases) { view in
-                        Button { model.libraryView = view } label: { Text(view.title).font(.system(size: 11)).frame(maxWidth: .infinity).padding(.vertical, 5).background(model.libraryView == view ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 5)).foregroundStyle(model.libraryView == view ? Color.accentColor : .secondary) }.buttonStyle(.plain)
+                        Button { model.libraryView = view } label: {
+                            Text(view.title)
+                                .font(.system(size: 11))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 5)
+                                .background(model.libraryView == view ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                                .foregroundStyle(model.libraryView == view ? Color.accentColor : .secondary)
+                                .contentShape(Rectangle())
+                        }.buttonStyle(.plain)
                     }
                 }
             }.padding(12)
