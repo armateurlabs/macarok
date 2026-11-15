@@ -1,6 +1,11 @@
 import Foundation
 import GRDB
 
+private struct QueueResumeCheckpoint: Codable {
+    let currentIndex: Int
+    let position: Double
+}
+
 public enum LibraryStoreError: LocalizedError {
     case trackNotFound(String)
 
@@ -125,6 +130,7 @@ public final class LibraryStore: @unchecked Sendable {
         LyricsCacheStorage.registerMigration(&migrator)
         RadioStoreStorage.registerMigration(&migrator)
         LastFMStoreStorage.registerMigration(&migrator)
+        LocalScanCacheStorage.registerMigration(&migrator)
         try migrator.migrate(database)
     }
 
@@ -203,7 +209,10 @@ public final class LibraryStore: @unchecked Sendable {
     /// Scans update their index fields, while user statistics and locked corrections survive.
     public func upsertTracks(_ tracks: [TrackRecord]) throws {
         try database.write { db in
-            for track in tracks { try Self.saveIndexedTrack(track, db: db) }
+            for track in tracks {
+                try Task.checkCancellation()
+                try Self.saveIndexedTrack(track, db: db)
+            }
         }
     }
 
@@ -219,12 +228,22 @@ public final class LibraryStore: @unchecked Sendable {
 
     public func replaceSourceTracks(sourceID: String, with tracks: [TrackRecord]) throws {
         try database.write { db in
-            try db.execute(sql: "UPDATE tracks SET isAvailable = 0 WHERE sourceID = ?", arguments: [sourceID])
+            try Task.checkCancellation()
+            var previous = Dictionary(uniqueKeysWithValues: try TrackRecord.fetchAll(db,
+                sql: "SELECT * FROM tracks WHERE sourceID = ?", arguments: [sourceID]).map { ($0.id, $0) })
+            var activeIDs = Set<String>()
             for track in tracks where track.sourceID == sourceID {
+                try Task.checkCancellation()
                 var value = track
                 value.isAvailable = true
-                try Self.saveIndexedTrack(value, db: db)
+                activeIDs.insert(value.id)
+                previous[value.id] = try Self.saveIndexedTrack(value, preserving: previous[value.id], db: db)
             }
+            for track in previous.values where track.isAvailable && !activeIDs.contains(track.id) {
+                try Task.checkCancellation()
+                try db.execute(sql: "UPDATE tracks SET isAvailable = 0 WHERE id = ? AND sourceID = ?", arguments: [track.id, sourceID])
+            }
+            try Task.checkCancellation()
         }
     }
 
@@ -345,12 +364,30 @@ public final class LibraryStore: @unchecked Sendable {
 
     public func saveQueue(trackIDs: [String], currentIndex: Int, position: Double) throws {
         let snapshot = PlaybackQueueSnapshot(trackIDs: trackIDs, currentIndex: currentIndex, position: position)
-        try setValue(JSONEncoder().encode(snapshot), forKey: "playbackQueue")
+        let data = try JSONEncoder().encode(snapshot)
+        try database.write { db in
+            try db.execute(sql: "INSERT INTO appState(key, value) VALUES ('playbackQueue', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", arguments: [data])
+            try db.execute(sql: "DELETE FROM appState WHERE key = 'playbackResume'")
+        }
+    }
+
+    /// Frequent resume checkpoints never re-encode the potentially large list of queued track IDs.
+    public func saveQueuePosition(currentIndex: Int, position: Double) throws {
+        let checkpoint = QueueResumeCheckpoint(currentIndex: max(0, currentIndex), position: position.isFinite ? max(0, position) : 0)
+        try setValue(JSONEncoder().encode(checkpoint), forKey: "playbackResume")
     }
 
     public func loadQueue() throws -> PlaybackQueueSnapshot? {
-        guard let data = try value(forKey: "playbackQueue") else { return nil }
-        return try JSONDecoder().decode(PlaybackQueueSnapshot.self, from: data)
+        try database.read { db in
+            guard let data = try Data.fetchOne(db, sql: "SELECT value FROM appState WHERE key = 'playbackQueue'") else { return nil }
+            var snapshot = try JSONDecoder().decode(PlaybackQueueSnapshot.self, from: data)
+            if let position = try Data.fetchOne(db, sql: "SELECT value FROM appState WHERE key = 'playbackResume'"),
+               let resume = try? JSONDecoder().decode(QueueResumeCheckpoint.self, from: position) {
+                snapshot.currentIndex = snapshot.trackIDs.isEmpty ? 0 : min(max(0, resume.currentIndex), snapshot.trackIDs.count - 1)
+                snapshot.position = resume.position
+            }
+            return snapshot
+        }
     }
 
     public func setValue(_ data: Data?, forKey key: String) throws {
@@ -368,8 +405,13 @@ public final class LibraryStore: @unchecked Sendable {
     }
 
     private static func saveIndexedTrack(_ incoming: TrackRecord, db: Database) throws {
+        _ = try saveIndexedTrack(incoming, preserving: TrackRecord.fetchOne(db, key: incoming.id), db: db)
+    }
+
+    @discardableResult
+    private static func saveIndexedTrack(_ incoming: TrackRecord, preserving previous: TrackRecord?, db: Database) throws -> TrackRecord {
         var track = incoming
-        if let previous = try TrackRecord.fetchOne(db, key: incoming.id) {
+        if let previous {
             track.addedAt = previous.addedAt
             track.playCount = previous.playCount
             track.lastPlayedAt = previous.lastPlayedAt
@@ -392,7 +434,11 @@ public final class LibraryStore: @unchecked Sendable {
                 track.artworkPath = previous.artworkPath ?? incoming.artworkPath
             }
         }
-        try track.save(db)
+        if let previous {
+            // Update only changed columns. Artwork/statistics/availability changes do not rebuild FTS.
+            _ = try track.updateChanges(db, from: previous)
+        } else { try track.insert(db) }
+        return track
     }
 
     private static func searchPattern(_ query: String) -> String? {

@@ -8,6 +8,8 @@ public struct LibraryScanResult: Sendable {
     public var warnings: [String]
     public var isComplete: Bool
     public var scannedAt: Date
+    public var fileCacheEntries: [LocalScanFileCacheEntry] = []
+    public var filesRead: Int = 0
 
     public var activeIDs: Set<String> { Set(tracks.map(\.id)) }
     public var trackCount: Int { tracks.count }
@@ -36,10 +38,11 @@ public struct LibraryScanner: Sendable {
     }
 
     public func scan(source: SourceRecord,
+                     cachedFiles: [String: LocalScanFileCacheEntry] = [:],
                      metadataReader: @escaping @Sendable (URL) throws -> AudioFileMetadata,
                      progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> LibraryScanResult {
-        let task = Task.detached(priority: .utility) {
-            try performScan(source: source, metadataReader: metadataReader, progress: progress)
+        let task = Task.detached(priority: .background) {
+            try performScan(source: source, cachedFiles: cachedFiles, metadataReader: metadataReader, progress: progress)
         }
         return try await withTaskCancellationHandler {
             try await task.value
@@ -49,6 +52,7 @@ public struct LibraryScanner: Sendable {
     }
 
     private func performScan(source: SourceRecord,
+                             cachedFiles: [String: LocalScanFileCacheEntry],
                              metadataReader: @Sendable (URL) throws -> AudioFileMetadata,
                              progress: (@Sendable (Int, Int) -> Void)?) throws -> LibraryScanResult {
         guard source.kind == .local else { throw LibraryScannerError.unsupportedSource }
@@ -143,16 +147,35 @@ public struct LibraryScanner: Sendable {
         let filesByPath = Dictionary(uniqueKeysWithValues: audioFiles.map { ($0.path, $0) })
         let foldedPaths = Dictionary(grouping: audioFiles, by: { $0.path.lowercased() })
         var metadataCache: [String: AudioFileMetadata] = [:]
+        var updatedCache: [LocalScanFileCacheEntry] = []
+        var filesRead = 0
+        var lastProgressAt = -Double.infinity
         var artworkCache: [String: String?] = [:]
         var coveredFiles = Set<String>()
         var tracks: [TrackRecord] = []
 
+        func publishProgress(final: Bool = false) {
+            let now = ProcessInfo.processInfo.systemUptime
+            guard final || now - lastProgressAt >= 0.1 else { return }
+            lastProgressAt = now
+            progress?(metadataCache.count, audioFiles.count)
+        }
+
         func readMetadata(for file: URL) -> AudioFileMetadata {
             if let cached = metadataCache[file.path] { return cached }
+            let fingerprint = try? LocalScanFileFingerprint(url: file)
+            if let fingerprint, let cached = cachedFiles[file.path], cached.matches(fingerprint) {
+                metadataCache[file.path] = cached.metadata
+                updatedCache.append(cached)
+                publishProgress()
+                return cached.metadata
+            }
             var value: AudioFileMetadata
-            do { value = try metadataReader(file) }
+            var readSucceeded = false
+            do { filesRead += 1; value = try metadataReader(file); readSucceeded = true }
             catch {
                 warnings.append("\(file.lastPathComponent): metadata could not be read (\(error.localizedDescription)).")
+                isComplete = false
                 value = AudioFileMetadata()
             }
             if let data = value.artworkData, !data.isEmpty {
@@ -164,7 +187,12 @@ public struct LibraryScanner: Sendable {
                 value.artworkData = nil
             }
             metadataCache[file.path] = value
-            progress?(metadataCache.count, audioFiles.count)
+            // Do not cache a failed read or metadata from a file replaced while TagLib was reading it.
+            if readSucceeded, let fingerprint, fingerprint == (try? LocalScanFileFingerprint(url: file)) {
+                updatedCache.append(LocalScanFileCacheEntry(path: file.path, byteCount: fingerprint.byteCount,
+                    modifiedAt: fingerprint.modifiedAt, metadata: value))
+            }
+            publishProgress()
             return value
         }
 
@@ -340,9 +368,11 @@ public struct LibraryScanner: Sendable {
             tracks = Array(indexed.values)
         }
         try Task.checkCancellation()
+        publishProgress(final: true)
         return LibraryScanResult(sourceID: source.id, tracks: tracks.sorted(by: TrackRecord.libraryOrder),
                                  filesScanned: metadataCache.count, warnings: warnings,
-                                 isComplete: isComplete, scannedAt: scanDate)
+                                 isComplete: isComplete, scannedAt: scanDate,
+                                 fileCacheEntries: updatedCache, filesRead: filesRead)
     }
 
     private func cacheArtwork(data: Data, mimeType: String?) throws -> String {
