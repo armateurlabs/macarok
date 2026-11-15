@@ -42,10 +42,11 @@ final class WindowLayoutTests: XCTestCase {
         if state == .unmatchedSearch {
             model.search = "no matching tracks"
             for _ in 0..<100 {
-                if model.displayedTracks.isEmpty { break }
+                if !model.isSearching && model.displayedTracks.isEmpty { break }
                 try await Task.sleep(for: .milliseconds(20))
             }
             XCTAssertTrue(model.displayedTracks.isEmpty)
+            XCTAssertFalse(model.isSearching)
         }
 
         for scheme in [ColorScheme.light, .dark] {

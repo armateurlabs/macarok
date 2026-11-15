@@ -127,7 +127,7 @@ final class ProgressiveCatalogImportTests: XCTestCase {
         try await script.emit([first], completed: 1, total: 2)
         fixture.model.sourceID = fixture.sourceB.id
         try await script.emit([second], completed: 2, total: 2)
-        try await Task.sleep(for: .milliseconds(500))
+        try await expectEventually { fixture.model.snapshotSourceID == fixture.sourceB.id && !fixture.model.isLoadingLibrary }
         XCTAssertEqual(fixture.model.sourceID, fixture.sourceB.id)
         XCTAssertEqual(fixture.model.tracks.map(\.id), [fixture.other.id])
         XCTAssertEqual(try fixture.store.track(id: second.id)?.sourceID, fixture.sourceA.id)
@@ -183,6 +183,7 @@ final class ProgressiveCatalogImportTests: XCTestCase {
                              remoteCatalog: { source, receive in try await script.run(sourceID: source.id, receive: receive) })
         await model.start()
         model.sourceID = sourceA.id
+        try await expectEventually { model.snapshotSourceID == sourceA.id && !model.isLoadingLibrary }
         return Fixture(directory: directory, store: store, model: model, sourceA: sourceA, sourceB: sourceB, old: old, other: other)
     }
 

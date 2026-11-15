@@ -14,6 +14,8 @@ final class AppModelTests: XCTestCase {
         await model.start()
         model.sourceID = fixture.local.id
 
+        await expectEventually { model.snapshotSourceID == fixture.local.id && !model.isLoadingLibrary }
+
         XCTAssertEqual(Set(model.tracks.map(\.id)), Set(fixture.localTracks.map(\.id)))
         XCTAssertEqual(model.albums.count, 2)
         XCTAssertEqual(Set(model.artists.map(\.name)), ["Meridian Atlas", "Paper Satellites"])
@@ -28,6 +30,8 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.selectedTrackID)
         XCTAssertNil(model.selectedAlbumID)
         XCTAssertNil(model.selectedArtist)
+        XCTAssertTrue(model.tracks.isEmpty, "Switching sources must immediately hide the previous catalog.")
+        await expectEventually { model.snapshotSourceID == fixture.remote.id && !model.isLoadingLibrary }
         XCTAssertEqual(Set(model.tracks.map(\.id)), Set(fixture.remoteTracks.map(\.id)))
         XCTAssertEqual(model.visibleAlbums.map(\.title), ["Cloud Album"])
         XCTAssertEqual(model.artists.map(\.name), ["Remote Artist"])
@@ -97,6 +101,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.currentQueueID, secondID)
         XCTAssertEqual(model.currentIndex, 0)
         XCTAssertEqual(model.queue.count, 2)
+        await model.flushQueue()
         XCTAssertEqual(try fixture.store.loadQueue()?.trackIDs, [fixture.localTracks[0].id, fixture.localTracks[0].id])
     }
 
@@ -125,6 +130,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.currentQueueID, currentID)
         XCTAssertEqual(model.selectedQueueID, currentID)
         XCTAssertEqual(model.queue.first?.id, currentID)
+        await model.flushQueue()
         XCTAssertEqual(try fixture.store.loadQueue()?.trackIDs, model.queue.map(\.track.id))
         XCTAssertEqual(try fixture.store.loadQueue()?.currentIndex, 0)
 
@@ -169,6 +175,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.queue.map(\.id), entryIDs, "Repeated start must not replace queue entry identities.")
 
         model.add([fixture.localTracks[1]])
+        await model.flushQueue()
         let saved = try XCTUnwrap(fixture.store.loadQueue())
         XCTAssertEqual(saved.trackIDs, ids + [fixture.localTracks[1].id])
         XCTAssertEqual(saved.currentIndex, 2)
@@ -199,6 +206,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(fixture.model.currentTrack?.id, fixture.localTracks[0].id)
         XCTAssertEqual(fixture.model.currentIndex, 0)
         fixture.model.saveQueue()
+        await fixture.model.flushQueue()
         XCTAssertEqual(try fixture.store.loadQueue()?.position, 23)
     }
 
@@ -209,6 +217,7 @@ final class AppModelTests: XCTestCase {
         await fixture.model.start()
         XCTAssertEqual(fixture.model.currentTrack?.id, fixture.remoteTracks[0].id)
         fixture.model.saveQueue()
+        await fixture.model.flushQueue()
         XCTAssertEqual(try fixture.store.loadQueue()?.position, 0)
     }
 
@@ -303,6 +312,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(Set(model.folderTracks.map(\.id)), Set(fixture.localTracks.prefix(2).map(\.id)))
 
         model.sourceID = fixture.remote.id
+        await expectEventually { model.snapshotSourceID == fixture.remote.id && !model.isLoadingLibrary }
         XCTAssertEqual(model.folderPath(fixture.remoteTracks[0]), "Remote/Cloud")
         XCTAssertEqual(model.tracksInFolder("Remote").count, 2)
         XCTAssertTrue(model.tracksInFolder("Rock").isEmpty)

@@ -63,17 +63,22 @@ struct MetadataDraft: Equatable {
 @MainActor
 extension AppModel {
     func applyMetadataEdits(original: TrackRecord, edited: TrackRecord, releaseID: String?, lockMetadata: Bool) async throws {
-        guard let store, let source = sources.first(where: { $0.id == original.sourceID }) else {
+        guard store != nil, let source = sources.first(where: { $0.id == original.sourceID }) else {
             throw MetadataError.unsupported("The library source is no longer available.")
         }
         let changes = MetadataDraft(edited).changes(from: original)
         var properties = Dictionary(uniqueKeysWithValues: changes.map { ($0.key, $0.after) })
         if let releaseID { properties["MUSICBRAINZ_ALBUMID"] = releaseID }
-        let cueSiblings = original.isCUETrack ? try store.tracks(sourceID: original.sourceID).filter {
-            guard $0.id != original.id, $0.isCUETrack else { return false }
-            if let path = original.cuePath { return $0.cuePath == path }
-            return $0.fileURL == original.fileURL && $0.cuePath == nil
-        } : []
+        let cueSiblings: [TrackRecord]
+        if original.isCUETrack {
+            cueSiblings = try await performLibraryWork { store in
+                try store.tracks(sourceID: original.sourceID, ordered: false).filter {
+                    guard $0.id != original.id, $0.isCUETrack else { return false }
+                    if let path = original.cuePath { return $0.cuePath == path }
+                    return $0.fileURL == original.fileURL && $0.cuePath == nil
+                }
+            }
+        } else { cueSiblings = [] }
         let cueTracks = [original] + cueSiblings
         let inheritedArtists = Dictionary(cueTracks.compactMap { value in
             value.trackNumber.map { ($0, value.artist) }
@@ -126,23 +131,31 @@ extension AppModel {
             }.value
             if usesCUEAlbumFolder && cueAlbumFolder == nil { cueAlbumFolder = audioURL.deletingLastPathComponent() }
         }
-        var values = [edited]
-        if original.isCUETrack && (edited.album != original.album || edited.albumArtist != original.albumArtist
-                                  || edited.year != original.year || edited.genre != original.genre) {
-            for var sibling in cueSiblings {
-                if edited.album != original.album { sibling.album = edited.album }
-                if edited.albumArtist != original.albumArtist { sibling.albumArtist = edited.albumArtist }
-                if edited.year != original.year { sibling.year = edited.year }
-                if edited.genre != original.genre { sibling.genre = edited.genre }
-                values.append(sibling)
+        let albumFolder = cueAlbumFolder
+        let updates = try await performLibraryWork { store in
+            var values = [edited]
+            if original.isCUETrack && (edited.album != original.album || edited.albumArtist != original.albumArtist
+                                      || edited.year != original.year || edited.genre != original.genre) {
+                for var sibling in cueSiblings {
+                    if edited.album != original.album { sibling.album = edited.album }
+                    if edited.albumArtist != original.albumArtist { sibling.albumArtist = edited.albumArtist }
+                    if edited.year != original.year { sibling.year = edited.year }
+                    if edited.genre != original.genre { sibling.genre = edited.genre }
+                    values.append(sibling)
+                }
             }
+            var updated: [String: TrackRecord] = [:]
+            for var value in values {
+                if source.kind == .local { value.albumID = Self.metadataAlbumID(for: value, source: source, cueFolder: albumFolder) }
+                value.metadataLocked = lockMetadata || source.kind != .local
+                try store.updateTrackMetadata(value)
+                try store.setMetadataLocked(trackID: value.id, locked: value.metadataLocked)
+                updated[value.id] = value
+            }
+            return updated
         }
-        for var value in values {
-            if source.kind == .local { value.albumID = metadataAlbumID(for: value, source: source, cueFolder: cueAlbumFolder) }
-            value.metadataLocked = lockMetadata || source.kind != .local
-            try store.updateTrackMetadata(value)
-            try store.setMetadataLocked(trackID: value.id, locked: value.metadataLocked)
-            for index in queue.indices where queue[index].track.id == value.id { queue[index].track = value }
+        for index in queue.indices {
+            if let value = updates[queue[index].track.id] { queue[index].track = value }
         }
         if let releaseID { UserDefaults.standard.set(releaseID, forKey: "Macarok.release.\(original.albumID)") }
         reloadLibrary()
@@ -150,18 +163,24 @@ extension AppModel {
     }
 
     func saveAlbumArtwork(data: Data, for track: TrackRecord, embedInFiles: Bool, saveSidecar: Bool) async throws {
-        guard let image = NSImage(data: data), let store,
-              let source = sources.first(where: { $0.id == track.sourceID }) else { throw AppFailure.invalidArtwork }
-        let related = try store.tracks(sourceID: track.sourceID).filter { $0.albumID == track.albumID }
+        guard store != nil, let source = sources.first(where: { $0.id == track.sourceID }) else { throw AppFailure.invalidArtwork }
+        let jpeg = try await Task.detached(priority: .userInitiated) { () throws -> Data? in
+            guard let image = NSImage(data: data) else { throw AppFailure.invalidArtwork }
+            guard saveSidecar else { return nil }
+            guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+                  let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.92]) else {
+                throw AppFailure.invalidArtwork
+            }
+            return jpeg
+        }.value
+        let related = try await performLibraryWork { store in
+            try store.tracks(sourceID: track.sourceID, ordered: false).filter { $0.albumID == track.albumID }
+        }
         let targets = related.isEmpty ? [track] : related
         if source.kind == .local { _ = accessFolder(source) }
         if source.kind == .local && (embedInFiles || saveSidecar) {
-            let audioURLs = Array(Set(targets.compactMap(\.url))).filter(\.isFileURL)
-            let jpeg: Data?
-            if saveSidecar, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) {
-                jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.92])
-            } else { jpeg = nil }
             try await Task.detached(priority: .userInitiated) {
+                let audioURLs = Array(Set(targets.compactMap(\.url))).filter(\.isFileURL)
                 if embedInFiles {
                     for url in audioURLs { try TagLibMetadataService.write(properties: [:], artworkData: data, to: url) }
                 }
@@ -173,14 +192,21 @@ extension AppModel {
                 }
             }.value
         }
-        let cached = try cacheArtwork(data, key: StableID.make(track.sourceID, track.albumID, "selected-artwork"))
-        for var target in targets {
-            target.artworkPath = cached.path
-            // Source refreshes cannot recreate a library-only artwork choice.
-            target.metadataLocked = target.metadataLocked || !embedInFiles
-            try store.updateTrackMetadata(target)
-            try store.setMetadataLocked(trackID: target.id, locked: target.metadataLocked)
-            for index in queue.indices where queue[index].track.id == target.id { queue[index].track.artworkPath = cached.path }
+        let cached = try await cacheArtwork(data, key: StableID.make(track.sourceID, track.albumID, "selected-artwork"))
+        let updatedIDs = try await performLibraryWork { store in
+            var ids: Set<String> = []
+            for var target in targets {
+                target.artworkPath = cached.path
+                // Source refreshes cannot recreate a library-only artwork choice.
+                target.metadataLocked = target.metadataLocked || !embedInFiles
+                try store.updateTrackMetadata(target)
+                try store.setMetadataLocked(trackID: target.id, locked: target.metadataLocked)
+                ids.insert(target.id)
+            }
+            return ids
+        }
+        for index in queue.indices where updatedIDs.contains(queue[index].track.id) {
+            queue[index].track.artworkPath = cached.path
         }
         reloadLibrary(); artworkRevision += 1
         status = source.kind == .local && embedInFiles ? "Album artwork embedded in \(Set(targets.compactMap(\.fileURL)).count) audio files." : "Album artwork saved to the library."
@@ -209,7 +235,7 @@ extension AppModel {
         }.value
     }
 
-    private func metadataAlbumID(for track: TrackRecord, source: SourceRecord, cueFolder: URL?) -> String {
+    nonisolated private static func metadataAlbumID(for track: TrackRecord, source: SourceRecord, cueFolder: URL?) -> String {
         guard let file = track.url else { return track.albumID }
         var folder = (cueFolder ?? file.deletingLastPathComponent()).standardizedFileURL
         if cueFolder == nil && folder.lastPathComponent.range(of: #"^(?:cd|disc|disk)[\s._-]*\d+$"#, options: [.regularExpression, .caseInsensitive]) != nil {

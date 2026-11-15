@@ -14,6 +14,8 @@ The suite also exercises actual VLCKit playback of synthetic MP3, FLAC, Vorbis, 
 
 Progressive catalog tests gate API responses and controller batches to prove that tracks are persisted, searchable, and queueable before completion. They cover cancellation, later request failures, stale refresh generations, source changes, and success-only reconciliation. Folder tests include a synthetic 30,000-track, 7,000-folder catalog and cancellation; the folder tree is built off the main thread.
 
+`LibrarySnapshotTests` covers the prepared navigation groups, deterministic sorting, cancellation, and a synthetic 50,000-track/5,000-album/100-year catalog. `LibraryResponsivenessTests` deliberately holds background loads while exercising all navigation buttons, a MainActor heartbeat, and queue persistence; it also checks coalescing and stale source/error rejection. The comparator tests cover missing disc/track numbers and strict ordering contracts.
+
 To exercise the optional real fingerprint helper as well:
 
 ```sh

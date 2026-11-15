@@ -36,7 +36,11 @@ SQLite retains the indexed titles, artists, albums, tags, durations, remote IDs,
 
 Cancellation or a later request failure keeps both the previous cache and newly committed albums usable. Missing-track reconciliation runs only after a successful complete retrieval and updates only availability differences. An interrupted import remains marked incomplete across restarts; Refresh traverses the catalog again. Remote cover caches survive refresh while their cover IDs remain unchanged.
 
-Folder browsing builds a cancellable snapshot off the main thread. Each track path is resolved once and its folder prefixes are assembled in one pass, rather than rescanning every track for each folder. A source/revision guard prevents an older snapshot from appearing after a source change or a newer catalog update.
+All library navigation reads an immutable `LibrarySnapshot` prepared off the main thread. Albums, artists, years, tags, statistics, folder trees, and folder membership are grouped once per catalog revision. View bodies consume ready arrays and lookups; collapsed groups create their children only when opened. Each track path is resolved once and its folder prefixes are assembled in one pass.
+
+SQLite reads and search-result preparation run in cancellable background tasks. Repeated reloads for one source coalesce behind one worker; source changes cancel the previous request and clear its displayed data immediately. Source/request guards reject obsolete results and errors. `LibraryBackgroundWorker` serializes catalog, metadata, queue, rating, and history writes away from the UI. Refresh generations reject obsolete catalog writes, while queue revisions prevent an older save from replacing a newer one. Normal application termination waits for the queue save.
+
+Remote artwork completion uses a targeted album/source/cover-ID update instead of rereading the entire catalog. Existing artwork choices are preserved, queued artwork is updated, and visible library reloads are coalesced.
 
 ## Playback and controls
 

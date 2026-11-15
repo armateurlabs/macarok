@@ -6,6 +6,8 @@ Baseline verified on 14 November 2026 with Xcode 27.1, Swift 6.4, and macOS 27.2
 
 - The complete suite passed: **87 tests, zero failures** — Core 50, Metadata 12, Audio 7, App 18.
 - The 15 November progressive-import and UI-freeze follow-up passed the expanded complete suite: **110 tests, zero failures**. A subsequent controller run verifies incomplete-import persistence across restarts.
+- The subsequent background-library refactor passed **125 tests, zero failures**. Gated background jobs verify that navigation, a MainActor heartbeat, and queue saving remain available during catalog preparation. Preparing the complete synthetic 50,000-track/5,000-album/100-year snapshot took about 0.66 seconds in the Debug test run, outside UI code.
+- After reopening the rebuilt Release app, native Home, Artists, Albums, Years, Folders, and Tags navigation was exercised with an existing catalog exceeding 50,000 tracks. Expanding a year was checked as well; the previous blocking navigation delay was not observed.
 - Real VLCKit 4 playback covered synthetic MP3, FLAC, Ogg Vorbis, and Opus, pause/resume, seeking, CUE boundaries, and completion.
 - A throttled loopback HTTP stream began playing before download completed, then exercised Range seeking and segment playback.
 - Live loopback HTTPS and protocol fixtures covered source/host/port trust, changed certificates, hostname/validity rejection, and the same transport for data and progressive audio.
@@ -14,6 +16,7 @@ Baseline verified on 14 November 2026 with Xcode 27.1, Swift 6.4, and macOS 27.2
 - The bundled upstream fpcalc helper generated a real fingerprint. AcoustID request/response tests used fixtures.
 - Fourteen offscreen native component renders cover Home, narrow loading and empty Home states, CUE albums, track tags, Settings, and metadata editing in Light and Dark appearances.
 - A sample of the unresponsive app identified repeated full-catalog folder traversal on the main thread. The replacement indexes folder prefixes once in a background task; its synthetic 30,000-track/7,000-folder test measured about 0.17 seconds for index construction.
+- A second live sample while opening Years identified full album reconstruction inside each year's disclosure group. Navigation now consumes cached snapshot groups, with collapsed children deferred until expansion; artwork completion no longer loads every track on the main thread.
 - The Release app bundle was built, locally signed, and passed deep strict signature verification. Its native executable targets arm64; VLC, resource bundles, the helper, icon, and third-party notices are embedded.
 
 Build/test logs and full-resolution renders are kept under the ignored `.build` directory. The checked-in native previews in `design/native` are component renders, not desktop screenshots.

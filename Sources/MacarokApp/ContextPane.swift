@@ -75,11 +75,11 @@ struct HomeView: View {
                     Image(systemName: "music.note").font(.system(size: 42)).foregroundStyle(.tertiary)
                     VStack(spacing: 8) {
                         Text("Ready to discover your music").font(.title3.weight(.semibold))
-                        Text(model.isRefreshing ? "Your source is being indexed." : "Refresh this source to index its music.")
+                        Text(model.isRefreshing || model.isLoadingLibrary ? "Your library is loading." : "Refresh this source to load its music.")
                             .foregroundStyle(.secondary)
                     }.multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-                    if model.isRefreshing {
-                        ProgressView(model.refreshProgress).controlSize(.small)
+                    if model.isRefreshing || model.isLoadingLibrary {
+                        ProgressView(model.isRefreshing ? model.refreshProgress : "Loading library…").controlSize(.small)
                             .font(.caption).foregroundStyle(.secondary)
                     } else { Button("Refresh Source", action: model.refresh) }
                 }.frame(maxWidth: .infinity)
@@ -174,10 +174,10 @@ struct TrackContextView: View {
             Divider()
             HStack { Text("About this recording").font(.system(size: 13, weight: .semibold)); Spacer(); Button { model.editingTrack = track } label: { Image(systemName: "square.and.pencil") }.buttonStyle(.borderless).help("Edit metadata") }
             Text("\(track.title) by \(track.artist), from \(track.album).\(track.isCUETrack ? " This track is a region of a shared audio file." : "")").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
-            let related = model.albums.filter { $0.artist == track.albumArtist && $0.id != track.albumID }
+            let related = Array(model.albumsForArtist(track.albumArtist).lazy.filter { $0.id != track.albumID }.prefix(4))
             if !related.isEmpty {
                 Text("More in your collection").font(.system(size: 13, weight: .semibold))
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 150))], alignment: .leading, spacing: 12) { ForEach(related.prefix(4)) { AlbumTile(model: model, album: $0) } }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 150))], alignment: .leading, spacing: 12) { ForEach(related) { AlbumTile(model: model, album: $0) } }
             }
         }
     }
@@ -223,11 +223,12 @@ struct ArtistContextView: View {
     @Bindable var model: AppModel
     var body: some View {
         let name = model.selectedArtist ?? model.selectedTrack?.albumArtist ?? "Choose an Artist"
-        let albums = model.albums.filter { $0.artist == name }
+        let albums = model.albumsForArtist(name)
+        let artist = model.artistSummary(named: name)
         VStack(alignment: .leading, spacing: 18) {
             Text("ARTIST").font(.system(size: 10)).tracking(1).foregroundStyle(.secondary)
             Text(name).font(.system(size: 29, weight: .semibold))
-            Text("\(albums.count) albums · \(albums.reduce(0) { $0 + $1.tracks.count }) tracks in this source").font(.system(size: 12)).foregroundStyle(.secondary)
+            Text("\(albums.count) albums · \(artist?.trackCount ?? 0) tracks in this source").font(.system(size: 12)).foregroundStyle(.secondary)
             HStack { Button { model.shuffle(albums.flatMap(\.tracks)) } label: { Label("Shuffle Artist", systemImage: "shuffle") }.buttonStyle(.borderedProminent); Button("Add to Playlist") { model.add(albums.flatMap(\.tracks)) } }.controlSize(.small)
             Divider()
             Text("Albums").font(.system(size: 14, weight: .semibold))
@@ -239,13 +240,14 @@ struct ArtistContextView: View {
 struct FolderContextView: View {
     @Bindable var model: AppModel
     var body: some View {
+        let tracks = model.folderTracks
         VStack(alignment: .leading, spacing: 16) {
             Text("FOLDER").font(.system(size: 10)).tracking(1).foregroundStyle(.secondary)
             Text((model.selectedFolder ?? "").isEmpty ? model.selectedSource?.name ?? "Music" : URL(fileURLWithPath: model.selectedFolder ?? "").lastPathComponent).font(.system(size: 25, weight: .semibold))
-            Text("\(model.folderTracks.count) tracks, including subfolders").font(.system(size: 12)).foregroundStyle(.secondary)
-            HStack { Button { model.add(model.folderTracks) } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }.buttonStyle(.borderedProminent); Button { model.shuffle(model.folderTracks) } label: { Label("Shuffle Folder", systemImage: "shuffle") } }.controlSize(.small)
+            Text("\(tracks.count) tracks, including subfolders").font(.system(size: 12)).foregroundStyle(.secondary)
+            HStack { Button { model.add(tracks) } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }.buttonStyle(.borderedProminent); Button { model.shuffle(tracks) } label: { Label("Shuffle Folder", systemImage: "shuffle") } }.controlSize(.small)
             Divider()
-            LazyVStack(spacing: 0) { ForEach(model.folderTracks) { TrackLine(track: $0, model: model, showsArtist: true).padding(.vertical, 4); Divider().opacity(0.4) } }
+            LazyVStack(spacing: 0) { ForEach(tracks) { TrackLine(track: $0, model: model, showsArtist: true).padding(.vertical, 4); Divider().opacity(0.4) } }
         }
     }
 }

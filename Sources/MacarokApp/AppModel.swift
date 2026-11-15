@@ -28,6 +28,15 @@ struct CertificatePrompt: Identifiable {
 
 typealias LocalScanOperation = @Sendable (SourceRecord, @escaping @Sendable (Int, Int) -> Void) async throws -> LibraryScanResult
 typealias RemoteCatalogOperation = @Sendable (SourceRecord, @escaping @Sendable ([TrackRecord], Int, Int?) async throws -> Void) async throws -> Void
+typealias LibrarySnapshotLoader = @Sendable (String, LibraryStore, [SourceRecord]) async throws -> LibrarySnapshot
+
+@MainActor
+private final class LibraryReloadState {
+    let sourceID: String
+    var requestedRevision = 1
+    var task: Task<Void, Never>?
+    init(sourceID: String) { self.sourceID = sourceID }
+}
 
 @MainActor
 private final class RemoteCatalogProgress {
@@ -48,10 +57,15 @@ final class AppModel {
     var libraryView: LibraryView = .home { didSet { if libraryView == .home { contextPage = .home; search = "" } } }
     var contextPage: ContextPage = .home
     var contextTab = "Overview"
-    var search = "" { didSet { searchLibrary() } }
-    var tracks: [TrackRecord] = [] { didSet { libraryRevision &+= 1 } }
+    var search = "" { didSet { searchLibrary(reset: true) } }
+    private var catalog = LibrarySnapshot.empty
+    private var searchCatalog = LibrarySnapshot.empty
+    var tracks: [TrackRecord] { catalog.tracks }
     private(set) var libraryRevision = 0
-    var searchResults: [TrackRecord] = []
+    var searchResults: [TrackRecord] { searchCatalog.tracks }
+    private(set) var isLoadingLibrary = false
+    private(set) var isSearching = false
+    var snapshotSourceID: String? { catalog.sourceID }
     var selectedTrackID: String?
     var selectedAlbumID: String?
     var selectedArtist: String?
@@ -81,6 +95,12 @@ final class AppModel {
     @ObservationIgnored private var pendingRescanSourceID: String?
     @ObservationIgnored private let localScan: LocalScanOperation
     @ObservationIgnored private let remoteCatalog: RemoteCatalogOperation?
+    @ObservationIgnored private let snapshotLoader: LibrarySnapshotLoader
+    @ObservationIgnored private let backgroundWorker = LibraryBackgroundWorker()
+    @ObservationIgnored private var libraryReloadState: LibraryReloadState?
+    @ObservationIgnored private var searchRequestID = UUID()
+    @ObservationIgnored private var searchNeedsReload = false
+    @ObservationIgnored private var queueSaveRevision = 0
     @ObservationIgnored private var remoteCatalogProgress: RemoteCatalogProgress?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var playbackTask: Task<Void, Never>?
@@ -103,42 +123,65 @@ final class AppModel {
     init(store: LibraryStore? = nil, preferences: AppPreferences? = nil, registerSystemControls: Bool = true,
          localScan: @escaping LocalScanOperation = { source, progress in
              try await LibraryScanner().scan(source: source, metadataReader: { try TagLibMetadataService.read(url: $0) }, progress: progress)
-         }, remoteCatalog: RemoteCatalogOperation? = nil) {
+         }, remoteCatalog: RemoteCatalogOperation? = nil, snapshotLoader: LibrarySnapshotLoader? = nil) {
         self.store = store
         self.registerSystemControls = registerSystemControls
         self.localScan = localScan
         self.remoteCatalog = remoteCatalog
+        self.snapshotLoader = snapshotLoader ?? { sourceID, store, sources in
+            let task = Task.detached(priority: .userInitiated) {
+                try LibrarySnapshot.build(sourceID: sourceID,
+                                          tracks: store.tracks(sourceID: sourceID, ordered: false), sources: sources)
+            }
+            return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        }
         if let preferences { settings = preferences }
     }
 
     var selectedSource: SourceRecord? { sources.first { $0.id == sourceID } }
     var displayedTracks: [TrackRecord] { search.isEmpty ? tracks : searchResults }
-    var albums: [AlbumRecord] { Dictionary(grouping: tracks, by: \.albumID).values.map(AlbumRecord.init).sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
-    var visibleAlbums: [AlbumRecord] { Dictionary(grouping: displayedTracks, by: \.albumID).values.map(AlbumRecord.init).sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
-    var artists: [ArtistSummary] { Dictionary(grouping: displayedTracks, by: \.albumArtist).map { ArtistSummary(name: $0.key, sourceID: sourceID ?? "", tracks: $0.value) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } }
+    var albums: [AlbumRecord] { catalog.albums }
+    var visibleAlbums: [AlbumRecord] { search.isEmpty ? catalog.albums : searchCatalog.albums }
+    var artists: [ArtistSummary] { search.isEmpty ? catalog.artists : searchCatalog.artists }
+    var yearGroups: [LibraryYearGroup] { catalog.yearGroups }
+    var genreGroups: [LibraryTrackGroup] { catalog.genreGroups }
+    var formatGroups: [LibraryTrackGroup] { catalog.formatGroups }
+    var folderNodes: [FolderNode] { catalog.folderNodes }
+    func albumsForArtist(_ name: String) -> [AlbumRecord] { catalog.artistsByName[name]?.albums ?? [] }
+    func artistSummary(named name: String) -> ArtistSummary? { catalog.artistsByName[name] }
+    func cachedTracksInFolder(_ path: String) -> [TrackRecord] {
+        (search.isEmpty ? catalog : searchCatalog).tracksByFolder[path] ?? []
+    }
     var currentIndex: Int? { queue.firstIndex { $0.id == currentQueueID } }
     var currentTrack: TrackRecord? { queue.first { $0.id == currentQueueID }?.track }
-    var selectedTrack: TrackRecord? { selectedTrackID.flatMap { id in tracks.first { $0.id == id } ?? queue.first { $0.track.id == id }?.track } ?? currentTrack }
-    var selectedAlbum: AlbumRecord? { albums.first { $0.id == selectedAlbumID } ?? selectedTrack.flatMap { track in albums.first { $0.id == track.albumID } } }
+    var selectedTrack: TrackRecord? { selectedTrackID.flatMap { id in catalog.tracksByID[id] ?? queue.first { $0.track.id == id }?.track } ?? currentTrack }
+    var selectedAlbum: AlbumRecord? { selectedAlbumID.flatMap { catalog.albumsByID[$0] } ?? selectedTrack.flatMap { catalog.albumsByID[$0.albumID] } }
     var queueDuration: Double { queue.reduce(0) { $0 + $1.track.duration } }
-    var recentlyAdded: [AlbumRecord] { Array(albums.sorted { $0.addedAt > $1.addedAt }.prefix(8)) }
-    var recentlyPlayed: [TrackRecord] { Array(tracks.filter { $0.lastPlayedAt != nil }.sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }.prefix(8)) }
-    var mostPlayedTracks: [TrackRecord] { Array(tracks.filter { $0.playCount > 0 }.sorted { $0.playCount > $1.playCount }.prefix(8)) }
-    var mostPlayedAlbums: [AlbumRecord] { Array(albums.filter { $0.playCount > 0 }.sorted { $0.playCount > $1.playCount }.prefix(8)) }
-    var mostPlayedArtists: [ArtistSummary] { Array(Dictionary(grouping: tracks, by: \.albumArtist).map { ArtistSummary(name: $0.key, sourceID: sourceID ?? "", tracks: $0.value) }.filter { $0.playCount > 0 }.sorted { $0.playCount > $1.playCount }.prefix(8)) }
+    var recentlyAdded: [AlbumRecord] { catalog.recentlyAdded }
+    var recentlyPlayed: [TrackRecord] { catalog.recentlyPlayed }
+    var mostPlayedTracks: [TrackRecord] { catalog.mostPlayedTracks }
+    var mostPlayedAlbums: [AlbumRecord] { catalog.mostPlayedAlbums }
+    var mostPlayedArtists: [ArtistSummary] { catalog.mostPlayedArtists }
 
     func start() async {
         guard !started else { return }; started = true
         do {
-            if store == nil { store = try LibraryStore(url: LibraryStore.defaultURL) }
-            sources = try store!.sources()
+            if store == nil { store = try await Task.detached { try LibraryStore(url: LibraryStore.defaultURL) }.value }
+            let initial = try await performLibraryWork { store in
+                let sources = try store.sources()
+                let snapshot = try store.loadQueue()
+                let restored = try (snapshot?.trackIDs ?? []).enumerated().compactMap { index, id in
+                    try store.track(id: id).map { (index, $0) }
+                }
+                let incomplete = try Set(sources.filter { try store.value(forKey: Self.catalogImportKey($0.id)) != nil }.map(\.id))
+                return (sources: sources, playlists: try store.playlists(), queue: snapshot, restored: restored, incomplete: incomplete)
+            }
+            sources = initial.sources
             let previous = UserDefaults.standard.string(forKey: "Macarok.selectedSource")
             sourceID = sources.first(where: { $0.id == previous })?.id ?? sources.first?.id
-            playlists = try store!.playlists()
-            if let snapshot = try store!.loadQueue() {
-                let restored = try snapshot.trackIDs.enumerated().compactMap { index, id in
-                    try store!.track(id: id).map { (originalIndex: index, item: QueueItem(track: $0)) }
-                }
+            playlists = initial.playlists
+            if let snapshot = initial.queue {
+                let restored = initial.restored.map { (originalIndex: $0.0, item: QueueItem(track: $0.1)) }
                 queue = restored.map(\.item)
                 if let current = restored.first(where: { $0.originalIndex == snapshot.currentIndex }) {
                     currentQueueID = current.item.id; restorePosition = snapshot.position
@@ -152,12 +195,9 @@ final class AppModel {
             if registerSystemControls {
                 configureControls()
                 tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.playbackTick() }
-                NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification).sink { [weak self] _ in
-                    MainActor.assumeIsolated { self?.saveQueue() }
-                }.store(in: &eventSubscriptions)
             }
-            if let source = selectedSource, source.kind == .openSubsonic,
-               try store!.value(forKey: Self.catalogImportKey(source.id)) != nil {
+            await waitForLibraryLoad()
+            if let source = selectedSource, source.kind == .openSubsonic, initial.incomplete.contains(source.id) {
                 status = "Catalog import is incomplete. Refresh this source to load the remaining albums."
             } else {
                 status = sources.isEmpty ? "Add a music folder or connect a source to get started." : "Library is up to date."
@@ -166,25 +206,93 @@ final class AppModel {
     }
 
     func reloadLibrary() {
-        guard let store, let sourceID else { tracks = []; searchResults = []; return }
-        do {
-            tracks = try store.tracks(sourceID: sourceID)
-            searchLibrary()
-            if registerSystemControls { UserDefaults.standard.set(sourceID, forKey: "Macarok.selectedSource") }
-        } catch { fail("Could not read the library", error.localizedDescription) }
+        guard let store, let sourceID else {
+            libraryReloadState?.task?.cancel(); libraryReloadState = nil
+            catalog = .empty; searchCatalog = .empty; libraryRevision &+= 1; isLoadingLibrary = false
+            return
+        }
+        if catalog.sourceID != sourceID {
+            catalog = .empty; searchCatalog = .empty; libraryRevision &+= 1
+        }
+        if let state = libraryReloadState, state.sourceID == sourceID, state.task != nil {
+            state.requestedRevision &+= 1
+            return
+        }
+        libraryReloadState?.task?.cancel()
+        let state = LibraryReloadState(sourceID: sourceID)
+        libraryReloadState = state
+        isLoadingLibrary = true
+        state.task = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                let requested = state.requestedRevision
+                do {
+                    let snapshot = try await self.snapshotLoader(sourceID, store, self.sources)
+                    try Task.checkCancellation()
+                    guard self.libraryReloadState === state, self.sourceID == sourceID else { break }
+                    self.catalog = snapshot
+                    self.updateQueuedMetadata(from: snapshot)
+                    self.libraryRevision &+= 1
+                    self.searchLibrary(reset: false)
+                } catch is CancellationError { break }
+                catch {
+                    if self.libraryReloadState === state, self.sourceID == sourceID { self.fail("Could not read the library", error.localizedDescription) }
+                    break
+                }
+                if state.requestedRevision == requested { break }
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { break }
+            }
+            state.task = nil
+            if self.libraryReloadState === state { self.isLoadingLibrary = false }
+        }
+        if registerSystemControls { UserDefaults.standard.set(sourceID, forKey: "Macarok.selectedSource") }
     }
 
-    private func searchLibrary() {
-        searchTask?.cancel()
-        guard let store, let sourceID, !search.isEmpty else { searchResults = tracks; return }
+    func waitForLibraryLoad() async { await libraryReloadState?.task?.value }
+
+    func performLibraryWork<Value: Sendable>(_ operation: @escaping @Sendable (LibraryStore) throws -> Value) async throws -> Value {
+        guard let store else { throw AppFailure.missingSource }
+        return try await backgroundWorker.perform(store: store, operation)
+    }
+
+    private func updateQueuedMetadata(from snapshot: LibrarySnapshot) {
+        for index in queue.indices {
+            if let updated = snapshot.tracksByID[queue[index].track.id], queue[index].track != updated {
+                queue[index].track = updated
+            }
+        }
+    }
+
+    private func searchLibrary(reset: Bool) {
+        if !reset, searchTask != nil, !search.isEmpty { searchNeedsReload = true; return }
+        searchTask?.cancel(); searchTask = nil; searchNeedsReload = false
+        searchRequestID = UUID()
+        guard let store, let sourceID, !search.isEmpty else { searchCatalog = catalog; isSearching = false; return }
+        if reset { searchCatalog = .empty }
+        isSearching = true
         let query = search
+        let requestID = searchRequestID
+        let sources = sources
         searchTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .milliseconds(160))
-                let result = try await Task.detached(priority: .userInitiated) { try store.tracks(sourceID: sourceID, query: query) }.value
-                guard !Task.isCancelled, self?.sourceID == sourceID, self?.search == query else { return }
-                self?.searchResults = result
-            } catch is CancellationError {} catch { self?.fail("Search failed", error.localizedDescription) }
+            guard let self else { return }
+            repeat {
+                self.searchNeedsReload = false
+                do {
+                    try await Task.sleep(for: .milliseconds(160))
+                    let task = Task.detached(priority: .userInitiated) {
+                        try LibrarySnapshot.build(sourceID: sourceID,
+                                                  tracks: store.tracks(sourceID: sourceID, query: query, ordered: false), sources: sources)
+                    }
+                    let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+                    guard !Task.isCancelled, self.sourceID == sourceID, self.search == query, self.searchRequestID == requestID else { return }
+                    self.searchCatalog = result; self.isSearching = false
+                } catch is CancellationError { return }
+                catch {
+                    if self.searchRequestID == requestID { self.fail("Search failed", error.localizedDescription) }
+                    break
+                }
+            } while self.searchNeedsReload
+            if self.searchRequestID == requestID { self.searchTask = nil; self.isSearching = false }
         }
     }
 
@@ -236,8 +344,10 @@ final class AppModel {
                     let url: URL
                     if source.kind == .openSubsonic {
                         guard let remoteID = item.track.remoteID else { throw AppFailure.missingFile }
-                        url = try self.subsonicClient(source).streamURL(songID: remoteID)
+                        url = try await self.subsonicClient(source).streamURL(songID: remoteID)
                     } else { guard let enclosure = item.track.url else { throw AppFailure.missingFile }; url = enclosure }
+                    try Task.checkCancellation()
+                    guard self.currentQueueID == id, self.queue.contains(where: { $0.id == id }) else { return }
                     let targetBytes = Int((self.settings.buffer ?? 20) * 192_000)
                     let stream = BufferedHTTPInputStream(url: url, transport: transport, bufferBytes: targetBytes, bufferSeconds: self.settings.buffer, durationHint: item.track.duration)
                     self.activeStream = stream
@@ -297,7 +407,19 @@ final class AppModel {
     func cycleRepeat() { settings.repeatMode = settings.repeatMode.next }
 
     func saveQueue() {
-        try? store?.saveQueue(trackIDs: queue.map(\.track.id), currentIndex: currentIndex ?? 0, position: player.position > 0 ? player.position : restorePosition)
+        guard let store else { return }
+        queueSaveRevision &+= 1
+        let revision = queueSaveRevision
+        let ids = queue.map(\.track.id), index = currentIndex ?? 0
+        let position = player.position > 0 ? player.position : restorePosition
+        Task { try? await backgroundWorker.saveQueue(store: store, trackIDs: ids, currentIndex: index, position: position, revision: revision) }
+    }
+
+    func flushQueue() async {
+        guard let store else { return }
+        queueSaveRevision &+= 1
+        try? await backgroundWorker.saveQueue(store: store, trackIDs: queue.map(\.track.id), currentIndex: currentIndex ?? 0,
+                                              position: player.position > 0 ? player.position : restorePosition, revision: queueSaveRevision)
     }
 
     func pickFolder() {
@@ -308,30 +430,35 @@ final class AppModel {
 
     func addFolder(_ url: URL) {
         if let existing = sources.first(where: { $0.kind == .local && $0.url?.standardizedFileURL == url.standardizedFileURL }) { sourceID = existing.id; refresh(); return }
-        do {
-            let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-            let source = SourceRecord(kind: .local, name: url.lastPathComponent, location: url.absoluteString, bookmarkData: bookmark)
-            try store?.saveSource(source); sources = try store?.sources() ?? []; sourceID = source.id
-            refresh()
-        } catch { fail("Could not add the folder", error.localizedDescription) }
+        Task {
+            do {
+                let result = try await performLibraryWork { store in
+                    let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+                    let source = SourceRecord(kind: .local, name: url.lastPathComponent, location: url.absoluteString, bookmarkData: bookmark)
+                    try store.saveSource(source)
+                    return (source, try store.sources())
+                }
+                sources = result.1; sourceID = result.0.id; refresh()
+            } catch { fail("Could not add the folder", error.localizedDescription) }
+        }
     }
 
     func addServer(name: String, address: String, credentials: SourceCredentials) async throws {
         guard let url = URL(string: address), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { throw SourceNetworkError.invalidURL }
         let source = SourceRecord(kind: .openSubsonic, name: name.isEmpty ? (url.host ?? "Music Server") : name, location: url.absoluteString)
-        try KeychainCredentialStore.shared.save(credentials, sourceID: source.id)
+        try await Task.detached { try KeychainCredentialStore.shared.save(credentials, sourceID: source.id) }.value
         do {
             let client = OpenSubsonicClient(baseURL: url, credentials: credentials, transport: transport(for: source))
             _ = try await client.ping()
-            try store?.saveSource(source)
+            try await performLibraryWork { try $0.saveSource(source) }
         } catch {
-            try? KeychainCredentialStore.shared.delete(sourceID: source.id)
+            try? await Task.detached { try KeychainCredentialStore.shared.delete(sourceID: source.id) }.value
             CertificateTrustStore.shared.revoke(sourceID: source.id)
             transportCache.removeValue(forKey: source.id)?.invalidate()
             throw error
         }
-        sources = try store?.sources() ?? []; sourceID = source.id
+        sources = try await performLibraryWork { try $0.sources() }; sourceID = source.id
         refresh()
     }
 
@@ -347,27 +474,32 @@ final class AppModel {
             throw error
         }
         source.name = feed.title
-        try store?.saveSource(source)
+        let savedSource = source
+        try await performLibraryWork { try $0.saveSource(savedSource) }
         let artwork = try? await cachePodcastArtwork(feed: feed, source: source)
-        try store?.upsertTracks(feed.episodes.map { $0.asTrackRecord(sourceID: source.id, feed: feed, artworkPath: artwork?.path) })
-        sources = try store?.sources() ?? []; sourceID = source.id
+        let episodes = feed.episodes.map { $0.asTrackRecord(sourceID: savedSource.id, feed: feed, artworkPath: artwork?.path) }
+        try await performLibraryWork { try $0.upsertTracks(episodes) }
+        sources = try await performLibraryWork { try $0.sources() }; sourceID = source.id
         reloadLibrary(); status = "Subscribed to “\(source.name)”."
     }
 
     func removeSource(_ source: SourceRecord) {
-        do {
+        Task {
+          do {
             if refreshSourceID == source.id { refreshTask?.cancel() }
             if currentTrack?.sourceID == source.id { playbackTask?.cancel(); player.stop(); activeStream?.close(); currentQueueID = nil; restorePosition = 0; updateNowPlaying() }
             queue.removeAll { $0.track.sourceID == source.id }
-            try store?.deleteSource(id: source.id); try KeychainCredentialStore.shared.delete(sourceID: source.id)
-            try store?.setValue(nil, forKey: Self.catalogImportKey(source.id))
+            guard let store else { throw AppFailure.missingSource }
+            try await backgroundWorker.deleteSource(store: store, sourceID: source.id, incompleteKey: Self.catalogImportKey(source.id))
+            try await Task.detached { try KeychainCredentialStore.shared.delete(sourceID: source.id) }.value
             CertificateTrustStore.shared.revoke(sourceID: source.id)
             accessedFolders.removeValue(forKey: source.id)?.stopAccessingSecurityScopedResource()
             transportCache.removeValue(forKey: source.id)?.invalidate()
-            sources = try store?.sources() ?? []
+            sources = try await performLibraryWork { try $0.sources() }
             if sourceID == source.id { sourceID = sources.first?.id }
             reloadLibrary(); saveQueue()
-        } catch { fail("Could not remove the source", error.localizedDescription) }
+          } catch { fail("Could not remove the source", error.localizedDescription) }
+        }
     }
 
     func refresh() {
@@ -393,6 +525,8 @@ final class AppModel {
                 }
             }
             do {
+                try await self.backgroundWorker.beginRefresh(store: store, sourceID: source.id, generation: generation,
+                                                              incompleteKey: source.kind == .openSubsonic ? Self.catalogImportKey(source.id) : nil)
                 switch source.kind {
                 case .local:
                     let resolved = self.accessFolder(source)
@@ -402,8 +536,8 @@ final class AppModel {
                         Task { @MainActor in if self?.refreshGeneration == generation { self?.refreshProgress = "Reading file \(count) of \(total)…" } }
                     })
                     try Task.checkCancellation()
-                    if result.isComplete { try store.replaceSourceTracks(sourceID: source.id, with: result.tracks) }
-                    else { try store.upsertTracks(result.tracks) }
+                    if result.isComplete { try await self.backgroundWorker.replace(store: store, sourceID: source.id, generation: generation, tracks: result.tracks) }
+                    else { try await self.backgroundWorker.upsert(store: store, sourceID: source.id, generation: generation, tracks: result.tracks) }
                     self.scanWarnings = result.warnings
                 case .openSubsonic:
                     try await self.importRemoteCatalog(source: source, store: store, generation: generation)
@@ -412,10 +546,11 @@ final class AppModel {
                     let feed = try await PodcastClient(transport: self.transport(for: source)).fetchFeed(url: url)
                     let artwork = try? await self.cachePodcastArtwork(feed: feed, source: source)
                     try Task.checkCancellation()
-                    try store.upsertTracks(feed.episodes.map { $0.asTrackRecord(sourceID: source.id, feed: feed, artworkPath: artwork?.path) })
+                    try await self.backgroundWorker.upsert(store: store, sourceID: source.id, generation: generation,
+                                                           tracks: feed.episodes.map { $0.asTrackRecord(sourceID: source.id, feed: feed, artworkPath: artwork?.path) })
                 }
                 guard self.refreshGeneration == generation else { return }
-                if source.kind != .openSubsonic { self.reloadLibrary() }
+                if source.kind != .openSubsonic { self.reloadLibrary(); await self.waitForLibraryLoad() }
                 self.status = self.scanWarnings.isEmpty ? "“\(source.name)” is up to date." : "Scan completed with \(self.scanWarnings.count) warnings."
             } catch {
                 if self.refreshGeneration == generation {
@@ -434,7 +569,6 @@ final class AppModel {
     private func importRemoteCatalog(source: SourceRecord, store: LibraryStore, generation: UUID) async throws {
         try Task.checkCancellation()
         guard refreshGeneration == generation, sources.contains(where: { $0.id == source.id }) else { throw CancellationError() }
-        try store.setValue(Data([1]), forKey: Self.catalogImportKey(source.id))
         let progress = RemoteCatalogProgress()
         remoteCatalogProgress = progress
         defer {
@@ -450,7 +584,7 @@ final class AppModel {
         do {
             if let remoteCatalog { try await remoteCatalog(source, receive) }
             else {
-                let client = try subsonicClient(source)
+                let client = try await subsonicClient(source)
                 try await client.streamLibrary(sourceID: source.id) { tracks, completed, total in
                     try await receive(tracks.map { $0.asTrackRecord(sourceID: source.id) }, completed, total)
                 }
@@ -460,11 +594,11 @@ final class AppModel {
             if let error = progress.publicationError { throw error }
             progress.acceptingBatches = false
             progress.publicationTask?.cancel()
-            try store.reconcileTracks(sourceID: source.id, activeIDs: progress.activeIDs)
+            try await backgroundWorker.finishCatalog(store: store, sourceID: source.id, generation: generation,
+                                                      activeIDs: progress.activeIDs, incompleteKey: Self.catalogImportKey(source.id))
             try await publishRemoteSnapshot(source: source, store: store, generation: generation, progress: progress)
             try Task.checkCancellation()
             guard refreshGeneration == generation else { throw CancellationError() }
-            try store.setValue(nil, forKey: Self.catalogImportKey(source.id))
         } catch {
             progress.acceptingBatches = false
             progress.publicationTask?.cancel()
@@ -475,7 +609,7 @@ final class AppModel {
         }
     }
 
-    private static func catalogImportKey(_ sourceID: String) -> String { "catalogImport.incomplete.\(sourceID)" }
+    nonisolated private static func catalogImportKey(_ sourceID: String) -> String { "catalogImport.incomplete.\(sourceID)" }
 
     private func acceptRemoteBatch(_ batch: [TrackRecord], completed: Int, total: Int?, source: SourceRecord,
                                    store: LibraryStore, generation: UUID, progress: RemoteCatalogProgress) async throws {
@@ -485,8 +619,8 @@ final class AppModel {
               sources.contains(where: { $0.id == source.id }) else { throw CancellationError() }
         if let error = progress.publicationError { throw error }
         guard batch.allSatisfy({ $0.sourceID == source.id }) else { throw SourceNetworkError.invalidResponse }
-        // Small album transactions remain serialized with cancellation and source removal on the main actor.
-        try store.upsertTracks(batch)
+        try await backgroundWorker.upsert(store: store, sourceID: source.id, generation: generation, tracks: batch)
+        guard refreshGeneration == generation, remoteCatalogProgress === progress, progress.acceptingBatches else { throw CancellationError() }
         progress.activeIDs.formUnion(batch.map(\.id))
         progress.revision &+= 1
         let albumProgress = total.map { "\(completed) of \($0) albums" } ?? "\(completed) albums"
@@ -524,14 +658,11 @@ final class AppModel {
                                        progress: RemoteCatalogProgress, allowCancelled: Bool = false) async throws {
         guard sourceID == source.id, refreshGeneration == generation,
               sources.contains(where: { $0.id == source.id }) else { return }
-        let revision = libraryRevision
-        let values = try await Task.detached(priority: .userInitiated) { try store.tracks(sourceID: source.id) }.value
+        reloadLibrary()
+        await waitForLibraryLoad()
         if !allowCancelled { try Task.checkCancellation() }
         guard sourceID == source.id, refreshGeneration == generation,
               sources.contains(where: { $0.id == source.id }) else { return }
-        guard libraryRevision == revision else { return }
-        tracks = values
-        searchLibrary()
         progress.lastPublished = ContinuousClock().now
     }
 
@@ -566,7 +697,11 @@ final class AppModel {
             var stale = false
             if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale) {
                 resolved = url
-                if stale, let renewed = try? url.bookmarkData(options: .withSecurityScope) { var updated = source; updated.bookmarkData = renewed; try? store?.saveSource(updated) }
+                if stale, let renewed = try? url.bookmarkData(options: .withSecurityScope) {
+                    var updated = source; updated.bookmarkData = renewed
+                    let renewedSource = updated
+                    Task { try? await performLibraryWork { try $0.saveSource(renewedSource) } }
+                }
             }
         }
         if let resolved { _ = resolved.startAccessingSecurityScopedResource(); accessedFolders[source.id] = resolved }
@@ -592,8 +727,11 @@ final class AppModel {
         let prompt = certificatePrompts.removeFirst(); prompt.completion(accepted)
     }
 
-    func subsonicClient(_ source: SourceRecord) throws -> OpenSubsonicClient {
-        guard let url = source.url, let credentials = try KeychainCredentialStore.shared.load(sourceID: source.id) else { throw SourceNetworkError.missingCredentials }
+    func subsonicClient(_ source: SourceRecord) async throws -> OpenSubsonicClient {
+        guard let url = source.url else { throw SourceNetworkError.invalidURL }
+        let credentials = try await Task.detached { try KeychainCredentialStore.shared.load(sourceID: source.id) }.value
+        try Task.checkCancellation()
+        guard let credentials, sources.contains(where: { $0.id == source.id }) else { throw SourceNetworkError.missingCredentials }
         return OpenSubsonicClient(baseURL: url, credentials: credentials, transport: transport(for: source))
     }
 
@@ -603,29 +741,30 @@ final class AppModel {
         defer { artworkTasks.remove(track.albumID) }
         do {
             let data = try await subsonicClient(source).coverArt(id: cover)
-            let url = try cacheArtwork(data, key: StableID.make(source.id, cover))
-            for var sibling in try store?.tracks(sourceID: source.id) ?? [] where sibling.albumID == track.albumID {
-                sibling.artworkPath = url.path
-                try store?.upsertTracks([sibling])
+            let url = try await cacheArtwork(data, key: StableID.make(source.id, cover))
+            let record = try await performLibraryWork { store in
+                try store.cacheRemoteArtwork(sourceID: source.id, albumID: track.albumID, coverArtID: cover, path: url.path)
+                return try store.track(id: track.id)
             }
-            reloadLibrary(); artworkRevision += 1
+            if let path = record?.artworkPath {
+                for index in queue.indices where queue[index].track.albumID == track.albumID && queue[index].track.artworkPath == nil {
+                    queue[index].track.artworkPath = path
+                }
+            }
+            if sourceID == source.id { reloadLibrary() }
         } catch { }
     }
 
-    func cacheArtwork(_ data: Data, key: String) throws -> URL {
-        guard NSImage(data: data) != nil else { throw AppFailure.invalidArtwork }
+    func cacheArtwork(_ data: Data, key: String) async throws -> URL {
         let databaseURL = store.map { URL(fileURLWithPath: $0.database.path) } ?? LibraryStore.defaultURL
         let directory = databaseURL.deletingLastPathComponent().appendingPathComponent("Artwork", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent(key + ".image")
-        try data.write(to: url, options: .atomic)
-        return url
+        return try await backgroundWorker.cacheArtwork(data, key: key, directory: directory)
     }
 
     private func cachePodcastArtwork(feed: PodcastFeed, source: SourceRecord) async throws -> URL? {
         guard let url = feed.artworkURL else { return nil }
         let data = try await transport(for: source).data(from: url)
-        return try cacheArtwork(data, key: StableID.make(source.id, "podcast-artwork"))
+        return try await cacheArtwork(data, key: StableID.make(source.id, "podcast-artwork"))
     }
 
     func loadLyrics() {
@@ -649,7 +788,12 @@ final class AppModel {
         }
     }
 
-    func rate(_ track: TrackRecord, value: Int) { do { try store?.setRating(trackID: track.id, rating: value); reloadLibrary() } catch { fail("Could not save rating", error.localizedDescription) } }
+    func rate(_ track: TrackRecord, value: Int) {
+        Task {
+            do { try await performLibraryWork { try $0.setRating(trackID: track.id, rating: value) }; reloadLibrary() }
+            catch { fail("Could not save rating", error.localizedDescription) }
+        }
+    }
 
     func fail(_ title: String, _ detail: String) { status = detail; message = AppMessage(title: title, detail: detail) }
 
@@ -672,7 +816,11 @@ final class AppModel {
             let duration = player.duration > 0 ? player.duration : track.duration
             let threshold = min(240, max(1, duration > 0 ? duration / 2 : 240))
             if !playRecorded && heardSeconds >= threshold {
-                try? store?.recordPlay(trackID: track.id, at: Date()); playRecorded = true; reloadLibrary()
+                playRecorded = true
+                Task {
+                    try? await performLibraryWork { try $0.recordPlay(trackID: track.id, at: Date()) }
+                    reloadLibrary()
+                }
             }
         }
         updateNowPlaying()

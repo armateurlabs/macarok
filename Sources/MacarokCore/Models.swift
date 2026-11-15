@@ -141,7 +141,11 @@ public struct AlbumRecord: Identifiable, Sendable, Hashable {
     public var addedAt: Date
 
     public init(tracks: [TrackRecord]) {
-        let ordered = tracks.sorted(by: TrackRecord.libraryOrder)
+        self.init(orderedTracks: tracks.sorted(by: TrackRecord.libraryOrder))
+    }
+
+    /// Reuses tracks already ordered by `TrackRecord.libraryOrder`.
+    public init(orderedTracks ordered: [TrackRecord]) {
         let first = ordered.first
         self.id = first?.albumID ?? UUID().uuidString
         self.sourceID = first?.sourceID ?? ""
@@ -173,11 +177,29 @@ public struct ArtistSummary: Identifiable, Sendable, Hashable {
         self.id = StableID.make(sourceID, name)
         self.sourceID = sourceID
         self.name = name
-        self.albums = Dictionary(grouping: tracks, by: \.albumID).values.map(AlbumRecord.init)
+        self.albums = Dictionary(grouping: tracks, by: \.albumID).values.map { AlbumRecord(tracks: $0) }
             .sorted { ($0.year ?? 0, $0.title) < ($1.year ?? 0, $1.title) }
         self.trackCount = tracks.count
         self.playCount = tracks.reduce(0) { $0 + $1.playCount }
         self.artworkPath = tracks.compactMap(\.artworkPath).first
+    }
+
+    /// Reuses the canonical album records prepared for a library snapshot.
+    public init(name: String, sourceID: String, albums: [AlbumRecord]) {
+        self.id = StableID.make(sourceID, name)
+        self.sourceID = sourceID
+        self.name = name
+        self.albums = albums.sorted {
+            let leftYear = $0.year ?? 0
+            let rightYear = $1.year ?? 0
+            if leftYear != rightYear { return leftYear < rightYear }
+            let titleOrder = $0.title.localizedStandardCompare($1.title)
+            if titleOrder != .orderedSame { return titleOrder == .orderedAscending }
+            return $0.id < $1.id
+        }
+        self.trackCount = albums.reduce(0) { $0 + $1.tracks.count }
+        self.playCount = albums.reduce(0) { $0 + $1.playCount }
+        self.artworkPath = self.albums.lazy.compactMap(\.artworkPath).first
     }
 }
 
@@ -289,8 +311,12 @@ extension TrackRecord {
         if artistOrder != .orderedSame { return artistOrder == .orderedAscending }
         let albumOrder = lhs.album.localizedStandardCompare(rhs.album)
         if albumOrder != .orderedSame { return albumOrder == .orderedAscending }
-        if lhs.discNumber != rhs.discNumber { return (lhs.discNumber ?? 1) < (rhs.discNumber ?? 1) }
-        if lhs.trackNumber != rhs.trackNumber { return (lhs.trackNumber ?? 0) < (rhs.trackNumber ?? 0) }
+        let leftDisc = lhs.discNumber ?? 1
+        let rightDisc = rhs.discNumber ?? 1
+        if leftDisc != rightDisc { return leftDisc < rightDisc }
+        let leftTrack = lhs.trackNumber ?? 0
+        let rightTrack = rhs.trackNumber ?? 0
+        if leftTrack != rightTrack { return leftTrack < rightTrack }
         let titleOrder = lhs.title.localizedStandardCompare(rhs.title)
         return titleOrder == .orderedSame ? lhs.id < rhs.id : titleOrder == .orderedAscending
     }

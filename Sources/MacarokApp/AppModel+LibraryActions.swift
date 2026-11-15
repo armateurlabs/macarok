@@ -13,43 +13,59 @@ extension AppModel {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             do {
-                guard let store = self.store else { return }
+                guard self.store != nil else { return }
                 let entries = try await Task.detached(priority: .userInitiated) { try PlaylistIO.read(url: url) }.value
                 guard !entries.isEmpty else {
                     self.fail("Empty playlist", "No playable entries were found in this playlist.")
                     return
                 }
-                let existing = try store.allTracks()
-                var matches: [Int: [TrackRecord]] = [:]
-                var needsLocalIndex = false
-                for (index, entry) in entries.enumerated() {
-                    if let id = entry.trackID, let track = existing.first(where: { $0.id == id && (entry.sourceID == nil || $0.sourceID == entry.sourceID) }) {
-                        matches[index] = [track]
-                        continue
+                self.status = "Resolving playlist entries…"
+                let resolution = try await self.performLibraryWork { store in
+                    let existing = try store.allTracks()
+                    let byID = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                    var matches: [Int: [TrackRecord]] = [:]
+                    var needsLocalIndex = false
+                    for (index, entry) in entries.enumerated() {
+                        if let id = entry.trackID, let track = byID[id], entry.sourceID == nil || track.sourceID == entry.sourceID {
+                            matches[index] = [track]
+                            continue
+                        }
+                        let known = Self.matchingTracks(for: entry, in: existing)
+                        if !known.isEmpty { matches[index] = known }
+                        else if entry.url.isFileURL { needsLocalIndex = true }
                     }
-                    let known = self.matchingTracks(for: entry, in: existing)
-                    if !known.isEmpty { matches[index] = known }
-                    else if entry.url.isFileURL { needsLocalIndex = true }
+                    return (matches: matches, needsLocalIndex: needsLocalIndex)
                 }
+                var matches = resolution.matches
 
-                if needsLocalIndex {
-                    let source = try self.explicitLocalSource(url: url, preferredName: url.deletingPathExtension().lastPathComponent)
+                if resolution.needsLocalIndex {
+                    let source = try await self.explicitLocalSource(url: url, preferredName: url.deletingPathExtension().lastPathComponent)
                     self.status = "Reading playlist files…"
                     let result = try await LibraryScanner().scan(source: source, metadataReader: { try TagLibMetadataService.read(url: $0) })
-                    if result.isComplete { try store.replaceSourceTracks(sourceID: source.id, with: result.tracks) }
-                    else { try store.upsertTracks(result.tracks) }
-                    self.scanWarnings = result.warnings
-                    for (index, entry) in entries.enumerated() where matches[index] == nil {
-                        let found = self.matchingTracks(for: entry, in: result.tracks)
-                        if !found.isEmpty { matches[index] = found }
+                    let existingMatches = matches
+                    let imported = try await self.performLibraryWork { store in
+                        if result.isComplete { try store.replaceSourceTracks(sourceID: source.id, with: result.tracks) }
+                        else { try store.upsertTracks(result.tracks) }
+                        var matches = existingMatches
+                        for (index, entry) in entries.enumerated() where matches[index] == nil {
+                            let found = Self.matchingTracks(for: entry, in: result.tracks)
+                            if !found.isEmpty { matches[index] = found }
+                        }
+                        return (matches: matches, sources: try store.sources())
                     }
-                    self.sources = try store.sources()
+                    self.scanWarnings = result.warnings
+                    matches = imported.matches
+                    self.sources = imported.sources
                     self.sourceID = source.id
                     self.reloadLibrary()
                 }
 
-                let values = entries.indices.flatMap { matches[$0] ?? [] }
-                let missing = entries.indices.filter { matches[$0] == nil }.count
+                let finalMatches = matches
+                let result = await Task.detached(priority: .userInitiated) {
+                    (values: entries.indices.flatMap { finalMatches[$0] ?? [] }, missing: entries.indices.filter { finalMatches[$0] == nil }.count)
+                }.value
+                let values = result.values
+                let missing = result.missing
                 if !values.isEmpty {
                     self.add(values)
                     if let first = values.first { self.inspect(first) }
@@ -73,17 +89,21 @@ extension AppModel {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             do {
-                guard let store = self.store else { return }
+                guard self.store != nil else { return }
                 let entry = PlaylistEntry(url: url)
-                let known = self.matchingTracks(for: entry, in: try store.allTracks())
+                let known = try await self.performLibraryWork { store in
+                    Self.matchingTracks(for: entry, in: try store.allTracks())
+                }
                 if !known.isEmpty { self.add(known); self.inspect(known[0]); return }
 
-                let source = try self.explicitLocalSource(url: url, preferredName: url.deletingPathExtension().lastPathComponent)
+                let source = try await self.explicitLocalSource(url: url, preferredName: url.deletingPathExtension().lastPathComponent)
                 self.status = "Reading “\(url.lastPathComponent)”…"
                 let result = try await LibraryScanner().scan(source: source, metadataReader: { try TagLibMetadataService.read(url: $0) })
-                if result.isComplete { try store.replaceSourceTracks(sourceID: source.id, with: result.tracks) }
-                else { try store.upsertTracks(result.tracks) }
-                self.sources = try store.sources()
+                self.sources = try await self.performLibraryWork { store in
+                    if result.isComplete { try store.replaceSourceTracks(sourceID: source.id, with: result.tracks) }
+                    else { try store.upsertTracks(result.tracks) }
+                    return try store.sources()
+                }
                 self.sourceID = source.id
                 self.reloadLibrary()
                 self.scanWarnings = result.warnings
@@ -103,14 +123,17 @@ extension AppModel {
     func exportPlaylist() { writeCurrentPlaylist(saveInLibrary: false) }
 
     func loadSavedPlaylist(_ playlist: PlaylistRecord) {
-        do {
-            let values = try store?.playlistTracks(id: playlist.id) ?? []
-            guard !values.isEmpty else {
-                fail("Empty playlist", "This saved playlist has no available entries.")
-                return
-            }
-            add(values)
-        } catch { fail("Could not load the playlist", error.localizedDescription) }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let values = try await self.performLibraryWork { try $0.playlistTracks(id: playlist.id) }
+                guard !values.isEmpty else {
+                    self.fail("Empty playlist", "This saved playlist has no available entries.")
+                    return
+                }
+                self.add(values)
+            } catch { self.fail("Could not load the playlist", error.localizedDescription) }
+        }
     }
 
     /// Paths are relative to a source, never manufactured from tags.
@@ -120,27 +143,26 @@ extension AppModel {
     }
 
     func tracksInFolder(_ path: String) -> [TrackRecord] {
-        let folder = LibraryFolderPathResolver.normalize(path)
-        guard !folder.isEmpty else { return displayedTracks }
-        let resolver = LibraryFolderPathResolver(sources: selectedSource.map { [$0] } ?? [])
-        return displayedTracks.filter { track in
-            let parent = resolver.folderPath(track)
-            return parent == folder || parent.hasPrefix(folder + "/")
-        }
+        cachedTracksInFolder(LibraryFolderPathResolver.normalize(path))
     }
 
     var folderTracks: [TrackRecord] { tracksInFolder(selectedFolder ?? "") }
 
-    private func explicitLocalSource(url: URL, preferredName: String) throws -> SourceRecord {
+    private func explicitLocalSource(url: URL, preferredName: String) async throws -> SourceRecord {
         if let existing = sources.first(where: { $0.kind == .local && $0.url?.standardizedFileURL == url.standardizedFileURL }) { return existing }
-        let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        let bookmark = await Task.detached(priority: .userInitiated) {
+            try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        }.value
         let source = SourceRecord(kind: .local, name: preferredName.isEmpty ? url.lastPathComponent : preferredName,
                                   location: url.absoluteString, bookmarkData: bookmark)
-        try store?.saveSource(source)
-        return source
+        return try await performLibraryWork { store in
+            if let existing = try store.sources().first(where: { $0.kind == .local && $0.url?.standardizedFileURL == url.standardizedFileURL }) { return existing }
+            try store.saveSource(source)
+            return source
+        }
     }
 
-    private func matchingTracks(for entry: PlaylistEntry, in candidates: [TrackRecord]) -> [TrackRecord] {
+    nonisolated private static func matchingTracks(for entry: PlaylistEntry, in candidates: [TrackRecord]) -> [TrackRecord] {
         if entry.url.isFileURL, entry.url.pathExtension.lowercased() == "cue" {
             let matching = candidates.filter { $0.cuePath == entry.url.standardizedFileURL.path }
             let sourceID = matching.first?.sourceID
@@ -183,14 +205,24 @@ extension AppModel {
             ? "M3U preserves the playback boundaries of CUE tracks."
             : "Save the active playlist as M3U or PLS."
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try PlaylistIO.write(entries: queue.map { PlaylistEntry(track: $0.track) }, to: url)
-            if saveInLibrary {
-                try store?.savePlaylist(name: url.deletingPathExtension().lastPathComponent, trackIDs: queue.map(\.track.id))
-                playlists = try store?.playlists() ?? []
-            }
-            status = "Saved “\(url.lastPathComponent)”."
-        } catch { fail("Could not save the playlist", error.localizedDescription) }
+        let tracks = queue.map(\.track)
+        Task { [weak self] in
+            guard let self else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try PlaylistIO.write(entries: tracks.map { PlaylistEntry(track: $0) }, to: url)
+                }.value
+                if saveInLibrary {
+                    self.playlists = try await self.performLibraryWork { store in
+                        try store.savePlaylist(name: url.deletingPathExtension().lastPathComponent, trackIDs: tracks.map(\.id))
+                        return try store.playlists()
+                    }
+                }
+                self.status = "Saved “\(url.lastPathComponent)”."
+            } catch { self.fail("Could not save the playlist", error.localizedDescription) }
+        }
     }
 
 }

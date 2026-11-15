@@ -139,7 +139,7 @@ public final class LibraryStore: @unchecked Sendable {
         }
     }
 
-    public func tracks(sourceID: String, query: String = "") throws -> [TrackRecord] {
+    public func tracks(sourceID: String, query: String = "", ordered: Bool = true) throws -> [TrackRecord] {
         let search = Self.searchPattern(query)
         return try database.read { db in
             let values: [TrackRecord]
@@ -152,7 +152,7 @@ public final class LibraryStore: @unchecked Sendable {
             } else {
                 values = try TrackRecord.fetchAll(db, sql: "SELECT * FROM tracks WHERE sourceID = ? AND isAvailable = 1", arguments: [sourceID])
             }
-            return values.sorted(by: TrackRecord.libraryOrder)
+            return ordered ? values.sorted(by: TrackRecord.libraryOrder) : values
         }
     }
 
@@ -166,7 +166,7 @@ public final class LibraryStore: @unchecked Sendable {
 
     public func albums(sourceID: String, query: String = "") throws -> [AlbumRecord] {
         let tracks = try tracks(sourceID: sourceID, query: query)
-        return Dictionary(grouping: tracks, by: \.albumID).values.map(AlbumRecord.init)
+        return Dictionary(grouping: tracks, by: \.albumID).values.map { AlbumRecord(tracks: $0) }
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
@@ -181,6 +181,16 @@ public final class LibraryStore: @unchecked Sendable {
     public func upsertTracks(_ tracks: [TrackRecord]) throws {
         try database.write { db in
             for track in tracks { try Self.saveIndexedTrack(track, db: db) }
+        }
+    }
+
+    /// A completed download may fill only the still-current, uncached cover references.
+    public func cacheRemoteArtwork(sourceID: String, albumID: String, coverArtID: String, path: String) throws {
+        try database.write { db in
+            try db.execute(sql: """
+                UPDATE tracks SET artworkPath = ?
+                WHERE sourceID = ? AND albumID = ? AND coverArtID = ? AND artworkPath IS NULL
+                """, arguments: [path, sourceID, albumID, coverArtID])
         }
     }
 

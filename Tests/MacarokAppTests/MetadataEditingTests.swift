@@ -24,6 +24,7 @@ final class MetadataEditingTests: XCTestCase {
         let image = try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j2foAAAAASUVORK5CYII="))
         for track in tracks {
             try await model.saveAlbumArtwork(data: image, for: track, embedInFiles: false, saveSidecar: false)
+            try await waitForLibrary(model)
             let saved = try XCTUnwrap(store.track(id: track.id))
             XCTAssertTrue(saved.metadataLocked)
             let artworkPath = try XCTUnwrap(saved.artworkPath)
@@ -71,6 +72,8 @@ final class MetadataEditingTests: XCTestCase {
         var edited = original
         edited.title = "First Edited"; edited.album = "Updated"; edited.albumArtist = "Various Artists"; edited.year = 2026
         try await model.applyMetadataEdits(original: original, edited: edited, releaseID: nil, lockMetadata: false)
+        try await waitForLibrary(model)
+        XCTAssertEqual(Set(model.tracks.map(\.album)), ["Updated"])
 
         let saved = try store.tracks(sourceID: source.id)
         XCTAssertEqual(Set(saved.map(\.album)), ["Updated"])
@@ -95,6 +98,14 @@ final class MetadataEditingTests: XCTestCase {
             XCTAssertEqual(track.startTime, previous.startTime)
             XCTAssertEqual(track.endTime, previous.endTime)
         }
+    }
+
+    private func waitForLibrary(_ model: AppModel) async throws {
+        for _ in 0..<100 {
+            if !model.isLoadingLibrary { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("The edited library did not finish loading within two seconds.")
     }
 
     private var flacFixture: Data {

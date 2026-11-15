@@ -198,6 +198,57 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertNil(try store.track(id: localTrack.id)?.artworkPath, "Removed local artwork must not be preserved just because its optional cover ID is still nil.")
     }
 
+    func testCompletedRemoteArtworkOnlyFillsCurrentUncachedAlbumReferences() throws {
+        let folder = try temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = try LibraryStore(url: folder.appendingPathComponent("test.sqlite"))
+        let source = SourceRecord(id: "source", kind: .openSubsonic, name: "Server", location: "https://music.example")
+        let other = SourceRecord(id: "other", kind: .openSubsonic, name: "Other", location: "https://other.example")
+        try store.saveSource(source); try store.saveSource(other)
+        try store.upsertTracks([
+            TrackRecord(id: "matching-1", sourceID: source.id, albumID: "album", title: "Keep title", coverArtID: "cover"),
+            TrackRecord(id: "matching-2", sourceID: source.id, albumID: "album", coverArtID: "cover"),
+            TrackRecord(id: "locked-empty", sourceID: source.id, albumID: "album", title: "My correction", coverArtID: "cover", metadataLocked: true),
+            TrackRecord(id: "overlay", sourceID: source.id, albumID: "album", coverArtID: "cover", artworkPath: "/cache/personal.image", metadataLocked: true),
+            TrackRecord(id: "changed-cover", sourceID: source.id, albumID: "album", coverArtID: "new-cover"),
+            TrackRecord(id: "other-album", sourceID: source.id, albumID: "other-album", coverArtID: "cover"),
+            TrackRecord(id: "other-source", sourceID: other.id, albumID: "album", coverArtID: "cover")
+        ])
+        let playedAt = Date(timeIntervalSince1970: 200)
+        try store.recordPlay(trackID: "matching-1", at: playedAt)
+        try store.setRating(trackID: "matching-1", rating: 4)
+        try store.database.write { db in
+            try db.execute(sql: """
+                CREATE TABLE artworkAudit (trackID TEXT NOT NULL);
+                CREATE TRIGGER auditArtwork AFTER UPDATE OF artworkPath ON tracks BEGIN
+                    INSERT INTO artworkAudit(trackID) VALUES (new.id);
+                END;
+                """)
+        }
+
+        try store.cacheRemoteArtwork(sourceID: source.id, albumID: "album", coverArtID: "cover", path: "/cache/downloaded.image")
+        for id in ["matching-1", "matching-2", "locked-empty"] {
+            XCTAssertEqual(try store.track(id: id)?.artworkPath, "/cache/downloaded.image")
+        }
+        XCTAssertEqual(try store.track(id: "overlay")?.artworkPath, "/cache/personal.image")
+        for id in ["changed-cover", "other-album", "other-source"] { XCTAssertNil(try store.track(id: id)?.artworkPath) }
+        XCTAssertEqual(try store.track(id: "locked-empty")?.title, "My correction")
+        XCTAssertEqual(try store.track(id: "locked-empty")?.metadataLocked, true)
+        let unchanged = try XCTUnwrap(store.track(id: "matching-1"))
+        XCTAssertEqual(unchanged.title, "Keep title")
+        XCTAssertEqual(unchanged.playCount, 1)
+        XCTAssertEqual(unchanged.lastPlayedAt, playedAt)
+        XCTAssertEqual(unchanged.rating, 4)
+
+        // A repeated or late completion must neither overwrite a cache nor create orphaned tracks.
+        try store.cacheRemoteArtwork(sourceID: source.id, albumID: "album", coverArtID: "cover", path: "/cache/repeated.image")
+        try store.cacheRemoteArtwork(sourceID: "deleted-source", albumID: "album", coverArtID: "cover", path: "/cache/orphan.image")
+        let writes = try store.database.read { try String.fetchAll($0, sql: "SELECT trackID FROM artworkAudit ORDER BY trackID") }
+        XCTAssertEqual(writes, ["locked-empty", "matching-1", "matching-2"])
+        XCTAssertEqual(try store.allTracks().count, 7)
+        XCTAssertEqual(try store.track(id: "matching-1")?.artworkPath, "/cache/downloaded.image")
+    }
+
     private func temporaryFolder() throws -> URL {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
