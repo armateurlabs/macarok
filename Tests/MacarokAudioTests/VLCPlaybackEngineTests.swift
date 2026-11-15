@@ -1,9 +1,114 @@
 import AppKit
+import Combine
 import Foundation
 @testable import MacarokAudio
 import XCTest
 
 final class VLCPlaybackEngineTests: XCTestCase {
+    @MainActor
+    func testClockPublishesOnlyToTimelineObserversAndIgnoresDuplicateStop() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokClockIsolation-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("clock.wav")
+        try wave(duration: 8).write(to: url)
+        let player = VLCPlaybackEngine()
+        player.volume = 0
+        defer { player.stop() }
+        var engineChanges = 0, timelineChanges = 0
+        let engineObservation = player.objectWillChange.sink { engineChanges += 1 }
+        let timelineObservation = player.timeline.objectWillChange.sink { timelineChanges += 1 }
+        defer { engineObservation.cancel(); timelineObservation.cancel() }
+        player.load(url: url)
+        try await eventually(player: player) { player.state == .playing && player.position > 0.2 && player.isSeekable }
+        let initialPosition = player.position, initialEngineChanges = engineChanges, initialTimelineChanges = timelineChanges
+
+        try await Task.sleep(for: .milliseconds(750))
+
+        XCTAssertGreaterThan(player.position, initialPosition + 0.3)
+        XCTAssertGreaterThan(timelineChanges, initialTimelineChanges)
+        XCTAssertEqual(engineChanges, initialEngineChanges,
+                       "Queue and radio state observers must not redraw for clock, duration, or seekability samples.")
+        player.stop()
+        let stoppedEngineChanges = engineChanges, stoppedTimelineChanges = timelineChanges
+        player.stop()
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(engineChanges, stoppedEngineChanges)
+        XCTAssertEqual(timelineChanges, stoppedTimelineChanges,
+                       "Repeated stop and cached VLC callbacks must not republish unchanged timeline values.")
+    }
+
+    @MainActor
+    func testMediaReplacementsReuseTheLibraryAndRejectOldCompletionCallbacks() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokReplacementTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("replacement.wav")
+        // Keep a substantial playback window after file caching; a tiny codec fixture can finish
+        // between two legitimate 5 Hz clock samples and cannot prove stale-callback isolation.
+        try wave(duration: 8).write(to: url)
+        let player = VLCPlaybackEngine()
+        player.volume = 0
+        var completions = 0
+        player.onCompletion = { completions += 1 }
+        defer { player.onCompletion = nil; player.stop() }
+        player.load(url: url)
+        try await eventually(player: player) { player.state == .playing }
+        let originalLibrary = try XCTUnwrap(player.libraryIdentity)
+        for _ in 0..<6 {
+            player.load(url: url, autoplay: false)
+            XCTAssertEqual(player.libraryIdentity, originalLibrary)
+        }
+        player.load(url: url)
+        try await eventually(player: player) { player.state == .playing && player.position > 0.1 }
+        XCTAssertEqual(player.libraryIdentity, originalLibrary)
+        XCTAssertEqual(completions, 0, "Cancelled media must never complete the newly installed queue entry.")
+        XCTAssertEqual(player.diagnostics.installationCount, 8)
+        XCTAssertGreaterThanOrEqual(player.diagnostics.lastInstallationSeconds, 0)
+        XCTAssertNotNil(player.diagnostics.lastTransitionSeconds)
+        XCTAssertNil(player.lastError)
+    }
+
+    @MainActor
+    func testAutomaticTransitionsRecordBoundedGapsWhileBackgroundSortingRuns() async throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "silence.flac", withExtension: nil, subdirectory: "Fixtures"))
+        let player = VLCPlaybackEngine()
+        player.volume = 0
+        var completed = 0
+        var transitionStarted: TimeInterval?
+        var measuredGaps: [TimeInterval] = []
+        let finished = expectation(description: "Three tracks completed under background load")
+        let observation = player.$state.sink { state in
+            if state == .playing, let started = transitionStarted {
+                measuredGaps.append(ProcessInfo.processInfo.systemUptime - started)
+                transitionStarted = nil
+            }
+        }
+        defer { observation.cancel(); player.onCompletion = nil; player.stop() }
+        player.onCompletion = {
+            completed += 1
+            if completed < 3 {
+                transitionStarted = ProcessInfo.processInfo.systemUptime
+                player.load(url: url)
+            } else { finished.fulfill() }
+        }
+        let backgroundWork = Task.detached(priority: .utility) {
+            let titles = (0..<2_000).map { "Synthetic album \(2_000 - $0)" }
+            let deadline = ProcessInfo.processInfo.systemUptime + 2.8
+            repeat { _ = titles.sorted { $0.localizedStandardCompare($1) == .orderedAscending } }
+            while ProcessInfo.processInfo.systemUptime < deadline
+        }
+        player.load(url: url)
+        await fulfillment(of: [finished], timeout: 15)
+        await backgroundWork.value
+        XCTAssertEqual(completed, 3)
+        XCTAssertEqual(measuredGaps.count, 2)
+        XCTAssertLessThan(measuredGaps.max() ?? .infinity, 2,
+                          "Main-actor transition dispatch plus VLC opening must remain bounded during background sorting.")
+        XCTAssertEqual(player.diagnostics.installationCount, 3)
+        XCTAssertNil(player.lastError)
+    }
+
     @MainActor
     func testRequiredCodecsPlayToCompletionThroughPinnedVLC() async throws {
         for name in ["silence.mp3", "silence.flac", "silence.ogg", "silence.opus"] {

@@ -1,22 +1,53 @@
 import Combine
 import Foundation
+import os
 import VLCKit
 
 public enum PlaybackState: String, Sendable {
     case stopped, opening, buffering, playing, paused, failed
 }
 
+/// High-frequency clock values are observed only by views that draw the timeline or synchronized lyrics.
+@MainActor
+public final class PlaybackTimeline: ObservableObject {
+    @Published public fileprivate(set) var position: Double = 0
+    @Published public fileprivate(set) var duration: Double = 0
+    @Published public fileprivate(set) var bufferingProgress: Double = 1
+    @Published public fileprivate(set) var isSeekable = false
+}
+
+public struct PlaybackDiagnostics: Equatable, Sendable {
+    public fileprivate(set) var installationCount = 0
+    public fileprivate(set) var lastInstallationSeconds: TimeInterval = 0
+    public fileprivate(set) var lastTransitionSeconds: TimeInterval?
+}
+
 /// A single-item player. Queue order and repeat behavior belong to the application.
 @MainActor
 public final class VLCPlaybackEngine: NSObject, ObservableObject {
     @Published public private(set) var state: PlaybackState = .stopped
-    @Published public private(set) var position: Double = 0
-    @Published public private(set) var duration: Double = 0
-    @Published public private(set) var bufferingProgress: Double = 1
-    @Published public private(set) var isSeekable = false
+    public let timeline = PlaybackTimeline()
+    public private(set) var diagnostics = PlaybackDiagnostics()
+    public private(set) var position: Double {
+        get { timeline.position }
+        set { if timeline.position != newValue { timeline.position = newValue } }
+    }
+    public private(set) var duration: Double {
+        get { timeline.duration }
+        set { if timeline.duration != newValue { timeline.duration = newValue } }
+    }
+    public private(set) var bufferingProgress: Double {
+        get { timeline.bufferingProgress }
+        set { if timeline.bufferingProgress != newValue { timeline.bufferingProgress = newValue } }
+    }
+    public private(set) var isSeekable: Bool {
+        get { timeline.isSeekable }
+        set { if timeline.isSeekable != newValue { timeline.isSeekable = newValue } }
+    }
     @Published public private(set) var lastError: String?
-    @Published public var volume: Double = 0.75 {
+    public var volume: Double = 0.75 {
         didSet {
+            guard volume != oldValue else { return }
             let bounded = min(1, max(0, volume))
             if bounded != volume { volume = bounded }
             player?.audio?.volume = Int32((bounded * 100).rounded())
@@ -41,11 +72,32 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     private var inFlightSeek: (target: Double, startedAt: TimeInterval)?
     private var timelineTimer: Timer?
     private var live = false
+    private static let playbackLibrary = VLCLibrary(options: ["--no-video", "--no-osd", "--quiet", "--no-metadata-network-access"])
+    private static let signposter = OSSignposter(subsystem: "com.armateurlabs.Macarok", category: "Playback")
+    private var transitionInterval: OSSignpostIntervalState?
+    private var transitionStartedAt: TimeInterval?
+
+    // Exposed internally for regressions without leaking VLCKit through the public application API.
+    var libraryIdentity: ObjectIdentifier? { player.map { ObjectIdentifier($0.libraryInstance) } }
 
     public override init() { super.init() }
     deinit { timelineTimer?.invalidate() }
 
     public var isPlaying: Bool { state == .playing || state == .buffering }
+
+    private func setState(_ next: PlaybackState) {
+        guard state != next else { return }
+        state = next
+    }
+
+    private func endTransition(startedPlaying: Bool = false) {
+        if startedPlaying, let started = transitionStartedAt {
+            diagnostics.lastTransitionSeconds = ProcessInfo.processInfo.systemUptime - started
+        }
+        transitionStartedAt = nil
+        if let interval = transitionInterval { Self.signposter.endInterval("TrackTransition", interval) }
+        transitionInterval = nil
+    }
 
     public func load(
         url: URL,
@@ -61,7 +113,8 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             return
         }
         install(media: media, stream: nil, segmentStart: segmentStart, segmentEnd: segmentEnd,
-                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay, live: live, supportsSeeking: nil)
+                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay, live: live,
+                localFile: url.isFileURL, supportsSeeking: nil)
     }
 
     /// The caller may supply a seekable stream backed by the shared source transport.
@@ -81,7 +134,8 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             return
         }
         install(media: media, stream: stream, segmentStart: segmentStart, segmentEnd: segmentEnd,
-                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay, live: live, supportsSeeking: supportsSeeking)
+                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay, live: live,
+                localFile: false, supportsSeeking: supportsSeeking)
     }
 
     public func play() {
@@ -100,9 +154,10 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     /// A live source resumes by installing a new connection, rather than retaining old broadcast audio.
     public func pauseLive() {
+        endTransition()
         stopTimelineUpdates(); generation = UUID(); explicitlyStopped = true
         heldStream?.close(); heldStream = nil; player?.delegate = nil; player?.stop()
-        pendingSeek = nil; inFlightSeek = nil; state = .paused; position = 0; duration = 0; isSeekable = false
+        pendingSeek = nil; inFlightSeek = nil; setState(.paused); position = 0; duration = 0; isSeekable = false
     }
 
     public func togglePlayPause() {
@@ -110,12 +165,13 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     }
 
     public func stop() {
+        endTransition()
         stopTimelineUpdates()
         explicitlyStopped = true
         pendingSeek = nil
         inFlightSeek = nil
         player?.stop()
-        state = .stopped
+        setState(.stopped)
         position = 0
         bufferingProgress = 1
         isSeekable = false
@@ -153,9 +209,22 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     private func install(
         media: VLCMedia, stream: InputStream?, segmentStart: Double, segmentEnd: Double?,
-        bufferSeconds: Double?, durationHint: Double?, autoplay: Bool, live: Bool,
+        bufferSeconds: Double?, durationHint: Double?, autoplay: Bool, live: Bool, localFile: Bool,
         supportsSeeking: (@Sendable () -> Bool?)?
     ) {
+        let installationStarted = ProcessInfo.processInfo.systemUptime
+        let installationInterval = Self.signposter.beginInterval("Install", id: Self.signposter.makeSignpostID())
+        defer {
+            diagnostics.installationCount += 1
+            diagnostics.lastInstallationSeconds = ProcessInfo.processInfo.systemUptime - installationStarted
+            Self.signposter.endInterval("Install", installationInterval)
+        }
+        endTransition()
+        if autoplay {
+            diagnostics.lastTransitionSeconds = nil
+            transitionStartedAt = installationStarted
+            transitionInterval = Self.signposter.beginInterval("TrackTransition", id: Self.signposter.makeSignpostID())
+        }
         stopTimelineUpdates()
         generation = UUID()
         player?.delegate = nil
@@ -173,10 +242,10 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         explicitlyStopped = false
         pendingSeek = nil
         inFlightSeek = nil
-        lastError = nil
+        if lastError != nil { lastError = nil }
         isSeekable = false
         bufferingProgress = 0
-        state = .opening
+        setState(.opening)
 
         media.addOption(":no-video")
         if self.segmentStart > 0 { media.addOption(":start-time=\(self.segmentStart)") }
@@ -184,8 +253,16 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         if let seconds = bufferSeconds, seconds.isFinite, seconds > 0 {
             media.addOption(":network-caching=\(Int(min(seconds, 600) * 1_000))")
         }
+        if localFile {
+            // Mounted SMB/NAS resources are still file URLs. Give their decoder the same explicit
+            // bounded cache policy, with a one-second default when streaming buffering is automatic.
+            let seconds = bufferSeconds.flatMap { $0.isFinite && $0 > 0 ? min($0, 600) : nil } ?? 1
+            media.addOption(":file-caching=\(Int(seconds * 1_000))")
+        }
 
-        let currentPlayer = VLCMediaPlayer(options: ["--no-video", "--no-osd", "--quiet", "--no-metadata-network-access"])
+        // A fresh lightweight player keeps delegate generations isolated, while the expensive
+        // libVLC context and its worker infrastructure are shared across every installation.
+        let currentPlayer = VLCMediaPlayer(library: Self.playbackLibrary)
         let delegate = PlaybackDelegate(owner: self, generation: generation)
         proxy = delegate
         currentPlayer.delegate = delegate
@@ -194,7 +271,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         currentPlayer.media = media
         currentPlayer.audio?.volume = Int32((volume * 100).rounded())
         player = currentPlayer
-        if autoplay { startTimelineUpdates(); currentPlayer.play() } else { state = .stopped }
+        if autoplay { startTimelineUpdates(); currentPlayer.play() } else { setState(.stopped) }
     }
 
     private func startTimelineUpdates() {
@@ -218,22 +295,23 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     fileprivate func receiveState(_ value: VLCMediaPlayerState, generation: UUID) {
         guard generation == self.generation else { return }
-        guard !explicitlyStopped || value == .stopped else { return }
+        guard !explicitlyStopped else { return }
         switch value {
         case .opening:
-            state = .opening
+            setState(.opening)
         case .playing:
+            endTransition(startedPlaying: true)
             hasStarted = true
             bufferingProgress = 1
-            state = .playing
+            setState(.playing)
             startTimelineUpdates()
             synchronizeTime()
         case .paused:
             stopTimelineUpdates()
-            state = .paused
+            setState(.paused)
         case .stopped:
             if hasStarted && !explicitlyStopped && !didComplete { finish() }
-            else if !didComplete { stopTimelineUpdates(); state = .stopped }
+            else if !didComplete { stopTimelineUpdates(); setState(.stopped) }
         case .error:
             reportError("VLC could not play this audio resource. Check the file or server connection.")
         default:
@@ -243,14 +321,16 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     fileprivate func receiveTime(generation: UUID) {
         guard generation == self.generation, !explicitlyStopped else { return }
-        synchronizeTime()
+        // The common-mode clock already samples playing media at 5 Hz. Delegate notifications
+        // are still needed for paused seeks, initial duration discovery, and seek acknowledgement.
+        if state != .playing || pendingSeek != nil || inFlightSeek != nil || duration == 0 { synchronizeTime() }
     }
 
     fileprivate func receiveBuffering(_ value: Float, generation: UUID) {
         guard generation == self.generation, !explicitlyStopped else { return }
         bufferingProgress = min(1, max(0, Double(value)))
-        if value < 1 && state != .paused { state = .buffering }
-        else if hasStarted && state == .buffering { state = .playing }
+        if value < 1 && state != .paused { setState(.buffering) }
+        else if hasStarted && state == .buffering { setState(.playing) }
     }
 
     private func synchronizeTime() {
@@ -293,23 +373,25 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     private func finish() {
         guard !didComplete, !explicitlyStopped else { return }
+        endTransition()
         stopTimelineUpdates()
         didComplete = true
         explicitlyStopped = true
         inFlightSeek = nil
-        state = .stopped
+        setState(.stopped)
         if duration > 0 { position = duration }
         player?.stop()
         onCompletion?()
     }
 
     private func reportError(_ message: String) {
+        endTransition()
         stopTimelineUpdates()
         explicitlyStopped = true
         pendingSeek = nil; inFlightSeek = nil; isSeekable = false
         player?.stop()
-        lastError = message
-        state = .failed
+        if lastError != message { lastError = message }
+        setState(.failed)
         onError?(message)
     }
 }

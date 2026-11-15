@@ -7,6 +7,66 @@ import XCTest
 
 final class ProgressivePlaybackTests: XCTestCase {
     @MainActor
+    func testHTTPAndLivePlaybackContinueDuringBackgroundCatalogWork() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokAudioStress-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for live in [false, true] {
+            let server = try ProgressiveHTTPServer(data: wave(duration: 20, sampleRate: 48_000, channels: 2), chunkDelay: 0.06)
+            defer { server.stop() }
+            let transport = SourceTransport(sourceID: "test.stress.vlc.\(UUID().uuidString)")
+            let stream = BufferedHTTPInputStream(url: server.url, transport: transport,
+                bufferBytes: 512 * 1024, bufferSeconds: 1, durationHint: live ? nil : 20, live: live)
+            let player = VLCPlaybackEngine()
+            player.volume = 0
+            defer { player.stop(); stream.close(); transport.invalidate() }
+            player.load(stream: stream, bufferSeconds: 1, durationHint: live ? nil : 20, live: live,
+                        supportsSeeking: { stream.supportsSeeking })
+            try await eventually(player: player, timeout: 15) { player.state == .playing && player.position > 0.2 }
+            let initialPosition = player.position
+            var beats = 0
+            var lastBeat = ProcessInfo.processInfo.systemUptime
+            var largestBeatGap: TimeInterval = 0
+            let heartbeat = Timer(timeInterval: 0.02, repeats: true) { _ in
+                MainActor.assumeIsolated {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    largestBeatGap = max(largestBeatGap, now - lastBeat)
+                    lastBeat = now; beats += 1
+                }
+            }
+            RunLoop.main.add(heartbeat, forMode: .common)
+            defer { heartbeat.invalidate() }
+            let databaseURL = directory.appendingPathComponent(live ? "live.sqlite" : "http.sqlite")
+            let importedCount = try await Task.detached(priority: .utility) {
+                let store = try LibraryStore(url: databaseURL)
+                let source = SourceRecord(id: "stress", kind: .openSubsonic, name: "Synthetic import", location: "https://music.invalid")
+                try store.saveSource(source)
+                let tracks = (0..<4_000).map { index in
+                    TrackRecord(id: "stress-\(index)", sourceID: source.id, title: "Track \(4_000 - index)",
+                                artist: "Artist \(index % 100)", album: "Album \(index / 10)", duration: 180)
+                }
+                let deadline = ProcessInfo.processInfo.systemUptime + 1.4
+                repeat {
+                    try store.replaceSourceTracks(sourceID: source.id, with: tracks)
+                    // Exercise the same Foundation comparison work as background library snapshots.
+                    _ = try store.tracks(sourceID: source.id, ordered: false).sorted {
+                        $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                    }
+                } while ProcessInfo.processInfo.systemUptime < deadline
+                return try store.tracks(sourceID: source.id, ordered: false).count
+            }.value
+            XCTAssertEqual(importedCount, 4_000)
+            XCTAssertGreaterThan(beats, 15, "The foreground heartbeat must keep running during catalog writes and sorting.")
+            XCTAssertLessThan(largestBeatGap, 0.75, "Background work must not monopolize the foreground executor.")
+            XCTAssertGreaterThan(player.position, initialPosition + 0.6,
+                                 live ? "Live radio must keep decoding during an import." : "HTTP playback must keep decoding during an import.")
+            XCTAssertEqual(player.state, .playing)
+            XCTAssertNil(player.lastError)
+            XCTAssertNil(stream.streamError)
+        }
+    }
+
+    @MainActor
     func testVariableBitratePodcastSeeksToSettledPlaybackWithAnInaccurateRSSDuration() async throws {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "variable-bitrate-podcast.mp3", withExtension: nil,
                                                   subdirectory: "Fixtures"))
@@ -33,7 +93,7 @@ final class ProgressivePlaybackTests: XCTestCase {
         XCTAssertLessThan(player.position, 43)
 
         var positions: [Double] = []
-        let observation = player.$position.sink { positions.append($0) }
+        let observation = player.timeline.$position.sink { positions.append($0) }
         defer { observation.cancel() }
         positions.removeAll()
         player.seek(to: 80)
