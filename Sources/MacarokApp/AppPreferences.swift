@@ -27,6 +27,17 @@ enum LibraryView: String, CaseIterable, Identifiable {
 
 enum ContextPage { case home, track, album, artist, folder }
 
+enum ContextMode: String, Codable, CaseIterable, Identifiable {
+    case context, lyrics
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+enum AddSourcePresenter: String, Identifiable {
+    case mainWindow, settings
+    var id: String { rawValue }
+}
+
 struct AppPreferences: Codable {
     var appearance: Appearance = .system
     var repeatMode: RepeatMode = .none

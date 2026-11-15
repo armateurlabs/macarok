@@ -91,6 +91,52 @@ final class NativeRenderingTests: XCTestCase {
             try await render(MetadataEditor(model: model, track: cueTrack), size: NSSize(width: 680, height: 720), scheme: scheme,
                              destination: output.appendingPathComponent("metadata-editor-\(suffix).png"))
         }
+        let duplicateSource = SourceRecord(id: "native-render-secondary", kind: .openSubsonic, name: "Second Library", location: "https://music.invalid")
+        try store.saveSource(duplicateSource)
+        let original = try XCTUnwrap(scan.tracks.first { !$0.isCUETrack })
+        var duplicate = original
+        duplicate.id = "native-render-duplicate-track"
+        duplicate.sourceID = duplicateSource.id
+        duplicate.fileURL = nil
+        duplicate.remoteID = "native-render-remote"
+        // Keep the same raw album identifier to exercise source-qualified presentation identity.
+        var longAlbum = original
+        longAlbum.id = "native-render-long-title-track"
+        longAlbum.albumID = "native-render-long-title-album"
+        longAlbum.album = "A Longer Album Title That Occupies Two Lines"
+        try store.upsertTracks([duplicate, longAlbum])
+        for track in [duplicate, longAlbum] { try store.recordPlay(trackID: track.id, at: Date()) }
+        model.sources = try store.sources()
+        model.libraryScope = .all
+        await model.waitForLibraryLoad()
+        XCTAssertEqual(Set(model.tracks.map(\.sourceID)), [source.id, duplicateSource.id])
+        XCTAssertEqual(Set(model.albums.map(\.presentationID)).count, model.albums.count)
+        XCTAssertEqual(model.albums.filter { $0.id == original.albumID }.count, 2)
+        let current = try XCTUnwrap(model.currentTrack)
+        let document = LRCParser.parse("[00:00.00]A quiet road beneath the stars\n[00:03.00]A second line for our synthetic song\n[00:06.00]The music carries on\n", source: .manual)
+        try store.saveLyrics(.from(document), for: LyricsLookupQuery(track: current), manual: true)
+
+        for scheme in [ColorScheme.light, .dark] {
+            let suffix = scheme == .light ? "light" : "dark"
+            model.contextMode = .context
+            model.libraryView = .home
+            model.contextPage = .home
+            try await render(MainWindow(model: model), size: NSSize(width: 1050, height: 860), scheme: scheme,
+                             destination: output.appendingPathComponent("all-home-narrow-\(suffix).png"))
+            try await render(MainWindow(model: model), size: NSSize(width: 1600, height: 1000), scheme: scheme,
+                             destination: output.appendingPathComponent("all-home-wide-\(suffix).png"))
+            model.inspectArtist(original.albumArtist)
+            try await render(MainWindow(model: model), size: NSSize(width: 1380, height: 860), scheme: scheme,
+                             destination: output.appendingPathComponent("artist-albums-\(suffix).png"))
+            model.contextMode = .lyrics
+            try await render(MainWindow(model: model), size: NSSize(width: 1380, height: 860), scheme: scheme,
+                             destination: output.appendingPathComponent("lyrics-synced-\(suffix).png"))
+            emptyModel.contextMode = .lyrics
+            try await render(ContextPane(model: emptyModel), size: NSSize(width: 370, height: 680), scheme: scheme,
+                             destination: output.appendingPathComponent("lyrics-empty-\(suffix).png"))
+            try await render(SettingsView(model: model, initialTab: .sources), size: NSSize(width: 650, height: 555), scheme: scheme,
+                             destination: output.appendingPathComponent("settings-sources-\(suffix).png"))
+        }
         XCTAssertEqual(model.player.state, .stopped)
     }
 

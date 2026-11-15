@@ -3,18 +3,26 @@ import KeyboardShortcuts
 import MacarokCore
 import SwiftUI
 
+enum SettingsTab: Hashable { case general, playback, shortcuts, sources }
+
 struct SettingsView: View {
     @Bindable var model: AppModel
+    @State private var selectedTab: SettingsTab
     @State private var removal: SourceRecord?
     @State private var credentialSource: SourceRecord?
     @State private var trustVersion = 0
 
+    init(model: AppModel, initialTab: SettingsTab = .general) {
+        self.model = model
+        _selectedTab = State(initialValue: initialTab)
+    }
+
     var body: some View {
-        TabView {
-            general.tabItem { Label("General", systemImage: "gearshape") }
-            playback.tabItem { Label("Playback", systemImage: "play.circle") }
-            shortcuts.tabItem { Label("Shortcuts", systemImage: "keyboard") }
-            sources.tabItem { Label("Sources", systemImage: "externaldrive.connected.to.line.below") }
+        TabView(selection: $selectedTab) {
+            general.tag(SettingsTab.general).tabItem { Label("General", systemImage: "gearshape") }
+            playback.tag(SettingsTab.playback).tabItem { Label("Playback", systemImage: "play.circle") }
+            shortcuts.tag(SettingsTab.shortcuts).tabItem { Label("Shortcuts", systemImage: "keyboard") }
+            sources.tag(SettingsTab.sources).tabItem { Label("Sources", systemImage: "externaldrive.connected.to.line.below") }
         }
         .frame(width: 650, height: 555)
         .confirmationDialog("Remove \(removal?.name ?? "Source")?", isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }), titleVisibility: .visible) {
@@ -24,6 +32,7 @@ struct SettingsView: View {
             Text("This removes its library entries and queued tracks from Macarok. Your audio files remain in place.")
         }
         .sheet(item: $credentialSource) { CredentialEditor(source: $0, model: model) }
+        .sheet(isPresented: Binding(get: { model.addSourcePresenter == .settings }, set: { if !$0 && model.addSourcePresenter == .settings { model.addSourcePresenter = nil } })) { AddSourceSheet(model: model) }
     }
 
     private var general: some View {
@@ -35,11 +44,12 @@ struct SettingsView: View {
                 Text("System follows the appearance selected in macOS.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Library") {
-                Picker("Double-click action", selection: $model.settings.doubleClickPlays) {
+                Picker("Track double-click", selection: $model.settings.doubleClickPlays) {
                     Text("Add to Active Playlist").tag(false)
                     Text("Play Now").tag(true)
                 }
                 Text("Double-clicking an entry in the active playlist always plays that entry.").font(.caption).foregroundStyle(.secondary)
+                Text("Double-clicking an album or artist always adds all its tracks to the active playlist.").font(.caption).foregroundStyle(.secondary)
             }
             Section("About") {
                 LabeledContent("Macarok", value: "0.1.0 · Private Beta")
@@ -123,41 +133,50 @@ struct SettingsView: View {
     }
 
     private var sources: some View {
-        Form {
-            if model.sources.isEmpty {
-                Section { ContentUnavailableView("No Sources", systemImage: "externaldrive", description: Text("Add a folder, OpenSubsonic server, or podcast from the main window.")) }
-            }
-            ForEach(model.sources) { source in
-                Section {
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: source.kind == .local ? "folder" : source.kind == .openSubsonic ? "server.rack" : "mic")
-                            .font(.title3).foregroundStyle(Color.accentColor).frame(width: 25)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(source.name).fontWeight(.medium)
-                            Text(source.location).font(.caption).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
-                            Text(source.kind.displayName).font(.caption2).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(role: .destructive) { removal = source } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless).help("Remove source")
-                    }
-                    if source.kind == .openSubsonic {
-                        HStack {
-                            Button("Edit Credentials…") { credentialSource = source }
+        VStack(spacing: 0) {
+            HStack {
+                Text("Music Sources").font(.headline)
+                Spacer()
+                Button("Add Source…", systemImage: "plus") { model.presentAddSource(from: .settings) }
+                    .accessibilityIdentifier("settingsAddSource")
+            }.padding(.horizontal, 20).frame(height: 48).background(.bar)
+            Divider()
+            Form {
+                if model.sources.isEmpty {
+                    Section { ContentUnavailableView("No Sources", systemImage: "externaldrive", description: Text("Add a folder, OpenSubsonic server, or podcast.")) }
+                }
+                ForEach(model.sources) { source in
+                    Section {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: source.kind == .local ? "folder" : source.kind == .openSubsonic ? "server.rack" : "mic")
+                                .font(.title3).foregroundStyle(Color.accentColor).frame(width: 25)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(source.name).fontWeight(.medium)
+                                Text(source.location).font(.caption).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
+                                Text(source.kind.displayName).font(.caption2).foregroundStyle(.secondary)
+                            }
                             Spacer()
-                            if let url = source.url, let host = url.host, url.scheme?.lowercased() == "https" {
-                                let fingerprint = CertificateTrustStore.shared.trustedFingerprint(sourceID: source.id, host: host, port: url.port ?? 443)
-                                if fingerprint != nil {
-                                    Button("Forget Certificate Trust") {
-                                        CertificateTrustStore.shared.revoke(sourceID: source.id, host: host, port: url.port ?? 443)
-                                        trustVersion += 1
-                                    }.help("The server will ask for trust on its next new connection.")
-                                } else { Label("macOS certificate validation", systemImage: "checkmark.shield").font(.caption).foregroundStyle(.secondary) }
+                            Button(role: .destructive) { removal = source } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless).help("Remove source")
+                        }
+                        if source.kind == .openSubsonic {
+                            HStack {
+                                Button("Edit Credentials…") { credentialSource = source }
+                                Spacer()
+                                if let url = source.url, let host = url.host, url.scheme?.lowercased() == "https" {
+                                    let fingerprint = CertificateTrustStore.shared.trustedFingerprint(sourceID: source.id, host: host, port: url.port ?? 443)
+                                    if fingerprint != nil {
+                                        Button("Forget Certificate Trust") {
+                                            CertificateTrustStore.shared.revoke(sourceID: source.id, host: host, port: url.port ?? 443)
+                                            trustVersion += 1
+                                        }.help("The server will ask for trust on its next new connection.")
+                                    } else { Label("macOS certificate validation", systemImage: "checkmark.shield").font(.caption).foregroundStyle(.secondary) }
+                                }
                             }
                         }
                     }
                 }
-            }
-        }.formStyle(.grouped).id(trustVersion)
+            }.formStyle(.grouped).id(trustVersion)
+        }
     }
 }
 

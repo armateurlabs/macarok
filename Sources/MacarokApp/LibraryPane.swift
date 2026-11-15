@@ -12,12 +12,10 @@ struct LibraryPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            PanelHeader { SourceMenu(model: model) }
+                .accessibilityIdentifier("libraryPanelHeader")
             VStack(spacing: 11) {
-                Picker("Source", selection: $model.sourceID) {
-                    if model.sources.isEmpty { Text("No sources configured").tag(String?.none) }
-                    ForEach(model.sources) { source in Label(source.name, systemImage: source.kind == .local ? "externaldrive" : source.kind == .openSubsonic ? "server.rack" : "podcasts").tag(Optional(source.id)) }
-                }.labelsHidden().frame(maxWidth: .infinity).controlSize(.large)
-                TextField("Search this library", text: $model.search).textFieldStyle(.roundedBorder).focused($searchFocused)
+                TextField(model.isAllSources ? "Search all sources" : "Search this library", text: $model.search).textFieldStyle(.roundedBorder).focused($searchFocused)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
                     ForEach(LibraryView.allCases) { view in
                         Button { model.libraryView = view } label: {
@@ -39,7 +37,7 @@ struct LibraryPane: View {
                 Button { model.shuffle(shuffleScope) } label: { Image(systemName: "shuffle") }.buttonStyle(.borderless).help(model.libraryView == .folders ? "Shuffle selected folder" : "Shuffle this library").disabled(model.tracks.isEmpty)
             }.padding(.horizontal, 15).padding(.bottom, 5)
             if model.sources.isEmpty {
-                VStack(spacing: 12) { Image(systemName: "music.note.house").font(.system(size: 28)).foregroundStyle(.tertiary); Text("Bring your music.").foregroundStyle(.secondary); Button("Add Music Folder…", action: model.pickFolder); Button("Connect a Source…") { model.showAddSource = true } }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 12) { Image(systemName: "music.note.house").font(.system(size: 28)).foregroundStyle(.tertiary); Text("Bring your music.").foregroundStyle(.secondary); Button("Add Music Folder…", action: model.pickFolder); Button("Connect a Source…") { model.presentAddSource(from: .mainWindow) } }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if (model.isLoadingLibrary && model.tracks.isEmpty) || (model.isSearching && model.displayedTracks.isEmpty) {
                 ProgressView(model.isSearching ? "Searching library…" : "Loading library…")
                     .controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -53,16 +51,17 @@ struct LibraryPane: View {
                         ForEach(model.artists) { artist in
                             DisclosureGroup(isExpanded: expansion(artist.id, in: $expandedArtists)) {
                                 if expandedArtists.contains(artist.id) {
-                                    ForEach(artist.albums) { album in
-                                        DisclosureGroup(isExpanded: expansion(album.id, in: $expandedAlbums)) {
-                                            if expandedAlbums.contains(album.id) {
+                                    ForEach(artist.albums, id: \.presentationID) { album in
+                                        DisclosureGroup(isExpanded: expansion(album.presentationID, in: $expandedAlbums)) {
+                                            if expandedAlbums.contains(album.presentationID) {
                                                 ForEach(album.tracks) { TrackLine(track: $0, model: model) }
                                             }
                                         } label: { albumLabel(album) }
                                     }
                                 }
                             } label: {
-                                HStack { Text(artist.name).lineLimit(1); Spacer(); Text("\(artist.albums.count)").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { model.inspectArtist(artist.name) }
+                                HStack { Text(artist.name).lineLimit(1); SourceGroupBadge(model: model, sourceIDs: artist.sourceIDs); Spacer(); Text("\(artist.albums.count)").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                                    .onLibraryClick(inspect: { model.inspectArtist(artist.name) }, add: { model.add(model.albumsForArtist(artist.name).flatMap(\.tracks)) })
                                     .contextMenu {
                                         LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") { model.albumsForArtist(artist.name).flatMap(\.tracks) }
                                         Button("Shuffle Artist") { model.shuffle(model.albumsForArtist(artist.name).flatMap(\.tracks)) }
@@ -70,12 +69,12 @@ struct LibraryPane: View {
                             }
                         }
                     case .albums:
-                        ForEach(model.visibleAlbums) { album in albumRow(album) }
+                        ForEach(model.visibleAlbums, id: \.presentationID) { album in albumRow(album) }
                     case .years:
                         ForEach(model.yearGroups) { group in
                             DisclosureGroup(isExpanded: expansion(group.id, in: $expandedYears)) {
                                 if expandedYears.contains(group.id) {
-                                    ForEach(group.albums) { albumRow($0) }
+                                    ForEach(group.albums, id: \.presentationID) { albumRow($0) }
                                 }
                             } label: { Text(group.title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
                         }
@@ -106,11 +105,17 @@ struct LibraryPane: View {
             Divider()
             VStack(alignment: .leading, spacing: 7) {
                 Text("\(model.albums.count) albums · \(model.tracks.count) tracks").font(.system(size: 10)).foregroundStyle(.secondary)
-                HStack { Image(systemName: model.selectedSource?.kind == .local ? "externaldrive" : "network"); Text(model.selectedSource?.kind == .local ? "Scan for Changes" : "Refresh Source"); Spacer() }.font(.system(size: 11)).contentShape(Rectangle()).onTapGesture { model.refresh() }
+                Button(action: model.refresh) {
+                    HStack {
+                        Image(systemName: model.isAllSources ? "arrow.clockwise" : model.selectedSource?.kind == .local ? "externaldrive" : "network")
+                        Text(model.isAllSources ? "Refresh All Sources" : model.selectedSource?.kind == .local ? "Scan for Changes" : "Refresh Source")
+                        Spacer()
+                    }.font(.system(size: 11)).contentShape(Rectangle())
+                }.buttonStyle(.plain).disabled(model.sources.isEmpty || model.isRefreshing)
             }.padding(13)
         }.background(.regularMaterial)
         .onReceive(NotificationCenter.default.publisher(for: .macarokFocusSearch)) { _ in searchFocused = true }
-        .onChange(of: model.sourceID) { _, _ in
+        .onChange(of: model.libraryScope) { _, _ in
             expandedArtists = []; expandedAlbums = []; expandedYears = []; expandedGenres = []; expandedFormats = []
         }
     }
@@ -125,7 +130,8 @@ struct LibraryPane: View {
     }
 
     private func albumLabel(_ album: AlbumRecord) -> some View {
-        HStack { Text(album.title).lineLimit(1); Spacer(); Text(album.year.map(String.init) ?? "").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 11)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { model.inspect(album) }
+        HStack { Text(album.title).lineLimit(1); SourceBadge(model: model, sourceID: album.sourceID); Spacer(); Text(album.year.map(String.init) ?? "").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 11)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            .onLibraryClick(inspect: { model.inspect(album) }, add: { model.add(model.tracksForAlbum(album)) })
             .contextMenu {
                 LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
                 Button("Shuffle Album") { model.shuffle(model.tracksForAlbum(album)) }
@@ -133,7 +139,8 @@ struct LibraryPane: View {
     }
 
     private func albumRow(_ album: AlbumRecord) -> some View {
-        HStack(spacing: 9) { ArtworkView(track: album.tracks.first, model: model).frame(width: 36, height: 36); VStack(alignment: .leading, spacing: 2) { Text(album.title).lineLimit(1); Text("\(album.artist) · \(album.year.map(String.init) ?? "—")").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) } }.font(.system(size: 12)).padding(.vertical, 3).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture(count: 2) { model.add(model.tracksForAlbum(album), play: model.settings.doubleClickPlays) }.onTapGesture { model.inspect(album) }
+        HStack(spacing: 9) { ArtworkView(track: album.tracks.first, model: model).frame(width: 36, height: 36); VStack(alignment: .leading, spacing: 2) { Text(album.title).lineLimit(1); Text("\(album.artist) · \(album.year.map(String.init) ?? "—")").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1); SourceBadge(model: model, sourceID: album.sourceID) } }.font(.system(size: 12)).padding(.vertical, 3).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            .onLibraryClick(inspect: { model.inspect(album) }, add: { model.add(model.tracksForAlbum(album)) })
             .contextMenu {
                 LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
                 Button("Shuffle Album") { model.shuffle(model.tracksForAlbum(album)) }
@@ -148,7 +155,7 @@ struct FolderLibrary: View {
         Section {
             if !model.folderNodes.isEmpty {
                 OutlineGroup(model.folderNodes, children: \.children) { node in
-                    Label(node.name, systemImage: "folder").font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { model.selectedFolder = node.id; model.contextPage = .folder }
+                    Label(node.name, systemImage: "folder").font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { model.inspectFolder(node.id) }
                         .contextMenu { Button("Shuffle Folder") { model.shuffle(model.tracksInFolder(node.id)) }; Button("Add Folder to Playlist") { model.add(model.tracksInFolder(node.id)) } }
                 }
             }

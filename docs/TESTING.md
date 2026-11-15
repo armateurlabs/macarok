@@ -8,6 +8,10 @@ swift test
 
 The core tests cover source-isolated SQLite search, reindexing without lost history or playlists, CUE timestamps and native sample boundaries, artwork caching, explicit file and playlist imports, OpenSubsonic requests, podcast parsing, and playlist serialization.
 
+`LibraryScopeTests` and `AllSourcesTests` cover aggregate FTS reads, normalized artists, duplicate album IDs and folder paths across origins, global rankings before limiting, persisted selection migration, held snapshots during source creation/removal, serial progressive refresh with an offline origin, cancellation, and coalesced local-origin rescans.
+
+`LyricsTests`, `OpenSubsonicLyricsTests`, and `LyricsControllerTests` use injected providers/transports to cover resolution precedence, manual corrections, metadata fingerprints, cache misses, duration matching, throttling/Retry-After, provider serialization, late responses, sheet targets, and line highlighting after seek/pause. `LyricsFileServiceTests` exercises MP3/FLAC/Vorbis/Opus round-trips, unrelated tag preservation, FLAC audio-frame preservation, CUE slicing/export reloads, and partial-write failures. These tests do not contact LRCLIB or submit lyrics.
+
 The suite also exercises actual VLCKit playback of synthetic MP3, FLAC, Vorbis, and Opus; CUE segment boundaries; a throttled HTTP stream that starts before download completes; validated Range seeking; and live loopback HTTPS certificate acceptance, changes, and rejection. Controller tests cover queue restoration, duplicate entries, shortcut disabling, refresh cancellation, and changes received during a scan.
 
 The menu-tracking regression plays a silent WAV through real VLC while pumping only the main run loop's event-tracking mode. Sentinel timers verify that default-mode sources stay suspended and common-mode sources run. The playback position must advance before returning to the default loop, and remain stable after pause or stop. This regression fails against the former delegate-only timeline updates.
@@ -52,7 +56,7 @@ Native component renders can be generated after creating the demo library:
 MACAROK_SNAPSHOT_DIRECTORY="$PWD/.build/native-snapshots" swift test --filter NativeRenderingTests
 ```
 
-This renders Home, a CUE album, track tags, Settings, and the metadata editor in both appearances using offscreen AppKit/SwiftUI views. It does not capture the screen or verify mouse, keyboard, file-picker, or media-key interaction.
+This renders Home, All Sources with duplicate names, narrow/wide layouts, artist albums, synchronized/empty Lyrics, a CUE album, track tags, Settings, and the metadata editor in both appearances using offscreen AppKit/SwiftUI views. `AlbumTileGeometryTests` measures mixed title lengths and square/portrait/landscape artwork before and after loading. These checks do not capture the screen or verify mouse, keyboard, file-picker, or media-key interaction.
 
 ## Run without using the regular library database
 
@@ -71,9 +75,13 @@ Clear Playlist should keep only the current queue entry and leave its playback p
 
 Right-click tracks, albums, and artists in the library and Home lists. Play Now should append the selection and start it immediately. Search for part of an album, switch library tabs, and confirm that each tab keeps its normal grouping and the query remains visible. Choosing Play Now for a matching album or artist should include its complete track list.
 
+Double-click artist and album rows to append their complete selection while keeping playback intact. Choose Add After Current Track on each entity type; confirm insertion order, independent duplicate queue entries, and unchanged playback position. Without a current entry, the same action appends at the end.
+
 Open each codec-check file and verify playback advances without an error. For CUE tracks, inspect tags and confirm that playback starts and ends at the selected segment. Export an M3U playlist and import it again to verify that segment boundaries survive.
 
-Use a second folder or a test OpenSubsonic server to verify that library views and Home remain separate per source. Switch between System, Light, and Dark appearances and inspect selections, artwork, metadata sheets, and settings.
+Use a second folder or a test OpenSubsonic server to verify single-source browsing, then choose All Sources. Duplicate albums/tracks should remain distinct with source labels; artists with matching case/whitespace-normalized names should group together. Folder roots stay source-specific. Search and shuffle follow the scope. Switching scope should not interrupt playback. Restart to verify persisted selection; use Refresh All Sources to verify progressive serial imports, partial caches, and error summaries.
+
+Open Lyrics while playing, pause and seek, and toggle Auto-scroll. Switch browsing sources and inspect another track; lyrics should keep following the current queue entry. Use Find Lyrics and Edit / Paste; change playback while an editor is open and confirm the correction applies to its original target. Save to Files only against generated fixtures, then reload ordinary and CUE sidecars. Close the main window, open Settings → Sources, and add a test source, including certificate acceptance/rejection and closing a pending connection dialog. Switch between System, Light, and Dark appearances and inspect selections, artwork, metadata sheets, and settings.
 
 For real-server integration checks, use a dedicated OpenSubsonic account and podcast feed. Exercise HTTP, valid HTTPS, and a self-signed server: certificate acceptance is scoped to that server, and changed certificates require a new decision. Playback, artwork, and library requests should follow the same trust policy.
 

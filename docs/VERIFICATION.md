@@ -4,6 +4,10 @@ Baseline verified on 14 November 2026 with Xcode 27.1, Swift 6.4, and macOS 27.2
 
 ## Completed checks
 
+- The unified-library and synchronized-lyrics implementation passed the full suite on 15 November: **186 tests, zero failures** — Core 88, Metadata 17, Audio 8, App 73. A subsequent 13-test native UI/controller run passed after the final menu alignment and caption changes. Twenty-six isolated native renders cover both appearances, narrow/wide layouts, duplicate source names/albums, synchronized/empty lyrics, and Settings Sources. Gated tests exercise stale loads, serial partial refresh, local rescan queues, dialog-owned/late certificate approvals, and retained editor targets. File tests verify supported-codec tags, CUE sidecar boundaries, export reloads, audio preservation, and cache retention after partial writes.
+- The Release bundle was built and passed deep strict signature verification. A separately identified validation copy used an isolated SQLite directory and synthetic HTTPS server. With the main window closed, Settings → Sources successfully opened Add Source, presented its nested certificate prompt, accepted the test leaf, and created/indexed the source. A second connection rejected the certificate and was cancelled without adding another source. The validation app/server were stopped and their synthetic credentials removed afterward.
+- The artist/album double-click and Add After Current Track follow-up passed the complete expanded suite: **191 tests, zero failures** — Core 88, Metadata 17, Audio 8, App 78. Five insertion tests cover independent duplicate queue entries, ordered multi-source groups, missing-current fallback, availability filtering, queue persistence, and uninterrupted real-VLC playback at the current position.
+- In the final Release validation copy, double-clicking the cached artist appended its three tracks; double-clicking its album appended another three. The album context menu exposed Add After Current Track, and invoking it without a current entry appended the ordered three-track group. Playback remained stopped throughout these native gesture checks.
 - The complete suite passed: **87 tests, zero failures** — Core 50, Metadata 12, Audio 7, App 18.
 - The 15 November progressive-import and UI-freeze follow-up passed the expanded complete suite: **110 tests, zero failures**. A subsequent controller run verifies incomplete-import persistence across restarts.
 - The subsequent background-library refactor passed **125 tests, zero failures**. Gated background jobs verify that navigation, a MainActor heartbeat, and queue saving remain available during catalog preparation. Preparing the complete synthetic 50,000-track/5,000-album/100-year snapshot took about 0.66 seconds in the Debug test run, outside UI code.
@@ -31,7 +35,7 @@ Build/test logs and full-resolution renders are kept under the ignored `.build` 
 
 The Mac was locked during the initial automated run. On 15 November, the empty-window height issue was reproduced in the running app and visually verified after rebuilding and reopening the corrected Release bundle. Four new geometry regressions cover no sources, a configured empty source, a populated library with an empty queue, and unmatched search results, in both appearances at several window sizes. The original code fails the empty-window regression. All four tests and the existing native render test pass.
 
-File pickers, double-click timing, drag/reorder, custom shortcut recording, Mac media keys, and accepting a certificate through the native modal still need manual verification. The corresponding controller/transport paths have automated coverage.
+File pickers, drag/reorder, custom shortcut recording, and Mac media keys still need manual verification. The corresponding controller/transport paths have automated coverage. Artist/album double-clicks and Settings-owned certificate acceptance/rejection with the main window closed were exercised in the isolated validation app.
 
 Live MusicBrainz/AcoustID results and personal OpenSubsonic servers have not been verified. Metadata lookup protocol tests use fixtures; AcoustID requires your own application client key. Follow `TESTING.md` and `DEMO-SERVER.md` for a reproducible manual session with synthetic data.
 
@@ -41,5 +45,5 @@ Live MusicBrainz/AcoustID results and personal OpenSubsonic servers have not bee
 - Metadata and artwork replacement is atomic per file. An operation across several files can partially save before a later error.
 - Recording fingerprint identification supports whole local files. Individual CUE tracks and remote streams use metadata search instead.
 - Servers that compress byte-range responses or cap an open-ended range before EOF fail explicitly; automatic stitching of such ranges is not implemented.
-- Gapless playback is optional. Crossfade, commercial-service playback, merged source libraries, and direct cloud-storage integration are outside this iteration.
+- Gapless playback is optional. Crossfade, dedicated commercial-service connectors, and direct cloud-storage integration are outside this iteration. All Sources unifies presentation while retaining separate stored copies and origin references.
 - Release DMGs currently target Apple Silicon and macOS 14 or later. The application is ad-hoc signed without Apple notarization.

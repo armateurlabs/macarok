@@ -25,20 +25,25 @@ To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.1.0 1`.
 
 ## Native application
 
-- Three resizable panels: source-specific library, listening context, and active playlist.
+- Three resizable panels: library, listening context/lyrics, and active playlist, with matching panel headers.
+- Browse one source or opt into All Sources; artist names group together while albums, tracks, folders, and credentials retain their origins.
 - System, Light, and Dark appearances; artist, album, year, folder, and tag browsing.
 - Local MP3, FLAC, Ogg Vorbis, Opus, and other TagLib/VLC formats; OpenSubsonic original streams; RSS/Atom podcasts.
 - CUE sheets expose individual tracks without splitting the original audio.
-- Persistent playlists, queue, listening history, ratings, and source-isolated search through SQLite/FTS5.
-- Double-click to append a track; right-click a track, album, or artist for Play Now; contextual shuffle and a None / Playlist / Track repeat button.
+- Persistent playlists, queue, listening history, ratings, and scope-aware search through SQLite/FTS5.
+- Home includes Recently Added, Recently Played, and separate Tracks, Artists, and Albums rankings.
+- Synchronized lyrics from local files, OpenSubsonic, and LRCLIB, with manual search/corrections, caching, highlighting, and optional file export.
+- Double-click a track, album, or artist to append it; right-click for Play Now or Add After Current Track. Contextual shuffle and a None / Playlist / Track repeat button.
 - Mac media keys, configurable local and global shortcuts, and adjustable streaming buffering.
 - Metadata cleanup, MusicBrainz release matching with change previews, TagLib file writes, and embedded/local/web artwork.
 - Optional recording identification through Chromaprint and AcoustID, using your own application client key stored in Keychain.
 - HTTP and HTTPS, with explicit server-specific trust for self-signed certificates shared by library, artwork, and audio requests.
 
-The first release uses separate libraries for each source. Crossfade and quality-tuning controls are outside its scope. Gapless playback is optional. Commercial streaming services appear only as unavailable future connectors.
+Single-source browsing remains the default. All Sources combines cached indexes and refreshes each source serially when requested; it does not merge stored copies. Crossfade and quality-tuning controls are outside the current scope. Gapless playback is optional. Bandcamp libraries exposed through OpenSubsonic use that connector.
 
 AcoustID lookup sends a fingerprint and duration after an explicit Identify action. It supports whole local files; individual CUE tracks use artist/album metadata search. Remote edits are local library overlays. Each local file replacement is atomic; an album spanning several files can be partially saved if a later file fails.
+
+Lyrics are retrieved only while the Lyrics panel is open, following the current queue track or the inspected track when no current entry exists. Automatic LRCLIB lookup sends the title, artist, album, and duration to that public service after local/server fallbacks. Edit / Paste saves a private library correction. Save to Files is explicit: local audio receives lyrics tags and synchronized sidecars; CUE segments receive separate track sidecars. Remote originals are never written and lyrics are never submitted publicly. See [lyrics behavior and storage](docs/LYRICS.md).
 
 See [verification and remaining manual checks](docs/VERIFICATION.md), [testing and synthetic demo data](docs/TESTING.md), [product decisions](docs/PRODUCT.md), and the [direct cloud-storage feasibility study](docs/CLOUD-STORAGE.md).
 
@@ -49,6 +54,8 @@ Offscreen renders of the implemented SwiftUI views, using the synthetic demo col
 ![Native Home in light mode](design/native/home-light.png)
 
 ![Native CUE album in dark mode](design/native/cue-album-dark.png)
+
+![Synchronized lyrics in dark mode](design/native/lyrics-dark.png)
 
 ## Explore the mockups
 

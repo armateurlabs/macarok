@@ -14,6 +14,7 @@ struct AddSourceSheet: View {
     @State private var isConnecting = false
     @State private var errorMessage: String?
     @State private var connectionTask: Task<Void, Never>?
+    @State private var presentedCertificateIDs: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -21,7 +22,7 @@ struct AddSourceSheet: View {
                 Image(systemName: "music.note.house").font(.system(size: 28)).foregroundStyle(Color.accentColor)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Add a Music Source").font(.title2.weight(.semibold))
-                    Text("Each source keeps its own library, search, and listening history.").font(.callout).foregroundStyle(.secondary)
+                    Text("Browse sources together or choose an individual library.").font(.callout).foregroundStyle(.secondary)
                 }
             }
             Picker("Source", selection: $kind) {
@@ -69,10 +70,13 @@ struct AddSourceSheet: View {
         }
         .padding(24).frame(width: 570, height: kind == .openSubsonic ? 500 : 390)
         .onChange(of: kind) { _, _ in errorMessage = nil }
-        .onDisappear { connectionTask?.cancel() }
+        .onDisappear { connectionTask?.cancel(); rejectOwnedCertificatePrompts() }
         .interactiveDismissDisabled(isConnecting)
-        .sheet(isPresented: Binding(get: { !model.certificatePrompts.isEmpty }, set: { if !$0 { model.answerCertificate(false) } })) {
-            if let prompt = model.certificatePrompts.first { CertificateSheet(prompt: prompt, answer: model.answerCertificate) }
+        .sheet(isPresented: Binding(get: { !model.certificatePrompts.isEmpty }, set: { if !$0 { rejectOwnedCertificatePrompts() } })) {
+            if let prompt = model.certificatePrompts.first {
+                CertificateSheet(prompt: prompt, answer: model.answerCertificate)
+                    .onAppear { presentedCertificateIDs.insert(prompt.id) }
+            }
         }
     }
 
@@ -131,6 +135,18 @@ struct AddSourceSheet: View {
     }
     private var validCredentials: Bool {
         useAPIKey ? !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty : !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func rejectOwnedCertificatePrompts() {
+        let host = URL(string: normalizedAddress)?.host?.lowercased()
+        let knownSourceIDs = Set(model.sources.map(\.id))
+        let owned = model.certificatePrompts.filter { prompt in
+            presentedCertificateIDs.contains(prompt.id)
+                || (isConnecting && prompt.challenge.host.lowercased() == host && !knownSourceIDs.contains(prompt.challenge.sourceID))
+        }
+        let ids = Set(owned.map(\.id))
+        model.certificatePrompts.removeAll { ids.contains($0.id) }
+        for prompt in owned { prompt.completion(false) }
     }
 
     private func connect() {

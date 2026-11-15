@@ -56,7 +56,7 @@ extension AppModel {
                     self.scanWarnings = result.warnings
                     matches = imported.matches
                     self.sources = imported.sources
-                    self.sourceID = source.id
+                    self.selectAddedSource(source.id)
                     self.reloadLibrary()
                 }
 
@@ -104,7 +104,7 @@ extension AppModel {
                     else { try store.upsertTracks(result.tracks) }
                     return try store.sources()
                 }
-                self.sourceID = source.id
+                self.selectAddedSource(source.id)
                 self.reloadLibrary()
                 self.scanWarnings = result.warnings
                 guard !result.tracks.isEmpty else {
@@ -143,7 +143,7 @@ extension AppModel {
     }
 
     func tracksInFolder(_ path: String) -> [TrackRecord] {
-        cachedTracksInFolder(LibraryFolderPathResolver.normalize(path))
+        cachedTracksInFolder(isAllSources ? path : LibraryFolderPathResolver.normalize(path))
     }
 
     var folderTracks: [TrackRecord] { tracksInFolder(selectedFolder ?? "") }

@@ -16,9 +16,13 @@ Provide System, Light, and Dark appearances with readable selections, secondary 
 
 Library views include Artists, Albums, Years, Folders, and Tags. Folder browsing follows the source's directory hierarchy; tag browsing uses musical metadata.
 
-Home contains Recently Added, Recently Played, and Most Played. Most Played can show albums, tracks, or artists. Every library view, search, and homepage section belongs to the selected source.
+Home contains Recently Added, Recently Played, and Most Played. Most Played has separate horizontal Tracks, Artists, and Albums rows, each showing up to eight entries. Every library view, search, homepage section, and library shuffle follows the selected library scope.
+
+The three panels share a 42-point bar header and a full-width bottom divider. Library search/navigation sits below its header. Album artwork is square; captions reserve two title lines and one artist line. The permanent Context / Lyrics selector preserves context navigation when switching modes. Sources can be added directly from Settings while the main window is closed; the presenting window owns connection and certificate dialogs.
 
 A single click inspects an item. Double-clicking a library track appends it to the active playlist without interrupting playback. Double-clicking a playlist entry plays it. The library double-click action is configurable.
+
+Double-clicking an artist or album always appends its complete selection, including when search shows only some matching tracks. The configurable double-click preference applies to individual tracks. Artist, album, and track context menus offer Add After Current Track, which inserts the selection in order immediately after the current queue entry without interrupting it. Without a current entry, the selection appends to the queue. Repeated copies receive independent queue identities.
 
 Right-click a track, album, or artist to choose Play Now. It appends the selection to the active playlist and immediately starts its first track. Album and artist actions resolve the complete selection even when search shows only some matching tracks.
 
@@ -28,9 +32,11 @@ Search retains the selected library presentation: artist/album hierarchy, albums
 
 ## Sources and connections
 
-The first iteration supports local files, OpenSubsonic servers, and podcasts. Each configured source has a separate library. Playlist entries retain their source references.
+The application supports local files, OpenSubsonic servers, and podcasts. Existing single-source selection remains the default. The optional All Sources scope combines cached indexes without starting network scans. Artists group by case/whitespace-normalized name. Albums and tracks remain distinct copies with source labels, and Folders has one root per source. Playlist entries, credentials, history, artwork, file writes, and lyrics retain their actual source references.
 
-Direct cloud-storage access requires a separate feasibility study. Future integrations may include Spotify, Qobuz, Deezer, and Bandcamp. Keep source access modular, with future connector placeholders visibly unavailable. Web radio is outside the initial release.
+Scope selection persists across launches and migrates the former selected-source preference. Adding/removing sources preserves All Sources. Show in Library keeps All Sources when it includes the selected track. Snapshot and search publication checks both scope and source-list revision. All Sources refresh runs source jobs serially, publishes partial progress, preserves committed caches, continues after individual failures, and summarizes errors. Each included local source has its own watcher and coalesced rescan request.
+
+Direct cloud-storage access requires a separate feasibility study. Future integrations may include Spotify, Qobuz, and Deezer. Bandcamp already works when exposed through OpenSubsonic; there is no separate Bandcamp connector. Keep source access modular, with future connector placeholders visibly unavailable. Web radio is outside the initial release.
 
 Support HTTP and HTTPS. Self-signed certificates require explicit acceptance, remembered for the relevant server. Certificate changes require a new decision. Apply a consistent source-specific trust policy to metadata requests, artwork, and audio delivery.
 
@@ -70,7 +76,7 @@ There is no crossfade or crossfade setting. Gapless playback is desirable but do
 
 One repeat button cycles through **None → Playlist → Track → None**. Both active modes use a selected appearance; track repeat adds a "1" indicator.
 
-Shuffle mixes tracks within the selected artist, album, folder including subfolders, or the entire selected-source library.
+Shuffle mixes tracks within the selected artist, album, folder including subfolders, or the entire selected library scope.
 
 Support Mac media keys and customizable in-app and global shortcuts. Space toggles playback inside the application when the user is not editing text.
 

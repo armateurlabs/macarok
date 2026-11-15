@@ -11,5 +11,6 @@ struct LibraryPlaybackActions: View {
             Label("Play Now", systemImage: "play.fill")
         }
         Button(addTitle) { model.add(tracks()) }
+        Button("Add After Current Track") { model.addAfterCurrent(tracks()) }
     }
 }

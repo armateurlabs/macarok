@@ -39,7 +39,7 @@ final class LibrarySnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.sourceID, source.id)
         XCTAssertEqual(snapshot.tracks.map(\.id), [first.id])
         XCTAssertEqual(snapshot.tracksByID[first.id]?.title, "First")
-        XCTAssertEqual(snapshot.albumsByID.keys.sorted(), ["album"])
+        XCTAssertEqual(snapshot.albumsByID.keys.sorted(), [StableID.make(source.id, "album", "album")])
         XCTAssertEqual(snapshot.artists.first?.trackCount, 1)
         XCTAssertEqual(snapshot.artists.first?.playCount, 7)
         XCTAssertEqual(snapshot.tracksByFolder[""]?.count, 1)
@@ -72,7 +72,7 @@ final class LibrarySnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.recentlyPlayed.map(\.id), ["studio", "live"])
         XCTAssertEqual(snapshot.mostPlayedTracks.map(\.id), ["live", "studio"])
         XCTAssertEqual(snapshot.mostPlayedArtists.first?.playCount, 5)
-        XCTAssertEqual(snapshot.artistsByName["Artist"]?.albums.count, 2)
+        XCTAssertEqual(snapshot.artistsByName["artist"]?.albums.count, 2)
     }
 
     func testGroupOrderingIsDeterministicAcrossInputOrders() throws {

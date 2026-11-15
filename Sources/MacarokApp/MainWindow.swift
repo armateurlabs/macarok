@@ -32,8 +32,7 @@ struct MainWindow: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
-                Menu { Button("Add Music Folder…", action: model.pickFolder); Button("Connect a Source…") { model.showAddSource = true } } label: { Image(systemName: "plus") }.help("Add a source")
-                Button { model.refresh() } label: { Image(systemName: "arrow.clockwise") }.help("Refresh selected source").disabled(model.selectedSource == nil || model.isRefreshing)
+                Button { model.refresh() } label: { Image(systemName: "arrow.clockwise") }.help(model.isAllSources ? "Refresh all sources" : "Refresh selected source").disabled(model.sources.isEmpty || model.isRefreshing)
             }
             ToolbarItem(placement: .principal) { Text("Macarok").fontWeight(.semibold) }
             ToolbarItemGroup(placement: .primaryAction) {
@@ -43,10 +42,10 @@ struct MainWindow: View {
                 SettingsLink { Image(systemName: "slider.horizontal.3") }.help("Settings")
             }
         }
-        .sheet(isPresented: $model.showAddSource) { AddSourceSheet(model: model) }
+        .sheet(isPresented: Binding(get: { model.addSourcePresenter == .mainWindow }, set: { if !$0 && model.addSourcePresenter == .mainWindow { model.addSourcePresenter = nil } })) { AddSourceSheet(model: model) }
         .sheet(item: $model.editingTrack) { MetadataEditor(model: model, track: $0) }
         .sheet(item: $model.artworkTrack) { ArtworkChooser(model: model, track: $0) }
-        .sheet(isPresented: Binding(get: { !model.showAddSource && !model.certificatePrompts.isEmpty }, set: { if !$0 && !model.showAddSource { model.answerCertificate(false) } })) {
+        .sheet(isPresented: Binding(get: { model.addSourcePresenter == nil && !model.certificatePrompts.isEmpty }, set: { if !$0 && model.addSourcePresenter == nil { model.answerCertificate(false) } })) {
             if let prompt = model.certificatePrompts.first { CertificateSheet(prompt: prompt, answer: model.answerCertificate) }
         }
         .alert(item: $model.message) { Alert(title: Text($0.title), message: Text($0.detail), dismissButton: .default(Text("OK"))) }
@@ -107,7 +106,7 @@ struct QueuePane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 9) {
+            PanelHeader {
                 Text("Active Playlist").fontWeight(.semibold)
                 Text("\(model.queue.count)").foregroundStyle(.secondary)
                 Spacer(minLength: 5)
@@ -115,8 +114,7 @@ struct QueuePane: View {
                 Button(action: model.cycleRepeat) { Image(systemName: model.settings.repeatMode.symbol).frame(width: 23, height: 23).background(model.settings.repeatMode == .none ? Color.clear : Color.accentColor.opacity(0.17), in: RoundedRectangle(cornerRadius: 5)).foregroundStyle(model.settings.repeatMode == .none ? Color.secondary : Color.accentColor) }
                     .help("Repeat: \(model.settings.repeatMode.title) · Next: \(model.settings.repeatMode.next.title)").accessibilityLabel("Repeat: \(model.settings.repeatMode.title)")
                 Menu { Button("Save Playlist…") { model.savePlaylist() }; Button("Export Playlist…") { model.exportPlaylist() }; Divider(); Button("Clear Playlist", role: .destructive, action: model.clearQueue) } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
-            }.font(.system(size: 12)).buttonStyle(.borderless).padding(.horizontal, 13).frame(height: 42).background(.bar)
-            Divider()
+            }.accessibilityIdentifier("playlistPanelHeader")
             if model.queue.isEmpty {
                 ContentUnavailableView { Label("Your playlist is empty", systemImage: "music.note.list") } description: { Text("Double-click a library track to add it here.") }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -131,12 +129,13 @@ struct QueuePane: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.track.title).fontWeight(item.id == model.currentQueueID ? .semibold : .regular).lineLimit(1)
                                 Text(item.track.artist + (item.track.isCUETrack ? " · CUE" : "")).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                                SourceBadge(model: model, sourceID: item.track.sourceID)
                             }
                             Spacer(minLength: 3)
                             Text(item.track.formattedDuration).font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
                         }.font(.system(size: 12)).padding(.vertical, 4).contentShape(Rectangle()).tag(item.id)
                             .onTapGesture(count: 2) { model.playQueueItem(item.id) }
-                            .contextMenu { Button("Play Now") { model.playQueueItem(item.id) }; Button("Show in Library") { model.sourceID = item.track.sourceID; model.inspect(item.track) }; Divider(); Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } } }
+                            .contextMenu { Button("Play Now") { model.playQueueItem(item.id) }; Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }; Divider(); Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } } }
                     }.onMove(perform: model.moveQueue).onDelete(perform: model.removeQueue)
                 }.listStyle(.inset(alternatesRowBackgrounds: true))
                 .onDeleteCommand { if let id = model.selectedQueueID, let index = model.queue.firstIndex(where: { $0.id == id }) { model.removeQueue(IndexSet(integer: index)) } }
@@ -154,10 +153,19 @@ struct ArtworkView: View {
     @State private var image: NSImage?
 
     var body: some View {
-        ZStack {
-            if let image { Image(nsImage: image).resizable().scaledToFill() }
-            else { Rectangle().fill(.quaternary); Image(systemName: "opticaldisc").resizable().scaledToFit().foregroundStyle(.tertiary).padding(13) }
-        }.clipped().clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        Rectangle().fill(.quaternary)
+            .overlay {
+                if let image {
+                    GeometryReader { geometry in
+                        Image(nsImage: image).resizable().scaledToFill()
+                            .frame(width: max(0, geometry.size.width), height: max(0, geometry.size.height))
+                            .clipped()
+                    }
+                } else {
+                    Image(systemName: "opticaldisc").resizable().scaledToFit().foregroundStyle(.tertiary).padding(13)
+                }
+            }
+            .clipped().clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .task(id: "\(track?.artworkPath ?? track?.id ?? "")-\(model?.artworkRevision ?? 0)") {
             if let path = track?.artworkPath {
                 let data = await Task.detached(priority: .utility) { try? Data(contentsOf: URL(fileURLWithPath: path)) }.value
@@ -175,7 +183,11 @@ struct TrackLine: View {
     var body: some View {
         HStack(spacing: 7) {
             Text(track.trackNumber.map { String(format: "%02d", $0) } ?? "").font(.system(size: 10)).foregroundStyle(.tertiary).frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) { Text(track.title).lineLimit(1); if showsArtist { Text(track.artist).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) } }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.title).lineLimit(1)
+                if showsArtist { Text(track.artist).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) }
+                SourceBadge(model: model, sourceID: track.sourceID)
+            }
             if track.isCUETrack { Text("CUE").font(.system(size: 8, weight: .medium)).padding(.horizontal, 3).background(.quaternary, in: RoundedRectangle(cornerRadius: 2)).foregroundStyle(.secondary) }
             Spacer(minLength: 4)
             Text(track.formattedDuration).font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()

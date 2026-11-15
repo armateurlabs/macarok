@@ -245,12 +245,35 @@ public struct OpenSubsonicClient: Sendable {
     }
 
     public func lyrics(songID: String) async throws -> String? {
+        try await structuredLyrics(songID: songID).first?.plainText
+    }
+
+    public func structuredLyrics(songID: String) async throws -> [LyricsDocument] {
         let response = try await request("getLyricsBySongId", parameters: ["id": songID])
-        let list = response["lyricsList"] as? [String: Any] ?? [:]
-        let lyrics = list["structuredLyrics"] as? [[String: Any]] ?? []
-        guard let first = lyrics.first else { return nil }
-        let lines = (first["line"] as? [[String: Any]] ?? []).compactMap { string($0["value"]) }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+        guard let rawList = response["lyricsList"] else { return [] }
+        guard let list = rawList as? [String: Any] else { throw SourceNetworkError.invalidResponse }
+        guard let rawLyrics = list["structuredLyrics"] else { return [] }
+        guard let lyrics = rawLyrics as? [[String: Any]] else { throw SourceNetworkError.invalidResponse }
+        return try lyrics.enumerated().compactMap { index, entry in
+            guard let rawRows = entry["line"] else { return nil }
+            guard let rows = rawRows as? [[String: Any]], rows.allSatisfy({ $0["value"] is String }) else {
+                throw SourceNetworkError.invalidResponse
+            }
+            let plain = rows.compactMap { $0["value"] as? String }.joined(separator: "\n")
+            let rawOffset = (entry["offset"] as? NSNumber)?.doubleValue ?? Double(entry["offset"] as? String ?? "") ?? 0
+            let offset = rawOffset.isFinite ? rawOffset / 1_000 : 0
+            let timed: [LyricsLine] = try rows.enumerated().compactMap { lineIndex, row in
+                guard entry["synced"] as? Bool == true, let text = row["value"] as? String,
+                      let start = row["start"] else { return nil }
+                guard let milliseconds = (start as? NSNumber)?.doubleValue ?? Double(start as? String ?? ""),
+                      milliseconds.isFinite else { throw SourceNetworkError.invalidResponse }
+                return LyricsLine(id: StableID.make(songID, String(index), String(lineIndex)),
+                                  startTime: milliseconds / 1_000 - offset, text: text)
+            }
+            let document = LyricsDocument(plainText: plain, lines: timed.count == rows.count ? timed : [],
+                                          source: .openSubsonic, providerID: songID)
+            return document.hasContent ? document : nil
+        }
     }
 
     public func lyrics(artist: String, title: String) async throws -> String? {

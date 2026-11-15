@@ -9,7 +9,7 @@ struct MacarokCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("Add Music Folder…", action: model.pickFolder).keyboardShortcut("o")
-            Button("Connect a Source…") { model.showAddSource = true }.keyboardShortcut("o", modifiers: [.command, .shift])
+            Button("Connect a Source…") { model.presentAddSource(from: .mainWindow) }.keyboardShortcut("o", modifiers: [.command, .shift])
             Divider()
             Button("Import Playlist…") { choosePlaylist() }
             Button("Save Active Playlist…", action: model.savePlaylist).keyboardShortcut("s")
@@ -32,7 +32,7 @@ struct MacarokCommands: Commands {
         CommandMenu("Library") {
             Button("Search Library") { NotificationCenter.default.post(name: .macarokFocusSearch, object: nil) }.keyboardShortcut(model.menuShortcut("search"))
             Button("Show Current Track", action: model.showCurrentTrack).keyboardShortcut(model.menuShortcut("showCurrentTrack"))
-            Button("Refresh Source", action: model.refresh).keyboardShortcut("r").disabled(model.selectedSource == nil || model.isRefreshing)
+            Button(model.isAllSources ? "Refresh All Sources" : "Refresh Source", action: model.refresh).keyboardShortcut("r").disabled(model.sources.isEmpty || model.isRefreshing)
             Divider()
             Button("Home") { model.libraryView = .home }.keyboardShortcut("1")
             Button("Artists") { model.libraryView = .artists }.keyboardShortcut("2")

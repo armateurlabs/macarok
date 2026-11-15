@@ -122,6 +122,7 @@ public final class LibraryStore: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE tracks ADD COLUMN remotePath TEXT")
             try db.execute(sql: "ALTER TABLE tracks ADD COLUMN coverArtID TEXT")
         }
+        LyricsCacheStorage.registerMigration(&migrator)
         try migrator.migrate(database)
     }
 
@@ -133,6 +134,19 @@ public final class LibraryStore: @unchecked Sendable {
         try database.write { try source.save($0) }
     }
 
+    /// A connection becomes visible together with its initial catalog, or neither is committed.
+    public func saveSource(_ source: SourceRecord, tracks: [TrackRecord]) throws {
+        try database.write { db in
+            try Task.checkCancellation()
+            try source.save(db)
+            for track in tracks where track.sourceID == source.id {
+                try Task.checkCancellation()
+                try Self.saveIndexedTrack(track, db: db)
+            }
+            try Task.checkCancellation()
+        }
+    }
+
     public func deleteSource(id: String) throws {
         try database.write { db in
             try db.execute(sql: "DELETE FROM sources WHERE id = ?", arguments: [id])
@@ -140,18 +154,25 @@ public final class LibraryStore: @unchecked Sendable {
     }
 
     public func tracks(sourceID: String, query: String = "", ordered: Bool = true) throws -> [TrackRecord] {
+        try tracks(scope: .source(sourceID), query: query, ordered: ordered)
+    }
+
+    public func tracks(scope: LibraryScope, query: String = "", ordered: Bool = true) throws -> [TrackRecord] {
         let search = Self.searchPattern(query)
         return try database.read { db in
-            let values: [TrackRecord]
-            if let search {
-                values = try TrackRecord.fetchAll(db, sql: """
-                    SELECT tracks.* FROM tracks
-                    JOIN trackSearch ON trackSearch.rowid = tracks.rowid
-                    WHERE tracks.sourceID = ? AND tracks.isAvailable = 1 AND trackSearch MATCH ?
-                    """, arguments: [sourceID, search])
-            } else {
-                values = try TrackRecord.fetchAll(db, sql: "SELECT * FROM tracks WHERE sourceID = ? AND isAvailable = 1", arguments: [sourceID])
+            var sql = "SELECT tracks.* FROM tracks"
+            var arguments = StatementArguments()
+            if search != nil { sql += " JOIN trackSearch ON trackSearch.rowid = tracks.rowid" }
+            sql += " WHERE tracks.isAvailable = 1"
+            if case .source(let id) = scope {
+                sql += " AND tracks.sourceID = ?"
+                arguments += [id]
             }
+            if let search {
+                sql += " AND trackSearch MATCH ?"
+                arguments += [search]
+            }
+            let values = try TrackRecord.fetchAll(db, sql: sql, arguments: arguments)
             return ordered ? values.sorted(by: TrackRecord.libraryOrder) : values
         }
     }
