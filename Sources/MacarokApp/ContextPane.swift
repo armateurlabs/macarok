@@ -14,6 +14,9 @@ struct ContextPane: View {
             }.font(.system(size: 12)).buttonStyle(.borderless).padding(.horizontal, 16).frame(height: 42).background(.bar)
             Divider()
             if model.sources.isEmpty { WelcomeView(model: model) }
+            else if model.contextPage == .home && model.tracks.isEmpty {
+                HomeView(model: model).padding(22).background(Color(nsColor: .textBackgroundColor))
+            }
             else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -58,14 +61,29 @@ struct HomeView: View {
     private let columns = [GridItem(.adaptive(minimum: 100, maximum: 170), spacing: 14, alignment: .top)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 23) {
-            VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: model.tracks.isEmpty ? .center : .leading, spacing: 23) {
+            VStack(alignment: model.tracks.isEmpty ? .center : .leading, spacing: 5) {
                 Text(model.selectedSource?.name.uppercased() ?? "YOUR LIBRARY").font(.system(size: 10, weight: .medium)).tracking(1).foregroundStyle(.secondary)
                 Text("Your Library").font(.system(size: 27, weight: .semibold))
                 Text("\(model.albums.count) albums · \(model.tracks.count) tracks").font(.system(size: 12)).foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: model.tracks.isEmpty ? .center : .leading)
+            .multilineTextAlignment(model.tracks.isEmpty ? .center : .leading)
             if model.tracks.isEmpty {
-                ContentUnavailableView { Label("Ready to discover your music", systemImage: "music.note") } description: { Text(model.isRefreshing ? "Your source is being indexed." : "Refresh this source to index its music.") } actions: { Button("Refresh Source", action: model.refresh).disabled(model.isRefreshing) }
+                Spacer(minLength: 0)
+                VStack(spacing: 16) {
+                    Image(systemName: "music.note").font(.system(size: 42)).foregroundStyle(.tertiary)
+                    VStack(spacing: 8) {
+                        Text("Ready to discover your music").font(.title3.weight(.semibold))
+                        Text(model.isRefreshing ? "Your source is being indexed." : "Refresh this source to index its music.")
+                            .foregroundStyle(.secondary)
+                    }.multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    if model.isRefreshing {
+                        ProgressView(model.refreshProgress).controlSize(.small)
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else { Button("Refresh Source", action: model.refresh) }
+                }.frame(maxWidth: .infinity)
+                Spacer(minLength: 0)
             } else {
                 VStack(alignment: .leading, spacing: 11) {
                     Text("Recently Added").font(.system(size: 14, weight: .semibold))
@@ -86,7 +104,7 @@ struct HomeView: View {
                     } else { ForEach(model.mostPlayedTracks.prefix(5)) { historyRow($0, showsCount: true) } }
                 }
             }
-        }
+        }.frame(maxWidth: .infinity, maxHeight: model.tracks.isEmpty ? .infinity : nil)
     }
     private var emptyHistory: some View { Text("Start listening to build your listening history.").font(.system(size: 12)).foregroundStyle(.secondary).padding(.vertical, 5) }
     private func historyRow(_ track: TrackRecord, showsCount: Bool = false) -> some View {

@@ -46,6 +46,10 @@ final class NativeRenderingTests: XCTestCase {
         preferences.volume = 0
         let model = AppModel(store: store, preferences: preferences, registerSystemControls: false)
         await model.start()
+        let emptyStore = try LibraryStore(url: temporary.appendingPathComponent("empty.sqlite"))
+        try emptyStore.saveSource(source)
+        let emptyModel = AppModel(store: emptyStore, preferences: preferences, registerSystemControls: false)
+        await emptyModel.start()
         model.sourceID = source.id
         let cueAlbum = try XCTUnwrap(model.albums.first { $0.tracks.contains(where: \.isCUETrack) })
         XCTAssertEqual(cueAlbum.tracks.count, 3)
@@ -58,6 +62,13 @@ final class NativeRenderingTests: XCTestCase {
         _ = NSApplication.shared
         for scheme in [ColorScheme.light, .dark] {
             let suffix = scheme == .light ? "light" : "dark"
+            emptyModel.isRefreshing = true
+            emptyModel.refreshProgress = "Reading album 14 of 200…"
+            try await render(ContextPane(model: emptyModel), size: NSSize(width: 370, height: 680), scheme: scheme,
+                             destination: output.appendingPathComponent("empty-home-loading-\(suffix).png"))
+            emptyModel.isRefreshing = false
+            try await render(ContextPane(model: emptyModel), size: NSSize(width: 590, height: 860), scheme: scheme,
+                             destination: output.appendingPathComponent("empty-home-idle-\(suffix).png"))
             model.settings.appearance = scheme == .light ? .light : .dark
             model.libraryView = .home
             model.contextPage = .home

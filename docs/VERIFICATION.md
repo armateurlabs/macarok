@@ -11,7 +11,7 @@ Baseline verified on 14 November 2026 with Xcode 27.1, Swift 6.4, and macOS 27.2
 - The loopback OpenSubsonic/podcast server exercised actual HTTP requests, password/API-key authentication, original audio, covers, lyrics, folders, and RSS.
 - TagLib tests verified preservation of audio and unrelated properties. Multi-file CUE edits survived an unlocked rescan; library artwork overlays survived refresh.
 - The bundled upstream fpcalc helper generated a real fingerprint. AcoustID request/response tests used fixtures.
-- Ten offscreen native component renders covered Home, CUE albums, track tags, Settings, and metadata editing in Light and Dark appearances.
+- Fourteen offscreen native component renders cover Home, narrow loading and empty Home states, CUE albums, track tags, Settings, and metadata editing in Light and Dark appearances.
 - The Release app bundle was built, locally signed, and passed deep strict signature verification. Its native executable targets arm64; VLC, resource bundles, the helper, icon, and third-party notices are embedded.
 
 Build/test logs and full-resolution renders are kept under the ignored `.build` directory. The checked-in native previews in `design/native` are component renders, not desktop screenshots.
