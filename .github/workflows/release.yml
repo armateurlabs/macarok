@@ -4,12 +4,18 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and release
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -21,6 +27,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       MACOSX_DEPLOYMENT_TARGET: '14.0'
     outputs:
+      tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
       prerelease: ${{ steps.release.outputs.prerelease }}
       commit: ${{ steps.release.outputs.commit }}
@@ -28,13 +35,13 @@ jobs:
       - name: Check out tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.sha }}
           persist-credentials: false
 
       - name: Validate release version and toolchain
         id: release
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" == v* ]]
@@ -47,6 +54,7 @@ jobs:
           prerelease=false
           if [[ "$version" == *-* ]]; then prerelease=true; fi
           {
+            echo "tag=$RELEASE_TAG"
             echo "version=$version"
             echo "prerelease=$prerelease"
             echo "commit=$(git rev-parse HEAD)"
@@ -61,6 +69,9 @@ jobs:
             .build/repositories
             .build/tools/chromaprint
           key: macarok-${{ runner.os }}-${{ runner.arch }}-xcode27.1-${{ hashFiles('Package.resolved', 'Package.swift', 'scripts/fetch-fingerprint-helper.sh') }}
+
+      - name: Generate synthetic library fixtures
+        run: python3 scripts/create-demo-library.py .build/demo-library --no-codecs
 
       - name: Test with the pinned fingerprint helper
         run: |
@@ -96,7 +107,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
       RELEASE_VERSION: ${{ needs.build.outputs.version }}
       RELEASE_PRERELEASE: ${{ needs.build.outputs.prerelease }}
       RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
@@ -104,7 +115,7 @@ jobs:
       - name: Check out release notes
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.build.outputs.commit }}
           persist-credentials: false
 
       - name: Download verified release files
