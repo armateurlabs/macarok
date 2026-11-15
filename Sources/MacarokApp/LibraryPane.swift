@@ -48,56 +48,56 @@ struct LibraryPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    if !model.search.isEmpty { ForEach(model.searchResults) { TrackLine(track: $0, model: model, showsArtist: true) } }
-                    else {
-                        switch model.libraryView {
-                        case .home, .artists:
-                            ForEach(model.artists) { artist in
-                                DisclosureGroup(isExpanded: expansion(artist.id, in: $expandedArtists)) {
-                                    if expandedArtists.contains(artist.id) {
-                                        ForEach(artist.albums) { album in
-                                            DisclosureGroup(isExpanded: expansion(album.id, in: $expandedAlbums)) {
-                                                if expandedAlbums.contains(album.id) {
-                                                    ForEach(album.tracks) { TrackLine(track: $0, model: model) }
-                                                }
-                                            } label: { albumLabel(album) }
-                                        }
+                    switch model.libraryView {
+                    case .home, .artists:
+                        ForEach(model.artists) { artist in
+                            DisclosureGroup(isExpanded: expansion(artist.id, in: $expandedArtists)) {
+                                if expandedArtists.contains(artist.id) {
+                                    ForEach(artist.albums) { album in
+                                        DisclosureGroup(isExpanded: expansion(album.id, in: $expandedAlbums)) {
+                                            if expandedAlbums.contains(album.id) {
+                                                ForEach(album.tracks) { TrackLine(track: $0, model: model) }
+                                            }
+                                        } label: { albumLabel(album) }
                                     }
-                                } label: {
-                                    HStack { Text(artist.name).lineLimit(1); Spacer(); Text("\(artist.albums.count)").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { model.inspectArtist(artist.name) }
-                                        .contextMenu { Button("Shuffle Artist") { model.shuffle(artist.albums.flatMap(\.tracks)) }; Button("Add Artist to Playlist") { model.add(artist.albums.flatMap(\.tracks)) } }
                                 }
+                            } label: {
+                                HStack { Text(artist.name).lineLimit(1); Spacer(); Text("\(artist.albums.count)").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { model.inspectArtist(artist.name) }
+                                    .contextMenu {
+                                        LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") { model.albumsForArtist(artist.name).flatMap(\.tracks) }
+                                        Button("Shuffle Artist") { model.shuffle(model.albumsForArtist(artist.name).flatMap(\.tracks)) }
+                                    }
                             }
-                        case .albums:
-                            ForEach(model.visibleAlbums) { album in albumRow(album) }
-                        case .years:
-                            ForEach(model.yearGroups) { group in
-                                DisclosureGroup(isExpanded: expansion(group.id, in: $expandedYears)) {
-                                    if expandedYears.contains(group.id) {
-                                        ForEach(group.albums) { albumRow($0) }
+                        }
+                    case .albums:
+                        ForEach(model.visibleAlbums) { album in albumRow(album) }
+                    case .years:
+                        ForEach(model.yearGroups) { group in
+                            DisclosureGroup(isExpanded: expansion(group.id, in: $expandedYears)) {
+                                if expandedYears.contains(group.id) {
+                                    ForEach(group.albums) { albumRow($0) }
+                                }
+                            } label: { Text(group.title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
+                        }
+                    case .folders:
+                        FolderLibrary(model: model)
+                    case .tags:
+                        Section("Genre") {
+                            ForEach(model.genreGroups) { group in
+                                DisclosureGroup(isExpanded: expansion(group.id, in: $expandedGenres)) {
+                                    if expandedGenres.contains(group.id) {
+                                        ForEach(group.tracks) { TrackLine(track: $0, model: model, showsArtist: true) }
                                     }
                                 } label: { Text(group.title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
                             }
-                        case .folders:
-                            FolderLibrary(model: model)
-                        case .tags:
-                            Section("Genre") {
-                                ForEach(model.genreGroups) { group in
-                                    DisclosureGroup(isExpanded: expansion(group.id, in: $expandedGenres)) {
-                                        if expandedGenres.contains(group.id) {
-                                            ForEach(group.tracks) { TrackLine(track: $0, model: model, showsArtist: true) }
-                                        }
-                                    } label: { Text(group.title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
-                                }
-                            }
-                            Section("Format") {
-                                ForEach(model.formatGroups) { group in
-                                    DisclosureGroup(isExpanded: expansion(group.id, in: $expandedFormats)) {
-                                        if expandedFormats.contains(group.id) {
-                                            ForEach(group.tracks) { TrackLine(track: $0, model: model, showsArtist: true) }
-                                        }
-                                    } label: { Text(group.title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
-                                }
+                        }
+                        Section("Format") {
+                            ForEach(model.formatGroups) { group in
+                                DisclosureGroup(isExpanded: expansion(group.id, in: $expandedFormats)) {
+                                    if expandedFormats.contains(group.id) {
+                                        ForEach(group.tracks) { TrackLine(track: $0, model: model, showsArtist: true) }
+                                    }
+                                } label: { Text(group.title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
                             }
                         }
                     }
@@ -126,12 +126,18 @@ struct LibraryPane: View {
 
     private func albumLabel(_ album: AlbumRecord) -> some View {
         HStack { Text(album.title).lineLimit(1); Spacer(); Text(album.year.map(String.init) ?? "").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 11)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { model.inspect(album) }
-            .contextMenu { Button("Add Album to Playlist") { model.add(album.tracks) }; Button("Shuffle Album") { model.shuffle(album.tracks) } }
+            .contextMenu {
+                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
+                Button("Shuffle Album") { model.shuffle(model.tracksForAlbum(album)) }
+            }
     }
 
     private func albumRow(_ album: AlbumRecord) -> some View {
-        HStack(spacing: 9) { ArtworkView(track: album.tracks.first, model: model).frame(width: 36, height: 36); VStack(alignment: .leading, spacing: 2) { Text(album.title).lineLimit(1); Text("\(album.artist) · \(album.year.map(String.init) ?? "—")").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) } }.font(.system(size: 12)).padding(.vertical, 3).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture(count: 2) { model.add(album.tracks, play: model.settings.doubleClickPlays) }.onTapGesture { model.inspect(album) }
-            .contextMenu { Button("Add Album to Playlist") { model.add(album.tracks) }; Button("Shuffle Album") { model.shuffle(album.tracks) } }
+        HStack(spacing: 9) { ArtworkView(track: album.tracks.first, model: model).frame(width: 36, height: 36); VStack(alignment: .leading, spacing: 2) { Text(album.title).lineLimit(1); Text("\(album.artist) · \(album.year.map(String.init) ?? "—")").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) } }.font(.system(size: 12)).padding(.vertical, 3).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture(count: 2) { model.add(model.tracksForAlbum(album), play: model.settings.doubleClickPlays) }.onTapGesture { model.inspect(album) }
+            .contextMenu {
+                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
+                Button("Shuffle Album") { model.shuffle(model.tracksForAlbum(album)) }
+            }
     }
 }
 

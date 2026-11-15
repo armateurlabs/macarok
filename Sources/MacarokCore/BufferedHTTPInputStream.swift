@@ -101,7 +101,10 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         if available == 0 { return failure == nil ? 0 : -1 }
         priming = false
         let count = min(len, available)
-        buffer.copyBytes(to: destination, from: readCursor..<(readCursor + count))
+        // Removing a consumed prefix can leave Data with a nonzero startIndex.
+        let start = buffer.index(buffer.startIndex, offsetBy: readCursor)
+        let end = buffer.index(start, offsetBy: count)
+        buffer.copyBytes(to: destination, from: start..<end)
         readCursor += count
         offset += UInt64(count)
         if readCursor == buffer.count { buffer.removeAll(keepingCapacity: true); readCursor = 0 }

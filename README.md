@@ -24,7 +24,7 @@ Open `Package.swift` in Xcode for development, or use `swift build` and `swift t
 - Local MP3, FLAC, Ogg Vorbis, Opus, and other TagLib/VLC formats; OpenSubsonic original streams; RSS/Atom podcasts.
 - CUE sheets expose individual tracks without splitting the original audio.
 - Persistent playlists, queue, listening history, ratings, and source-isolated search through SQLite/FTS5.
-- Double-click to append a track; double-click a playlist entry to play; contextual shuffle and a None / Playlist / Track repeat button.
+- Double-click to append a track; right-click a track, album, or artist for Play Now; contextual shuffle and a None / Playlist / Track repeat button.
 - Mac media keys, configurable local and global shortcuts, and adjustable streaming buffering.
 - Metadata cleanup, MusicBrainz release matching with change previews, TagLib file writes, and embedded/local/web artwork.
 - Optional recording identification through Chromaprint and AcoustID, using your own application client key stored in Keychain.

@@ -20,6 +20,10 @@ Home contains Recently Added, Recently Played, and Most Played. Most Played can 
 
 A single click inspects an item. Double-clicking a library track appends it to the active playlist without interrupting playback. Double-clicking a playlist entry plays it. The library double-click action is configurable.
 
+Right-click a track, album, or artist to choose Play Now. It appends the selection to the active playlist and immediately starts its first track. Album and artist actions resolve the complete selection even when search shows only some matching tracks.
+
+Search retains the selected library presentation: artist/album hierarchy, albums, years, folders, or tags. The query persists across tabs; clearing it restores the complete source catalog. Home listening history remains scoped to the complete selected source.
+
 ## Sources and connections
 
 The first iteration supports local files, OpenSubsonic servers, and podcasts. Each configured source has a separate library. Playlist entries retain their source references.

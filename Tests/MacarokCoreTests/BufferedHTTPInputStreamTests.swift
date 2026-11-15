@@ -29,6 +29,50 @@ final class BufferedHTTPInputStreamTests: XCTestCase {
         XCTAssertEqual(stream.streamStatus, .atEnd)
     }
 
+    func testLargeResponsePreservesBytesAcrossMultipleBufferCompactions() async throws {
+        let fixture = ProgressiveFixture(size: 3 * 1024 * 1024 + 19, delay: 0)
+        // Prime the whole response so each compaction retains an unread tail.
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport,
+            bufferSeconds: 1, durationHint: 1)
+        defer { stream.close(); fixture.transport.invalidate() }
+        stream.open()
+        var received = Data()
+        while true {
+            let result = try await read(stream, count: 64 * 1024 + 17)
+            guard result.count > 0 else {
+                XCTAssertEqual(result.count, 0)
+                break
+            }
+            received.append(result.data)
+            XCTAssertEqual(stream.snapshot.offset, UInt64(received.count))
+        }
+        XCTAssertEqual(received, fixture.data)
+        XCTAssertEqual(stream.streamStatus, .atEnd)
+    }
+
+    func testSeekAndCloseAfterBufferCompaction() async throws {
+        let fixture = ProgressiveFixture(size: 2 * 1024 * 1024 + 61, delay: 0)
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport,
+            bufferSeconds: 1, durationHint: 1)
+        defer { stream.close(); fixture.transport.invalidate() }
+        stream.open()
+        let first = try await read(stream, count: 1024 * 1024)
+        XCTAssertEqual(first.data, fixture.data.prefix(first.count))
+        XCTAssertEqual(first.count, 1024 * 1024)
+        let afterCompaction = try await read(stream, count: 4093)
+        XCTAssertEqual(afterCompaction.data, fixture.data.subdata(in: first.count..<(first.count + 4093)))
+
+        let offset = 196_613
+        XCTAssertTrue(stream.setProperty(NSNumber(value: offset), forKey: .fileCurrentOffsetKey))
+        let afterSeek = try await read(stream, count: 65_539)
+        XCTAssertEqual(afterSeek.data, fixture.data.subdata(in: offset..<(offset + 65_539)))
+        XCTAssertEqual(stream.snapshot.offset, UInt64(offset + 65_539))
+        stream.close()
+        let afterClose = try await read(stream, count: 1)
+        XCTAssertEqual(afterClose.count, 0)
+        XCTAssertEqual(stream.streamStatus, .closed)
+    }
+
     func testSeekUsesValidatedByteRangesAndDiscardsTheOldGeneration() async throws {
         let fixture = ProgressiveFixture(size: 256 * 1024, delay: 0.02)
         let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport, durationHint: 8)

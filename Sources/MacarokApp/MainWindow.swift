@@ -182,8 +182,7 @@ struct TrackLine: View {
         }.font(.system(size: 12)).padding(.vertical, 3).contentShape(Rectangle())
             .onLibraryClick(inspect: { model.inspect(track) }, add: { model.doubleClick(track) })
             .contextMenu {
-                Button("Add to Active Playlist") { model.add([track]) }
-                Button("Play Now") { model.add([track], play: true) }
+                LibraryPlaybackActions(model: model) { [track] }
                 Divider()
                 Button("Edit Metadata…") { model.editingTrack = track }
                 Button("Choose Artwork…") { model.artworkTrack = track }

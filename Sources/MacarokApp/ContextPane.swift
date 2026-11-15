@@ -98,9 +98,17 @@ struct HomeView: View {
                     HStack { Text("Most Played").font(.system(size: 14, weight: .semibold)); Spacer(); Picker("Show", selection: $mostPlayed) { Text("Albums").tag("Albums"); Text("Tracks").tag("Tracks"); Text("Artists").tag("Artists") }.labelsHidden().fixedSize().controlSize(.small) }
                     if model.mostPlayedTracks.isEmpty { emptyHistory }
                     else if mostPlayed == "Albums" {
-                        ForEach(model.mostPlayedAlbums.prefix(5)) { album in Button { model.inspect(album) } label: { HStack { ArtworkView(track: album.tracks.first, model: model).frame(width: 36, height: 36); VStack(alignment: .leading, spacing: 2) { Text(album.title).lineLimit(1); Text(album.artist).font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(); Text("\(album.playCount) plays").font(.system(size: 10)).foregroundStyle(.secondary) }.font(.system(size: 12)) }.buttonStyle(.plain) }
+                        ForEach(model.mostPlayedAlbums.prefix(5)) { album in
+                            Button { model.inspect(album) } label: { HStack { ArtworkView(track: album.tracks.first, model: model).frame(width: 36, height: 36); VStack(alignment: .leading, spacing: 2) { Text(album.title).lineLimit(1); Text(album.artist).font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(); Text("\(album.playCount) plays").font(.system(size: 10)).foregroundStyle(.secondary) }.font(.system(size: 12)) }
+                                .buttonStyle(.plain)
+                                .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) } }
+                        }
                     } else if mostPlayed == "Artists" {
-                        ForEach(model.mostPlayedArtists.prefix(5)) { artist in Button { model.inspectArtist(artist.name) } label: { HStack { Image(systemName: "person.crop.circle").font(.system(size: 26)).foregroundStyle(.tertiary); Text(artist.name); Spacer(); Text("\(artist.playCount) plays").font(.system(size: 10)).foregroundStyle(.secondary) }.font(.system(size: 12)) }.buttonStyle(.plain) }
+                        ForEach(model.mostPlayedArtists.prefix(5)) { artist in
+                            Button { model.inspectArtist(artist.name) } label: { HStack { Image(systemName: "person.crop.circle").font(.system(size: 26)).foregroundStyle(.tertiary); Text(artist.name); Spacer(); Text("\(artist.playCount) plays").font(.system(size: 10)).foregroundStyle(.secondary) }.font(.system(size: 12)) }
+                                .buttonStyle(.plain)
+                                .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") { model.albumsForArtist(artist.name).flatMap(\.tracks) } }
+                        }
                     } else { ForEach(model.mostPlayedTracks.prefix(5)) { historyRow($0, showsCount: true) } }
                 }
             }
@@ -115,6 +123,7 @@ struct HomeView: View {
             if showsCount { Text("\(track.playCount) plays").font(.system(size: 10)).foregroundStyle(.secondary) }
             else if let date = track.lastPlayedAt { Text(date, style: .relative).font(.system(size: 10)).foregroundStyle(.secondary) }
         }.font(.system(size: 12)).padding(.vertical, 3).contentShape(Rectangle()).onLibraryClick(inspect: { model.inspect(track) }, add: { model.doubleClick(track) })
+            .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add to Active Playlist") { [track] } }
     }
 }
 
@@ -127,7 +136,11 @@ struct AlbumTile: View {
             Text(album.title).font(.system(size: 11, weight: .medium)).lineLimit(2)
             Text(album.artist).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
         }.contentShape(Rectangle()).onLibraryClick(inspect: { model.inspect(album) }, add: { model.add(album.tracks, play: model.settings.doubleClickPlays) })
-            .contextMenu { Button("Add Album to Playlist") { model.add(album.tracks) }; Button("Shuffle Album") { model.shuffle(album.tracks) }; Button("Choose Artwork…") { model.artworkTrack = album.tracks.first } }
+            .contextMenu {
+                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
+                Button("Shuffle Album") { model.shuffle(album.tracks) }
+                Button("Choose Artwork…") { model.artworkTrack = album.tracks.first }
+            }
     }
 }
 
@@ -141,8 +154,19 @@ struct TrackContextView: View {
                 ArtworkView(track: track, model: model).frame(width: 126, height: 126)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(track.title).font(.system(size: 22, weight: .semibold)).textSelection(.enabled)
+                        .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add to Active Playlist") { [track] } }
                     Button(track.artist) { model.inspectArtist(track.albumArtist) }.buttonStyle(.link).font(.system(size: 13))
+                        .contextMenu {
+                            if track.sourceID == model.sourceID {
+                                LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") { model.albumsForArtist(track.albumArtist).flatMap(\.tracks) }
+                            }
+                        }
                     Button(track.album) { model.selectedAlbumID = track.albumID; model.contextPage = .album }.buttonStyle(.plain).foregroundStyle(.secondary).font(.system(size: 12))
+                        .contextMenu {
+                            if track.sourceID == model.sourceID, let album = model.albumsForArtist(track.albumArtist).first(where: { $0.id == track.albumID }) {
+                                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
+                            }
+                        }
                     Text([track.year.map(String.init), track.genre].compactMap { $0 }.joined(separator: " · ")).font(.system(size: 11)).foregroundStyle(.secondary)
                     Text((track.isCUETrack ? "CUE + " : "") + track.format.uppercased()).font(.system(size: 9, weight: .medium)).padding(.horizontal, 5).padding(.vertical, 2).overlay(RoundedRectangle(cornerRadius: 3).stroke(.quaternary))
                 }
@@ -209,7 +233,17 @@ struct AlbumContextView: View {
             Text("ALBUM · \(album.year.map(String.init) ?? "UNKNOWN YEAR")").font(.system(size: 10)).tracking(1).foregroundStyle(.secondary)
             HStack(spacing: 16) {
                 ArtworkView(track: album.tracks.first, model: model).frame(width: 118, height: 118)
-                VStack(alignment: .leading, spacing: 7) { Text(album.title).font(.system(size: 23, weight: .semibold)); Button(album.artist) { model.inspectArtist(album.artist) }.buttonStyle(.link); Text("\(album.tracks.count) tracks · \(album.duration.playbackTime)").font(.system(size: 11)).foregroundStyle(.secondary) }
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(album.title).font(.system(size: 23, weight: .semibold))
+                        .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) } }
+                    Button(album.artist) { model.inspectArtist(album.artist) }.buttonStyle(.link)
+                        .contextMenu {
+                            LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") {
+                                model.albumsForArtist(album.artist).flatMap(\.tracks)
+                            }
+                        }
+                    Text("\(album.tracks.count) tracks · \(album.duration.playbackTime)").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
             }
             HStack { Button { model.add(album.tracks) } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }.buttonStyle(.borderedProminent); Button { model.shuffle(album.tracks) } label: { Label("Shuffle", systemImage: "shuffle") }; Spacer(); Button { model.artworkTrack = album.tracks.first } label: { Image(systemName: "photo") }.help("Choose album artwork") }.controlSize(.small)
             Divider()
@@ -228,6 +262,7 @@ struct ArtistContextView: View {
         VStack(alignment: .leading, spacing: 18) {
             Text("ARTIST").font(.system(size: 10)).tracking(1).foregroundStyle(.secondary)
             Text(name).font(.system(size: 29, weight: .semibold))
+                .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") { model.albumsForArtist(name).flatMap(\.tracks) } }
             Text("\(albums.count) albums · \(artist?.trackCount ?? 0) tracks in this source").font(.system(size: 12)).foregroundStyle(.secondary)
             HStack { Button { model.shuffle(albums.flatMap(\.tracks)) } label: { Label("Shuffle Artist", systemImage: "shuffle") }.buttonStyle(.borderedProminent); Button("Add to Playlist") { model.add(albums.flatMap(\.tracks)) } }.controlSize(.small)
             Divider()

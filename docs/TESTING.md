@@ -16,6 +16,8 @@ Progressive catalog tests gate API responses and controller batches to prove tha
 
 `LibrarySnapshotTests` covers the prepared navigation groups, deterministic sorting, cancellation, and a synthetic 50,000-track/5,000-album/100-year catalog. `LibraryResponsivenessTests` deliberately holds background loads while exercising all navigation buttons, a MainActor heartbeat, and queue persistence; it also checks coalescing and stale source/error rejection. The comparator tests cover missing disc/track numbers and strict ordering contracts.
 
+`LibrarySearchPresentationTests` verifies grouped results in each library view, query preservation across tabs, clearing the query, source isolation, and complete album selection from a partial search result. Buffer regressions drain multi-megabyte responses through repeated prefix compaction, then exercise seeking and closing without corrupting bytes or trapping on nonzero `Data` indices.
+
 To exercise the optional real fingerprint helper as well:
 
 ```sh
@@ -62,6 +64,8 @@ Add `.build/demo-library` through the application's music-folder picker. The cus
 Verify that the track count matches `.macarok-demo.json`; the continuous album should contain three tracks, with no additional full-album audio entry. Check the Artists, Albums, Years, Folders, and Tags views, source-scoped search, and local cover images.
 
 Double-clicking a library track should append it without interrupting playback. Double-clicking a queue entry should play that entry. Verify repeat cycles through None, Playlist, and Track; check next/previous, position seeking, media keys, and custom shortcuts. Confirm that typing spaces in a search field does not pause playback.
+
+Right-click tracks, albums, and artists in the library and Home lists. Play Now should append the selection and start it immediately. Search for part of an album, switch library tabs, and confirm that each tab keeps its normal grouping and the query remains visible. Choosing Play Now for a matching album or artist should include its complete track list.
 
 Open each codec-check file and verify playback advances without an error. For CUE tracks, inspect tags and confirm that playback starts and ends at the selected segment. Export an M3U playlist and import it again to verify that segment boundaries survive.
 

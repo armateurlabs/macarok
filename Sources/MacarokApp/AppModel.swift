@@ -54,7 +54,7 @@ final class AppModel {
     var settings = AppPreferences.load() { didSet { if registerSystemControls { settings.save() }; player.volume = settings.volume } }
     var sources: [SourceRecord] = []
     var sourceID: String? { didSet { if oldValue != sourceID { lyricsTask?.cancel(); lyrics = nil; isLoadingLyrics = false; selectedTrackID = nil; selectedAlbumID = nil; selectedArtist = nil; selectedFolder = nil; search = ""; reloadLibrary(); watchSelectedSource() } } }
-    var libraryView: LibraryView = .home { didSet { if libraryView == .home { contextPage = .home; search = "" } } }
+    var libraryView: LibraryView = .home { didSet { if libraryView == .home { contextPage = .home } } }
     var contextPage: ContextPage = .home
     var contextTab = "Overview"
     var search = "" { didSet { searchLibrary(reset: true) } }
@@ -139,18 +139,20 @@ final class AppModel {
     }
 
     var selectedSource: SourceRecord? { sources.first { $0.id == sourceID } }
-    var displayedTracks: [TrackRecord] { search.isEmpty ? tracks : searchResults }
+    private var displayedCatalog: LibrarySnapshot { search.isEmpty ? catalog : searchCatalog }
+    var displayedTracks: [TrackRecord] { displayedCatalog.tracks }
     var albums: [AlbumRecord] { catalog.albums }
-    var visibleAlbums: [AlbumRecord] { search.isEmpty ? catalog.albums : searchCatalog.albums }
-    var artists: [ArtistSummary] { search.isEmpty ? catalog.artists : searchCatalog.artists }
-    var yearGroups: [LibraryYearGroup] { catalog.yearGroups }
-    var genreGroups: [LibraryTrackGroup] { catalog.genreGroups }
-    var formatGroups: [LibraryTrackGroup] { catalog.formatGroups }
-    var folderNodes: [FolderNode] { catalog.folderNodes }
+    var visibleAlbums: [AlbumRecord] { displayedCatalog.albums }
+    var artists: [ArtistSummary] { displayedCatalog.artists }
+    var yearGroups: [LibraryYearGroup] { displayedCatalog.yearGroups }
+    var genreGroups: [LibraryTrackGroup] { displayedCatalog.genreGroups }
+    var formatGroups: [LibraryTrackGroup] { displayedCatalog.formatGroups }
+    var folderNodes: [FolderNode] { displayedCatalog.folderNodes }
+    func tracksForAlbum(_ album: AlbumRecord) -> [TrackRecord] { catalog.albumsByID[album.id]?.tracks ?? album.tracks }
     func albumsForArtist(_ name: String) -> [AlbumRecord] { catalog.artistsByName[name]?.albums ?? [] }
     func artistSummary(named name: String) -> ArtistSummary? { catalog.artistsByName[name] }
     func cachedTracksInFolder(_ path: String) -> [TrackRecord] {
-        (search.isEmpty ? catalog : searchCatalog).tracksByFolder[path] ?? []
+        displayedCatalog.tracksByFolder[path] ?? []
     }
     var currentIndex: Int? { queue.firstIndex { $0.id == currentQueueID } }
     var currentTrack: TrackRecord? { queue.first { $0.id == currentQueueID }?.track }
