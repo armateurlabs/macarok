@@ -37,8 +37,10 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     private var didComplete = false
     private var explicitlyStopped = false
     private var pendingSeek: Double?
+    private var timelineTimer: Timer?
 
     public override init() { super.init() }
+    deinit { timelineTimer?.invalidate() }
 
     public var isPlaying: Bool { state == .playing || state == .buffering }
 
@@ -84,6 +86,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             position = 0
             player.time = VLCTime(number: NSNumber(value: segmentStart * 1_000))
         }
+        startTimelineUpdates()
         player.play()
     }
 
@@ -94,6 +97,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     }
 
     public func stop() {
+        stopTimelineUpdates()
         explicitlyStopped = true
         pendingSeek = nil
         player?.stop()
@@ -119,6 +123,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         media: VLCMedia, stream: InputStream?, segmentStart: Double, segmentEnd: Double?,
         bufferSeconds: Double?, durationHint: Double?, autoplay: Bool
     ) {
+        stopTimelineUpdates()
         generation = UUID()
         player?.delegate = nil
         player?.stop()
@@ -153,7 +158,26 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         currentPlayer.media = media
         currentPlayer.audio?.volume = Int32((volume * 100).rounded())
         player = currentPlayer
-        if autoplay { currentPlayer.play() } else { state = .stopped }
+        if autoplay { startTimelineUpdates(); currentPlayer.play() } else { state = .stopped }
+    }
+
+    private func startTimelineUpdates() {
+        guard !explicitlyStopped, timelineTimer == nil else { return }
+        let currentGeneration = generation
+        // VLCKit's notification timer pauses while AppKit tracks an open menu.
+        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == currentGeneration, !self.explicitlyStopped else { return }
+                self.synchronizeTime()
+            }
+        }
+        timelineTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopTimelineUpdates() {
+        timelineTimer?.invalidate()
+        timelineTimer = nil
     }
 
     fileprivate func receiveState(_ value: VLCMediaPlayerState, generation: UUID) {
@@ -165,12 +189,14 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             hasStarted = true
             bufferingProgress = 1
             state = .playing
+            startTimelineUpdates()
             synchronizeTime()
         case .paused:
+            stopTimelineUpdates()
             state = .paused
         case .stopped:
             if hasStarted && !explicitlyStopped && !didComplete { finish() }
-            else if !didComplete { state = .stopped }
+            else if !didComplete { stopTimelineUpdates(); state = .stopped }
         case .error:
             reportError("VLC could not play this audio resource. Check the file or server connection.")
         default:
@@ -179,7 +205,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     }
 
     fileprivate func receiveTime(generation: UUID) {
-        guard generation == self.generation else { return }
+        guard generation == self.generation, !explicitlyStopped else { return }
         synchronizeTime()
     }
 
@@ -214,6 +240,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     private func finish() {
         guard !didComplete, !explicitlyStopped else { return }
+        stopTimelineUpdates()
         didComplete = true
         explicitlyStopped = true
         state = .stopped
@@ -223,6 +250,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     }
 
     private func reportError(_ message: String) {
+        stopTimelineUpdates()
         explicitlyStopped = true
         player?.stop()
         lastError = message

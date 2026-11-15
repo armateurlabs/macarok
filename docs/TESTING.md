@@ -10,6 +10,8 @@ The core tests cover source-isolated SQLite search, reindexing without lost hist
 
 The suite also exercises actual VLCKit playback of synthetic MP3, FLAC, Vorbis, and Opus; CUE segment boundaries; a throttled HTTP stream that starts before download completes; validated Range seeking; and live loopback HTTPS certificate acceptance, changes, and rejection. Controller tests cover queue restoration, duplicate entries, shortcut disabling, refresh cancellation, and changes received during a scan.
 
+The menu-tracking regression plays a silent WAV through real VLC while pumping only the main run loop's event-tracking mode. Sentinel timers verify that default-mode sources stay suspended and common-mode sources run. The playback position must advance before returning to the default loop, and remain stable after pause or stop. This regression fails against the former delegate-only timeline updates.
+
 `WindowLayoutTests` verifies that all three panels fill the native hosting window when resized, including startup without sources, an empty source, an empty queue, and unmatched search results. It checks actual split-view geometry in both appearances without imposing a fixed-size SwiftUI root.
 
 Progressive catalog tests gate API responses and controller batches to prove that tracks are persisted, searchable, and queueable before completion. They cover cancellation, later request failures, stale refresh generations, source changes, and success-only reconciliation. Folder tests include a synthetic 30,000-track, 7,000-folder catalog and cancellation; the folder tree is built off the main thread.

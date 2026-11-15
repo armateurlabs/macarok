@@ -64,6 +64,8 @@ Support MP3, FLAC, Ogg Vorbis, and Ogg Opus for local and remote playback. Reque
 
 Streaming Buffer has Automatic and Custom modes. Custom buffering specifies a target duration in seconds.
 
+The playback engine samples VLC's actual clock on a main-run-loop timer registered in common modes, keeping the timeline updated while an AppKit menu is open. It does not extrapolate elapsed time. This avoids depending on VLCKit's notification timer, which the pinned version registers only in the default mode (see [the upstream implementation](https://github.com/videolan/vlckit/blob/master/Sources/Playback/VLCMediaPlayer.m)). Polling stops on pause, stop, completion, error, media replacement, and engine destruction.
+
 There is no crossfade or crossfade setting. Gapless playback is desirable but does not block the first release.
 
 One repeat button cycles through **None → Playlist → Track → None**. Both active modes use a selected appearance; track repeat adds a "1" indicator.

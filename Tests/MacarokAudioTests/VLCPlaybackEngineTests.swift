@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 @testable import MacarokAudio
 import XCTest
@@ -121,6 +122,60 @@ final class VLCPlaybackEngineTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(completions, 0)
         XCTAssertEqual(player.state, .stopped)
+    }
+
+    @MainActor
+    func testTimelineKeepsUpdatingDuringMenuTrackingAndRespectsPauseAndStop() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokTrackingTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("tracking.wav")
+        try wave(duration: 12).write(to: url)
+        let player = VLCPlaybackEngine()
+        player.volume = 0
+        defer { player.stop() }
+        player.load(url: url)
+        try await eventually(player: player) { player.state == .playing && player.isSeekable && player.position > 0.2 }
+
+        let initialPosition = player.position
+        let playing = runMenuTracking(player: player, duration: 1.2)
+        XCTAssertEqual(playing.defaultTicks, 0, "The regression must exclude the default run-loop mode.")
+        XCTAssertGreaterThan(playing.commonTicks, 5, "Common-mode sources must remain active during menu tracking.")
+        XCTAssertGreaterThan(playing.position, initialPosition + 0.4,
+                             "The timeline must advance before leaving the menu-tracking run loop.")
+
+        player.pause()
+        try await eventually(player: player) { player.state == .paused }
+        let pausedPosition = player.position
+        let paused = runMenuTracking(player: player, duration: 0.6)
+        XCTAssertEqual(paused.position, pausedPosition, accuracy: 0.1)
+        XCTAssertEqual(player.state, .paused)
+
+        player.stop()
+        let stopped = runMenuTracking(player: player, duration: 0.6)
+        XCTAssertEqual(stopped.position, 0, accuracy: 0.001)
+        XCTAssertEqual(player.state, .stopped)
+        XCTAssertNil(player.lastError)
+    }
+
+    @MainActor
+    private func runMenuTracking(player: VLCPlaybackEngine, duration: TimeInterval)
+        -> (position: Double, defaultTicks: Int, commonTicks: Int) {
+        // Exercise the nested event loop directly without opening a desktop menu.
+        CFRunLoopAddCommonMode(CFRunLoopGetMain(), CFRunLoopMode(rawValue: RunLoop.Mode.eventTracking.rawValue as CFString))
+        var defaultTicks = 0
+        var commonTicks = 0
+        let defaultTimer = Timer(timeInterval: 0.02, repeats: true) { _ in defaultTicks += 1 }
+        let commonTimer = Timer(timeInterval: 0.02, repeats: true) { _ in commonTicks += 1 }
+        RunLoop.main.add(defaultTimer, forMode: .default)
+        RunLoop.main.add(commonTimer, forMode: .common)
+        defer { defaultTimer.invalidate(); commonTimer.invalidate() }
+        let deadline = Date().addingTimeInterval(duration)
+        while Date() < deadline {
+            RunLoop.main.run(mode: .eventTracking, before: deadline)
+        }
+        // Capture the value before the default loop can deliver any deferred callbacks.
+        return (player.position, defaultTicks, commonTicks)
     }
 
     @MainActor
