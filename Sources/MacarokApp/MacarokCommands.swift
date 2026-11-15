@@ -57,7 +57,8 @@ struct MacarokCommands: Commands {
         }
         CommandMenu("Track") {
             Button("Add to Active Playlist") { if let track = model.selectedTrack { model.add([track]) } }.keyboardShortcut(model.menuShortcut("addToPlaylist")).disabled(model.selectedTrack == nil)
-            Button("Edit Metadata…") { model.beginMetadataEditing(model.selectedTrack) }.keyboardShortcut("i").disabled(model.selectedTrack == nil || model.isRadioTrack(model.selectedTrack))
+            Button("Edit Song Metadata…") { model.beginMetadataEditing(model.selectedTrack) }.keyboardShortcut("i").disabled(model.selectedTrack == nil || model.isRadioTrack(model.selectedTrack))
+            Button("Edit Album Metadata…") { model.beginAlbumMetadataEditing(model.selectedTrack) }.disabled(model.selectedTrack == nil || model.isRadioTrack(model.selectedTrack))
             Button("Choose Artwork…") { model.artworkTrack = model.selectedTrack }.keyboardShortcut("i", modifiers: [.command, .shift]).disabled(model.selectedTrack == nil)
         }
     }

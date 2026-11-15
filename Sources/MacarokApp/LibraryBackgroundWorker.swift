@@ -5,7 +5,8 @@ import MacarokCore
 /// Serializes database writes away from the UI and rejects obsolete catalog operations.
 actor LibraryBackgroundWorker {
     private var refreshGenerations: [String: UUID] = [:]
-    private var savedQueueRevision = 0
+    private var savedQueueContentRevision = 0
+    private var queueCheckpoint: (revision: Int, index: Int, position: Double)?
 
     func perform<Value: Sendable>(store: LibraryStore,
                                  _ operation: @Sendable (LibraryStore) throws -> Value) throws -> Value {
@@ -28,6 +29,12 @@ actor LibraryBackgroundWorker {
     func replace(store: LibraryStore, sourceID: String, generation: UUID, tracks: [TrackRecord]) throws {
         try requireCurrent(sourceID: sourceID, generation: generation)
         try store.replaceSourceTracks(sourceID: sourceID, with: tracks)
+    }
+
+    func saveScanCache(store: LibraryStore, sourceID: String, generation: UUID,
+                       entries: [LocalScanFileCacheEntry], isComplete: Bool) throws {
+        try requireCurrent(sourceID: sourceID, generation: generation)
+        try store.saveLocalScanCache(sourceID: sourceID, entries: entries, isComplete: isComplete)
     }
 
     func updateRadioStation(store: LibraryStore, station: RadioStationRecord, generation: UUID) throws {
@@ -55,9 +62,18 @@ actor LibraryBackgroundWorker {
 
     func saveQueue(store: LibraryStore, trackIDs: [String], currentIndex: Int,
                    position: Double, revision: Int) throws {
-        guard revision > savedQueueRevision else { return }
-        try store.saveQueue(trackIDs: trackIDs, currentIndex: currentIndex, position: position)
-        savedQueueRevision = revision
+        guard revision > savedQueueContentRevision else { return }
+        let newerCheckpoint = queueCheckpoint.flatMap { $0.revision > revision ? $0 : nil }
+        try store.saveQueue(trackIDs: trackIDs, currentIndex: newerCheckpoint?.index ?? currentIndex,
+                            position: newerCheckpoint?.position ?? position)
+        savedQueueContentRevision = revision
+        if newerCheckpoint == nil { queueCheckpoint = nil }
+    }
+
+    func saveQueuePosition(store: LibraryStore, currentIndex: Int, position: Double, revision: Int) throws {
+        guard revision > savedQueueContentRevision, revision > queueCheckpoint?.revision ?? 0 else { return }
+        try store.saveQueuePosition(currentIndex: currentIndex, position: position)
+        queueCheckpoint = (revision, currentIndex, position)
     }
 
     func cacheArtwork(_ data: Data, key: String, directory: URL) throws -> URL {

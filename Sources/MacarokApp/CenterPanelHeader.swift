@@ -27,8 +27,16 @@ struct CenterPanelHeader: View {
                         CenterSegmentedPicker(selection: Binding(get: { ContextMode.allCases.firstIndex(of: model.contextMode) ?? 0 }, set: {
                             guard ContextMode.allCases.indices.contains($0) else { return }
                             model.contextMode = ContextMode.allCases[$0]
-                        }), labels: ContextMode.allCases.map(\.title), label: "Playing view", identifier: "playingViewPicker", maximumWidth: 382)
-                            .frame(maxWidth: 382)
+                        }), labels: ContextMode.allCases.map(\.title), label: "Playing view", identifier: "playingViewPicker", maximumWidth: 522,
+                                              fontSize: 10.5, proportional: true,
+                                              compactLabels: ContextMode.allCases.map { mode in
+                                                  switch mode {
+                                                  case .editMetadata: "Song metadata"
+                                                  case .editAlbumMetadata: "Album metadata"
+                                                  default: mode.title
+                                                  }
+                                              })
+                            .frame(maxWidth: 522)
                     }
                 }.frame(maxWidth: .infinity)
             }.accessibilityIdentifier("contextPanelSubheader")
@@ -46,6 +54,7 @@ private struct CenterSegmentedPicker: NSViewRepresentable {
     let maximumWidth: CGFloat
     var fontSize: CGFloat = 12
     var proportional = false
+    var compactLabels: [String]?
 
     func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
 
@@ -63,15 +72,11 @@ private struct CenterSegmentedPicker: NSViewRepresentable {
 
     func updateNSView(_ control: CenterSegmentedControl, context: Context) {
         context.coordinator.selection = $selection
-        control.font = .systemFont(ofSize: fontSize)
         control.segmentDistribution = proportional ? .fillProportionally : .fillEqually
-        control.segmentCount = labels.count
-        for (index, title) in labels.enumerated() {
-            control.setLabel(title, forSegment: index)
-            control.setWidth(0, forSegment: index)
-        }
+        control.configure(fullLabels: labels, compactLabels: compactLabels, fontSize: fontSize)
         control.selectedSegment = labels.indices.contains(selection) ? selection : -1
         control.setAccessibilityLabel(label)
+        control.setAccessibilityHelp(labels.joined(separator: ", "))
         control.setAccessibilityIdentifier(identifier)
     }
 
@@ -90,5 +95,55 @@ private struct CenterSegmentedPicker: NSViewRepresentable {
 }
 
 private final class CenterSegmentedControl: NSSegmentedControl {
+    private var fullLabels: [String] = []
+    private var compactLabels: [String]?
+    private var displayedLabels: [String] = []
+    private var preferredFontSize: CGFloat = 12
+
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 24) }
+
+    func configure(fullLabels: [String], compactLabels: [String]?, fontSize: CGFloat) {
+        self.fullLabels = fullLabels
+        self.compactLabels = compactLabels?.count == fullLabels.count ? compactLabels : nil
+        preferredFontSize = fontSize
+        if segmentCount != fullLabels.count { segmentCount = fullLabels.count; displayedLabels = [] }
+        updateLabelsForWidth()
+        for (index, title) in fullLabels.enumerated() { setToolTip(title, forSegment: index) }
+    }
+
+    override func layout() {
+        super.layout()
+        updateLabelsForWidth()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateLabelsForWidth()
+    }
+
+    private func updateLabelsForWidth() {
+        let available = bounds.width > 0 ? bounds.width : .greatestFiniteMagnitude
+        var titles = fullLabels
+        var pointSize = preferredFontSize
+        if let compactLabels, requiredWidth(for: titles, fontSize: pointSize) > available {
+            titles = compactLabels
+            if requiredWidth(for: titles, fontSize: pointSize) > available { pointSize = min(preferredFontSize, 10) }
+        }
+        if font?.pointSize != pointSize { font = .systemFont(ofSize: pointSize) }
+        guard displayedLabels != titles else { return }
+        displayedLabels = titles
+        for (index, title) in titles.enumerated() {
+            setLabel(title, forSegment: index)
+            setWidth(0, forSegment: index)
+        }
+    }
+
+    private func requiredWidth(for labels: [String], fontSize: CGFloat) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: fontSize)
+        let textWidth = labels.reduce(CGFloat(0)) { total, title in
+            total + (title as NSString).size(withAttributes: [.font: font]).width
+        }
+        // Reserve native segment padding and dividers as well as the full text width.
+        return textWidth + CGFloat(labels.count * 16 + max(0, labels.count - 1))
+    }
 }

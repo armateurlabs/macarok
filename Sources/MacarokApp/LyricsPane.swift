@@ -4,24 +4,15 @@ import SwiftUI
 
 struct LyricsPane: View {
     @Bindable var model: AppModel
-    @ObservedObject private var player: VLCPlaybackEngine
     @State private var controller: LyricsController
     @State private var autoScroll = true
 
     init(model: AppModel) {
         self.model = model
-        _player = ObservedObject(wrappedValue: model.player)
         _controller = State(initialValue: LyricsController(model: model))
     }
 
     private var targetTrack: TrackRecord? { model.currentTrack ?? model.selectedTrack }
-    private var activeLineID: Int? {
-        guard let track = controller.track,
-              let current = model.currentTrack,
-              current.id == track.id, current.sourceID == track.sourceID,
-              controller.hasSynchronizedLyrics else { return nil }
-        return controller.activeLineID(at: player.position)
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -71,7 +62,7 @@ struct LyricsPane: View {
         case .loading:
             ProgressView("Loading lyrics…").controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
         case .loaded:
-            if controller.hasSynchronizedLyrics { synchronizedLyrics }
+            if controller.hasSynchronizedLyrics { SynchronizedLyricsView(model: model, controller: controller, autoScroll: $autoScroll, timeline: model.player.timeline) }
             else {
                 ScrollView {
                     Text(controller.plainText).font(.system(size: 14)).lineSpacing(7).textSelection(.enabled)
@@ -104,7 +95,23 @@ struct LyricsPane: View {
         }
     }
 
-    private var synchronizedLyrics: some View {
+}
+
+private struct SynchronizedLyricsView: View {
+    @Bindable var model: AppModel
+    @Bindable var controller: LyricsController
+    @Binding var autoScroll: Bool
+    @ObservedObject var timeline: PlaybackTimeline
+
+    private var activeLineID: Int? {
+        guard let track = controller.track,
+              let current = model.currentTrack,
+              current.id == track.id, current.sourceID == track.sourceID,
+              controller.hasSynchronizedLyrics else { return nil }
+        return controller.activeLineID(at: timeline.position)
+    }
+
+    var body: some View {
         let activeID = activeLineID
         return ScrollViewReader { proxy in
             ScrollView {

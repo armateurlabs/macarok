@@ -47,9 +47,11 @@ enum HomeFilter: String, CaseIterable, Identifiable {
 }
 
 enum ContextMode: String, Codable, CaseIterable, Identifiable {
-    case context, lyrics, editMetadata
+    case context, lyrics, wikipedia, editMetadata, editAlbumMetadata
     var id: String { rawValue }
-    var title: String { self == .editMetadata ? "Edit metadata" : rawValue.capitalized }
+    var title: String {
+        switch self { case .editMetadata: "Edit song metadata"; case .editAlbumMetadata: "Edit album metadata"; default: rawValue.capitalized }
+    }
 }
 
 enum AddSourcePresenter: String, Identifiable {
@@ -67,6 +69,7 @@ enum TrackDoubleClickAction: String, Codable, CaseIterable, Identifiable {
 
 struct AppPreferences: Codable {
     var appearance: Appearance = .system
+    var showMenuBar = false
     var repeatMode: RepeatMode = .none
     var trackDoubleClickAction: TrackDoubleClickAction = .append
     var doubleClickPlays: Bool {
@@ -82,11 +85,12 @@ struct AppPreferences: Codable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case appearance, repeatMode, trackDoubleClickAction, doubleClickPlays, customBuffer, bufferSeconds, volume, localShortcuts
+        case appearance, showMenuBar, repeatMode, trackDoubleClickAction, doubleClickPlays, customBuffer, bufferSeconds, volume, localShortcuts
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         appearance = try values.decodeIfPresent(Appearance.self, forKey: .appearance) ?? .system
+        showMenuBar = try values.decodeIfPresent(Bool.self, forKey: .showMenuBar) ?? false
         repeatMode = try values.decodeIfPresent(RepeatMode.self, forKey: .repeatMode) ?? .none
         trackDoubleClickAction = try values.decodeIfPresent(TrackDoubleClickAction.self, forKey: .trackDoubleClickAction)
             ?? ((try values.decodeIfPresent(Bool.self, forKey: .doubleClickPlays) ?? false) ? .playNow : .append)
@@ -98,6 +102,7 @@ struct AppPreferences: Codable {
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(appearance, forKey: .appearance)
+        try values.encode(showMenuBar, forKey: .showMenuBar)
         try values.encode(repeatMode, forKey: .repeatMode)
         try values.encode(trackDoubleClickAction, forKey: .trackDoubleClickAction)
         try values.encode(customBuffer, forKey: .customBuffer)

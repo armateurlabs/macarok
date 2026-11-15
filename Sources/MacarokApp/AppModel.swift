@@ -7,6 +7,7 @@ import MacarokCore
 import MacarokMetadata
 import MediaPlayer
 import Observation
+import os
 import SwiftUI
 
 struct QueueItem: Identifiable, Equatable {
@@ -56,6 +57,15 @@ final class AppModel {
     var sources: [SourceRecord] = [] {
         didSet {
             guard oldValue != sources else { return }
+            sourcesByID = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+            radioSourceIDs = Set(sources.filter { $0.kind == .radio }.map(\.id))
+            let removedIDs = Set(oldValue.map(\.id)).subtracting(sources.map(\.id))
+            podcastDownloads?.cancel(sourceIDs: removedIDs)
+            for source in oldValue where sourcesByID[source.id] != source { invalidateSourceClient(source.id) }
+            if !removedIDs.isEmpty {
+                presentationPatches.removeAll(); presentationPatchRevision &+= 1
+                Task { await playbackPreparation.invalidate(sourceIDs: removedIDs) }
+            }
             sourceRevision &+= 1
             searchTask?.cancel(); searchTask = nil; searchRequestID = UUID(); searchNeedsReload = false; isSearching = false
             if !Set(oldValue.map(\.id)).subtracting(sources.map(\.id)).isEmpty {
@@ -65,6 +75,8 @@ final class AppModel {
             if libraryScope != nil { reloadLibrary(); watchSelectedSource() }
         }
     }
+    private(set) var sourcesByID: [String: SourceRecord] = [:]
+    private(set) var radioSourceIDs: Set<String> = []
     var libraryScope: LibraryScope? {
         didSet {
             guard oldValue != libraryScope else { return }
@@ -81,13 +93,19 @@ final class AppModel {
     }
     var libraryView: LibraryView = .home { didSet { if libraryView == .home { contextPage = .home } } }
     var contextMode: ContextMode = .context {
-        didSet { if contextMode == .editMetadata { ensureMetadataEditingSession() } }
+        didSet {
+            if contextMode == .editMetadata { ensureMetadataEditingSession() }
+            if contextMode == .editAlbumMetadata { ensureAlbumMetadataEditingSession() }
+        }
     }
     var contextPage: ContextPage = .home
     var homeFilter: HomeFilter = .all
     var contextTab = "Overview"
     var metadataEditingSession: MetadataEditingSession? {
         didSet { if oldValue != nil && metadataEditingSession == nil { followPlaybackContext() } }
+    }
+    var albumMetadataEditingSession: AlbumMetadataEditingSession? {
+        didSet { if oldValue != nil && albumMetadataEditingSession == nil { followPlaybackContext() } }
     }
     var search = "" { didSet { searchLibrary(reset: true) } }
     private var catalog = LibrarySnapshot.empty
@@ -104,10 +122,27 @@ final class AppModel {
     var selectedAlbumSourceID: String?
     var selectedArtist: String?
     var selectedFolder: String?
-    var queue: [QueueItem] = []
+    var queue: [QueueItem] = [] {
+        didSet {
+            let sameEntries = queue.count == oldValue.count && zip(queue, oldValue).allSatisfy { $0.id == $1.id && $0.track.id == $1.track.id }
+            if !sameEntries {
+                queueIndices = Dictionary(queue.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
+                queueTrackIDs = queue.map(\.track.id)
+                queueRevision &+= 1
+                prepareNextPlayback()
+            }
+            if !sameEntries || zip(queue, oldValue).contains(where: { $0.track.duration != $1.track.duration }) {
+                cachedQueueDuration = queue.reduce(0) { $0 + $1.track.duration }
+            }
+        }
+    }
+    private(set) var queueRevision = 0
+    @ObservationIgnored private var cachedQueueDuration: Double = 0
+    @ObservationIgnored private var queueIndices: [UUID: Int] = [:]
+    @ObservationIgnored private var queueTrackIDs: [String] = []
     @ObservationIgnored var queueMetadataOverrides: [String: TrackRecord] = [:]
     var currentQueueID: UUID? {
-        didSet { if oldValue != currentQueueID { followPlaybackContext() } }
+        didSet { if oldValue != currentQueueID { followPlaybackContext(); prepareNextPlayback() } }
     }
     var selectedQueueID: UUID?
     var playlists: [PlaylistRecord] = []
@@ -145,6 +180,7 @@ final class AppModel {
     var scanWarnings: [String] = []
     var radio: RadioController?
     var scrobbling: ScrobblingController?
+    var podcastDownloads: PodcastDownloadsController?
     var radioBroadcastTitle: String?
     var radioDisconnected = false
     var radioDiscoveryOwnsCertificates = false
@@ -156,7 +192,7 @@ final class AppModel {
     @ObservationIgnored private var refreshBatchPosition = 0
     @ObservationIgnored private var refreshBatchCount = 0
     @ObservationIgnored private var pendingRescanSourceIDs: Set<String> = []
-    @ObservationIgnored private let localScan: LocalScanOperation
+    @ObservationIgnored private let localScan: LocalScanOperation?
     @ObservationIgnored private let remoteCatalog: RemoteCatalogOperation?
     @ObservationIgnored private let snapshotLoader: ScopedLibrarySnapshotLoader
     @ObservationIgnored private let selectionDefaults: UserDefaults
@@ -176,6 +212,8 @@ final class AppModel {
     @ObservationIgnored var playbackIntentQueueID: UUID?
     @ObservationIgnored private let queueUndoController = QueueUndoController()
     @ObservationIgnored weak var mainPlayerWindow: NSWindow?
+    @ObservationIgnored var openMainWindow: (() -> Void)?
+    @ObservationIgnored private var menuBarController: MenuBarController?
     @ObservationIgnored private var arrowKeys = PlaybackArrowKeys()
     var queueUndoManager: UndoManager { queueUndoController.manager }
     @ObservationIgnored lazy var queueUndoPresentation = QueueUndoPresentation(model: self)
@@ -185,20 +223,29 @@ final class AppModel {
     @ObservationIgnored private var transportCache: [String: SourceTransport] = [:]
     @ObservationIgnored private var connectionPresentationID: UUID?
     @ObservationIgnored private var pendingSourceConnections: [String: UUID] = [:]
-    @ObservationIgnored private var accessedFolders: [String: URL] = [:]
     @ObservationIgnored private var artworkTasks: Set<String> = []
     @ObservationIgnored private var heardSeconds: Double = 0
     @ObservationIgnored private var playRecorded = false
     @ObservationIgnored var restorePosition: Double = 0
     @ObservationIgnored private var lastSavedTick = 0
     @ObservationIgnored private var directoryWatchers: [String: DirectoryWatcher] = [:]
+    @ObservationIgnored private var watcherSetupTask: Task<Void, Never>?
+    @ObservationIgnored private var watcherGeneration = UUID()
     @ObservationIgnored private var rescanTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private let registerSystemControls: Bool
+    @ObservationIgnored private let signposter = OSSignposter(subsystem: "labs.armateur.Macarok", category: "Library")
+    @ObservationIgnored private var presentationPatches: [String: LibraryPresentationPatch] = [:]
+    @ObservationIgnored private var presentationPatchRevision = 0
+    @ObservationIgnored private var presentationPatchTask: Task<Void, Never>?
+    @ObservationIgnored private let artworkGate = AsyncOperationGate(limit: 3)
+    @ObservationIgnored private var clientCache: [String: OpenSubsonicClient] = [:]
+    @ObservationIgnored private var clientRequests: [String: Task<OpenSubsonicClient, Error>] = [:]
+    @ObservationIgnored private var clientRevisions: [String: Int] = [:]
+    @ObservationIgnored private let playbackPreparation = PlaybackPreparationWorker()
+    @ObservationIgnored private var nextPreparation: (id: UUID, source: SourceRecord, task: Task<PreparedLocalPlayback, Error>)?
 
     init(store: LibraryStore? = nil, preferences: AppPreferences? = nil, registerSystemControls: Bool = true,
-         localScan: @escaping LocalScanOperation = { source, progress in
-             try await LibraryScanner().scan(source: source, metadataReader: { try TagLibMetadataService.read(url: $0) }, progress: progress)
-         }, remoteCatalog: RemoteCatalogOperation? = nil, snapshotLoader: LibrarySnapshotLoader? = nil,
+         localScan: LocalScanOperation? = nil, remoteCatalog: RemoteCatalogOperation? = nil, snapshotLoader: LibrarySnapshotLoader? = nil,
          scopedSnapshotLoader: ScopedLibrarySnapshotLoader? = nil, selectionDefaults: UserDefaults? = nil) {
         self.store = store
         self.registerSystemControls = registerSystemControls
@@ -210,7 +257,7 @@ final class AppModel {
             if case .source(let sourceID) = scope, let snapshotLoader {
                 return try await snapshotLoader(sourceID, store, sources)
             }
-            let task = Task.detached(priority: .userInitiated) {
+            let task = Task.detached(priority: .utility) {
                 try LibrarySnapshot.build(scope: scope,
                                           tracks: store.tracks(scope: scope, ordered: false), sources: sources)
             }
@@ -219,10 +266,10 @@ final class AppModel {
         if let preferences { settings = preferences }
     }
 
-    var selectedSource: SourceRecord? { sources.first { $0.id == sourceID } }
+    var selectedSource: SourceRecord? { sourceID.flatMap { sourcesByID[$0] } }
     var isAllSources: Bool { libraryScope == .all }
     var scopeTitle: String { isAllSources ? "All Sources" : selectedSource?.name ?? "Your Library" }
-    func sourceName(for sourceID: String) -> String { sources.first { $0.id == sourceID }?.name ?? "Unavailable source" }
+    func sourceName(for sourceID: String) -> String { sourcesByID[sourceID]?.name ?? "Unavailable source" }
     func scopeIncludes(sourceID: String) -> Bool { libraryScope?.includes(sourceID: sourceID) == true }
     private func persistLibraryScope() {
         guard savesLibrarySelection else { return }
@@ -250,15 +297,16 @@ final class AppModel {
     func cachedTracksInFolder(_ path: String) -> [TrackRecord] {
         displayedCatalog.tracksByFolder[path] ?? []
     }
-    var currentIndex: Int? { queue.firstIndex { $0.id == currentQueueID } }
-    var currentTrack: TrackRecord? { queue.first { $0.id == currentQueueID }?.track }
+    var currentIndex: Int? { currentQueueID.flatMap { queueIndices[$0] } }
+    var currentTrack: TrackRecord? { currentIndex.flatMap { queue.indices.contains($0) ? queue[$0].track : nil } }
+    var currentIsPodcast: Bool { currentTrack.map { sourcesByID[$0.sourceID]?.kind == .podcasts } == true }
     var selectedTrack: TrackRecord? { selectedTrackID.flatMap { id in catalog.tracksByID[id] ?? queue.first { $0.track.id == id }?.track } ?? currentTrack }
     var selectedAlbum: AlbumRecord? {
         if let id = selectedAlbumID, let origin = selectedAlbumSourceID ?? sourceID,
            let album = catalog.albumsByID[StableID.make(origin, "album", id)] { return album }
         return selectedTrack.flatMap { catalog.albumsByID[StableID.make($0.sourceID, "album", $0.albumID)] }
     }
-    var queueDuration: Double { queue.reduce(0) { $0 + $1.track.duration } }
+    var queueDuration: Double { _ = queue; return cachedQueueDuration }
     var recentlyAdded: [AlbumRecord] { catalog.recentlyAdded }
     var recentlyPlayed: [TrackRecord] { catalog.recentlyPlayed }
     var mostPlayedTracks: [TrackRecord] { catalog.mostPlayedTracks }
@@ -279,6 +327,9 @@ final class AppModel {
                 return (sources: sources, playlists: try store.playlists(), queue: snapshot, restored: restored, incomplete: incomplete)
             }
             sources = initial.sources
+            let dataDirectory = store.map { URL(fileURLWithPath: $0.database.path).deletingLastPathComponent() } ?? LibraryStore.defaultURL.deletingLastPathComponent()
+            podcastDownloads = PodcastDownloadsController(model: self, directory: dataDirectory.appendingPathComponent("PodcastDownloads", isDirectory: true))
+            await podcastDownloads?.start()
             radio = RadioController(model: self)
             if let store { scrobbling = ScrobblingController(store: store) }
             await radio?.reload()
@@ -316,11 +367,15 @@ final class AppModel {
                                         position: self.player.position, duration: self.player.duration)
                 if [.paused, .stopped, .failed].contains(state) { self.resetArrowSeek() }
                 if state == .paused || state == .failed { self.playbackIntentQueueID = nil }
+                self.updateNowPlaying(state: state)
             }.store(in: &eventSubscriptions)
             NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
                 .sink { [weak self] _ in self?.scrobbling?.suspend(); self?.resetArrowSeek() }.store(in: &eventSubscriptions)
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+                .sink { [weak self] _ in Task { @MainActor in await self?.podcastDownloads?.start() } }.store(in: &eventSubscriptions)
             if registerSystemControls {
                 configureControls()
+                menuBarController = MenuBarController(model: self)
                 tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.playbackTick() }
             }
             await waitForLibraryLoad()
@@ -355,15 +410,21 @@ final class AppModel {
                 let requested = state.requestedRevision
                 let sourceRevision = self.sourceRevision
                 let registeredSources = self.sources
+                let patchRevision = self.presentationPatchRevision
                 do {
-                    let snapshot = try await self.snapshotLoader(scope, store, registeredSources)
+                    var snapshot = try await self.snapshotLoader(scope, store, registeredSources)
                     try Task.checkCancellation()
                     guard self.libraryReloadState === state, self.libraryScope == scope else { break }
                     if self.sourceRevision != sourceRevision { continue }
+                    snapshot = try await self.overlayPresentationPatches(on: snapshot, after: patchRevision, sources: registeredSources)
+                    guard self.libraryReloadState === state, self.libraryScope == scope, self.sourceRevision == sourceRevision else { continue }
+                    let interval = self.signposter.beginInterval("PublishSnapshot")
                     self.catalog = snapshot
+                    self.presentationPatches = self.presentationPatches.filter { $0.value.revision > patchRevision }
                     self.updateQueuedMetadata(from: snapshot)
                     self.libraryRevision &+= 1
                     self.searchLibrary(reset: false)
+                    self.signposter.endInterval("PublishSnapshot", interval)
                 } catch is CancellationError { break }
                 catch {
                     guard self.libraryReloadState === state, self.libraryScope == scope else { break }
@@ -379,7 +440,86 @@ final class AppModel {
         }
     }
 
-    func waitForLibraryLoad() async { await libraryReloadState?.task?.value }
+    func waitForLibraryLoad() async { await libraryReloadState?.task?.value; await presentationPatchTask?.value }
+
+    /// Coalesced metadata-only updates do not traverse SQLite or rebuild folder/search ordering.
+    func patchLibraryTracks(_ tracks: [TrackRecord], kind: LibraryPatchKind) {
+        guard !tracks.isEmpty else { return }
+        presentationPatchRevision &+= 1
+        for track in tracks {
+            var patch = presentationPatches[track.id] ?? LibraryPresentationPatch(revision: presentationPatchRevision)
+            patch.merge(track, kind: kind, revision: presentationPatchRevision)
+            presentationPatches[track.id] = patch
+        }
+        let changedIDs = Set(tracks.map(\.id))
+        let updatedQueue = queue.map { item -> QueueItem in
+            guard changedIDs.contains(item.track.id), let patch = presentationPatches[item.track.id] else { return item }
+            var value = item; value.track = patch.applying(to: value.track); return value
+        }
+        if updatedQueue != queue { queue = updatedQueue }
+        for track in tracks {
+            if let patch = presentationPatches[track.id] {
+                queueMetadataOverrides[track.id] = patch.applying(to: queueMetadataOverrides[track.id] ?? track)
+            }
+        }
+        guard presentationPatchTask == nil else { return }
+        presentationPatchTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.presentationPatchTask = nil }
+            do {
+                try await Task.sleep(for: .milliseconds(100))
+                while !Task.isCancelled {
+                    let revision = self.presentationPatchRevision, baseRevision = self.libraryRevision
+                    let scope = self.libraryScope, sourceRevision = self.sourceRevision, sources = self.sources
+                    let base = self.catalog, searchBase = self.searchCatalog, query = self.search
+                    let patches = self.presentationPatches
+                    let work = Task.detached(priority: .utility) {
+                        let updates = patches.compactMap { id, patch in base.tracksByID[id].map { patch.applying(to: $0) } }
+                        let searchUpdates = patches.compactMap { id, patch in searchBase.tracksByID[id].map { patch.applying(to: $0) } }
+                        return try (base.updating(updatedTracks: updates, sources: sources),
+                                    searchBase.updating(updatedTracks: searchUpdates, sources: sources))
+                    }
+                    let result = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+                    guard self.libraryScope == scope, self.sourceRevision == sourceRevision else { continue }
+                    if self.libraryRevision != baseRevision { continue }
+                    self.catalog = result.0
+                    if self.search == query { self.searchCatalog = query.isEmpty ? result.0 : result.1 }
+                    self.updateQueuedMetadata(from: result.0); self.libraryRevision &+= 1
+                    if revision == self.presentationPatchRevision { break }
+                }
+            } catch is CancellationError { }
+            catch { self.reloadLibrary() }
+        }
+    }
+
+    private func overlayPresentationPatches(on snapshot: LibrarySnapshot, after revision: Int,
+                                             sources: [SourceRecord]) async throws -> LibrarySnapshot {
+        while true {
+            try Task.checkCancellation()
+            let currentRevision = presentationPatchRevision
+            let patches = presentationPatches.filter { $0.value.revision > revision }
+            guard !patches.isEmpty else { return snapshot }
+            let work = Task.detached(priority: .utility) {
+                let updates = patches.compactMap { id, patch in snapshot.tracksByID[id].map { patch.applying(to: $0) } }
+                return try snapshot.updating(updatedTracks: updates, sources: sources)
+            }
+            let updated = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+            if presentationPatchRevision == currentRevision { return updated }
+        }
+    }
+
+    func patchRadioStations(_ stations: [TrackRecord]) async {
+        guard let scope = libraryScope else { return }
+        while libraryScope == scope {
+            let base = catalog, revision = libraryRevision, sourceRevision = sourceRevision, sources = sources
+            let work = Task.detached(priority: .utility) { try base.updatingStations(stations, sources: sources) }
+            guard let updated = try? await work.value, libraryScope == scope, self.sourceRevision == sourceRevision else { return }
+            if libraryRevision != revision { continue }
+            catalog = updated; if search.isEmpty { searchCatalog = updated }
+            updateQueuedMetadata(from: updated); libraryRevision &+= 1
+            return
+        }
+    }
 
     func performLibraryWork<Value: Sendable>(_ operation: @escaping @Sendable (LibraryStore) throws -> Value) async throws -> Value {
         guard let store else { throw AppFailure.missingSource }
@@ -390,11 +530,14 @@ final class AppModel {
         for id in queueMetadataOverrides.keys {
             if let updated = snapshot.tracksByID[id] { queueMetadataOverrides[id] = updated }
         }
-        for index in queue.indices {
+        var updatedQueue = queue
+        var changed = false
+        for index in updatedQueue.indices {
             if let updated = snapshot.tracksByID[queue[index].track.id], queue[index].track != updated {
-                queue[index].track = updated
+                updatedQueue[index].track = updated; changed = true
             }
         }
+        if changed { queue = updatedQueue }
     }
 
     private func searchLibrary(reset: Bool) {
@@ -414,12 +557,15 @@ final class AppModel {
                 self.searchNeedsReload = false
                 do {
                     try await Task.sleep(for: .milliseconds(160))
-                    let task = Task.detached(priority: .userInitiated) {
+                    let patchRevision = self.presentationPatchRevision
+                    let task = Task.detached(priority: .utility) {
                         try LibrarySnapshot.build(scope: scope,
                                                   tracks: store.tracks(scope: scope, query: query, ordered: false), sources: sources)
                     }
-                    let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+                    var result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+                    result = try await self.overlayPresentationPatches(on: result, after: patchRevision, sources: sources)
                     guard !Task.isCancelled, self.libraryScope == scope, self.sourceRevision == sourceRevision, self.search == query, self.searchRequestID == requestID else { return }
+                    if self.searchNeedsReload { continue }
                     self.searchCatalog = result; self.isSearching = false
                 } catch is CancellationError { return }
                 catch {
@@ -536,7 +682,7 @@ final class AppModel {
 
     func seekPlayback(to seconds: Double) {
         guard !currentIsRadio, player.isSeekable else { return }
-        scrobbling?.seek(); player.seek(to: seconds)
+        scrobbling?.seek(); player.seek(to: seconds); updateNowPlaying()
     }
 
     func stopPlayback(clearCurrent: Bool) {
@@ -548,7 +694,10 @@ final class AppModel {
     }
 
     func playQueueItem(_ id: UUID) {
-        guard let item = queue.first(where: { $0.id == id }) else { return }
+        guard let index = queueIndices[id], queue.indices.contains(index) else { return }
+        let item = queue[index]
+        let preparedCandidate = nextPreparation?.id == id ? nextPreparation : nil
+        if preparedCandidate != nil { nextPreparation = nil }
         scrobbling?.end(); radioBroadcastTitle = nil; radioDisconnected = false
         let resume = id == currentQueueID ? restorePosition : 0
         restorePosition = 0
@@ -567,9 +716,21 @@ final class AppModel {
                 if source.kind == .radio {
                     try await self.loadRadio(item: item, source: source, generation: generation)
                 } else if source.kind == .local {
-                    _ = self.accessFolder(source)
-                    guard let url = item.track.url, FileManager.default.fileExists(atPath: url.path) else { throw AppFailure.missingFile }
-                    self.player.load(url: url, segmentStart: item.track.startTime ?? 0, segmentEnd: item.track.endTime, bufferSeconds: self.settings.buffer, durationHint: item.track.duration)
+                    let prepared: PreparedLocalPlayback
+                    if let next = preparedCandidate, next.source == source {
+                        do { prepared = try await next.task.value }
+                        catch { try Task.checkCancellation(); prepared = try await self.playbackPreparation.prepare(source: source, track: item.track) }
+                    }
+                    else { prepared = try await self.playbackPreparation.prepare(source: source, track: item.track) }
+                    try Task.checkCancellation()
+                    guard self.playbackGeneration == generation, self.currentQueueID == id else { return }
+                    self.player.load(url: prepared.url, segmentStart: item.track.startTime ?? 0, segmentEnd: item.track.endTime, bufferSeconds: self.settings.buffer, durationHint: item.track.duration)
+                    if let renewed = prepared.renewedSource { Task { try? await self.performLibraryWork { try $0.saveSource(renewed) } } }
+                } else if source.kind == .podcasts,
+                          let downloaded = self.podcastDownloads?.localURL(for: item.track),
+                          await Task.detached(priority: .userInitiated, operation: { FileManager.default.isReadableFile(atPath: downloaded.path) }).value {
+                    guard self.playbackGeneration == generation, self.currentQueueID == id else { return }
+                    self.player.load(url: downloaded, bufferSeconds: self.settings.buffer, durationHint: item.track.duration)
                 } else {
                     let transport = self.transport(for: source)
                     let url: URL
@@ -590,6 +751,7 @@ final class AppModel {
                 if resume > 0, source.kind != .radio { self.player.seek(to: resume) }
                 self.status = "Playing “\(item.track.title)”."
                 self.updateNowPlaying(); self.saveQueue()
+                self.prepareNextPlayback()
             } catch is CancellationError { }
             catch { if !Task.isCancelled, self.playbackGeneration == generation, self.currentQueueID == id {
                 self.playbackIntentQueueID = nil
@@ -597,6 +759,35 @@ final class AppModel {
                 self.fail("Could not play the track", error.localizedDescription)
             } }
         }
+    }
+
+    private func prepareNextPlayback() {
+        guard let index = currentIndex, !queue.isEmpty else { nextPreparation?.task.cancel(); nextPreparation = nil; return }
+        let nextIndex = index + 1 < queue.count ? index + 1 : settings.repeatMode == .playlist ? 0 : nil
+        guard let nextIndex, let source = sourcesByID[queue[nextIndex].track.sourceID], source.kind == .local else {
+            nextPreparation?.task.cancel(); nextPreparation = nil; return
+        }
+        let next = queue[nextIndex]
+        if nextPreparation?.id == next.id && nextPreparation?.source == source { return }
+        nextPreparation?.task.cancel()
+        let worker = playbackPreparation
+        nextPreparation = (next.id, source, Task(priority: .utility) { try await worker.prepare(source: source, track: next.track) })
+    }
+
+    func finishPlaybackAccess() async {
+        menuBarController?.stop()
+        watcherSetupTask?.cancel(); watcherGeneration = UUID()
+        for watcher in directoryWatchers.values { watcher.stop() }
+        directoryWatchers.removeAll()
+        for task in rescanTasks.values { task.cancel() }; rescanTasks.removeAll()
+        nextPreparation?.task.cancel(); nextPreparation = nil
+        await playbackPreparation.shutdown()
+    }
+
+    func showMainWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = mainPlayerWindow, window.isVisible { window.makeKeyAndOrderFront(nil) }
+        else { openMainWindow?() }
     }
 
     func togglePlayback() {
@@ -693,7 +884,7 @@ final class AppModel {
         guard let store else { return }
         queueSaveRevision &+= 1
         let revision = queueSaveRevision
-        let ids = queue.map(\.track.id), index = currentIndex ?? 0
+        let ids = queueTrackIDs, index = currentIndex ?? 0
         let position = currentIsRadio ? 0 : player.position > 0 ? player.position : restorePosition
         Task { try? await backgroundWorker.saveQueue(store: store, trackIDs: ids, currentIndex: index, position: position, revision: revision) }
     }
@@ -701,7 +892,7 @@ final class AppModel {
     func flushQueue() async {
         guard let store else { return }
         queueSaveRevision &+= 1
-        try? await backgroundWorker.saveQueue(store: store, trackIDs: queue.map(\.track.id), currentIndex: currentIndex ?? 0,
+        try? await backgroundWorker.saveQueue(store: store, trackIDs: queueTrackIDs, currentIndex: currentIndex ?? 0,
                                               position: currentIsRadio ? 0 : player.position > 0 ? player.position : restorePosition, revision: queueSaveRevision)
     }
 
@@ -826,7 +1017,7 @@ final class AppModel {
             try await backgroundWorker.deleteSource(store: store, sourceID: source.id, incompleteKey: Self.catalogImportKey(source.id))
             try await Task.detached { try KeychainCredentialStore.shared.delete(sourceID: source.id) }.value
             CertificateTrustStore.shared.revoke(sourceID: source.id)
-            accessedFolders.removeValue(forKey: source.id)?.stopAccessingSecurityScopedResource()
+            await playbackPreparation.invalidate(sourceIDs: [source.id])
             transportCache.removeValue(forKey: source.id)?.invalidate()
             sources = try await performLibraryWork { try $0.sources() }
             if sourceID == source.id { sourceID = sources.first?.id }
@@ -920,18 +1111,29 @@ final class AppModel {
                 try await worker.updateRadioStation(store: store, station: station, generation: generation)
             }
         case .local:
-            let resolved = accessFolder(source)
+            let resolved = await accessFolder(source)
             var scanSource = source
             if let resolved { scanSource.location = resolved.absoluteString }
-            let result = try await localScan(scanSource, { [weak self] count, total in
+            let progress: @Sendable (Int, Int) -> Void = { [weak self] count, total in
                 Task { @MainActor in
                     guard let self, !self.isStoppingRefresh, self.refreshGeneration == generation, self.refreshSourceID == source.id else { return }
                     self.refreshProgress = self.refreshLabel("Reading file \(count) of \(total)…")
                 }
-            })
+            }
+            let result: LibraryScanResult
+            if let localScan { result = try await localScan(scanSource, progress) }
+            else {
+                let cache = try await backgroundWorker.perform(store: store) { try $0.localScanCache(sourceID: source.id) }
+                result = try await LibraryScanner().scan(source: scanSource, cachedFiles: cache,
+                    metadataReader: { try TagLibMetadataService.read(url: $0) }, progress: progress)
+            }
             try Task.checkCancellation()
             if result.isComplete { try await backgroundWorker.replace(store: store, sourceID: source.id, generation: generation, tracks: result.tracks) }
             else { try await backgroundWorker.upsert(store: store, sourceID: source.id, generation: generation, tracks: result.tracks) }
+            if localScan == nil {
+                try await backgroundWorker.saveScanCache(store: store, sourceID: source.id, generation: generation,
+                    entries: result.fileCacheEntries, isComplete: result.isComplete)
+            }
             scanWarnings.append(contentsOf: result.warnings)
         case .openSubsonic:
             try await importRemoteCatalog(source: source, store: store, generation: generation)
@@ -1059,6 +1261,9 @@ final class AppModel {
     }
 
     private func watchSelectedSource() {
+        watcherSetupTask?.cancel()
+        watcherGeneration = UUID()
+        let generation = watcherGeneration
         for watcher in directoryWatchers.values { watcher.stop() }
         directoryWatchers.removeAll()
         for task in rescanTasks.values { task.cancel() }
@@ -1066,18 +1271,25 @@ final class AppModel {
         let visibleLocal = sources.filter { $0.kind == .local && scopeIncludes(sourceID: $0.id) }
         pendingRescanSourceIDs.formIntersection(visibleLocal.map(\.id))
         guard registerSystemControls else { return }
-        for source in visibleLocal {
-            guard let url = accessFolder(source) else { continue }
-            let watchedURL = url.hasDirectoryPath ? url : url.deletingLastPathComponent()
-            directoryWatchers[source.id] = DirectoryWatcher(url: watchedURL) { [weak self] in
-                Task { @MainActor in
-                    guard let self, !self.isStoppingRefresh, self.scopeIncludes(sourceID: source.id), self.sources.contains(where: { $0.id == source.id }) else { return }
-                    self.rescanTasks[source.id]?.cancel()
-                    self.rescanTasks[source.id] = Task { [weak self] in
-                        try? await Task.sleep(for: .seconds(2))
-                        guard !Task.isCancelled, let self else { return }
-                        self.rescanTasks[source.id] = nil
-                        self.requestRescan(sourceID: source.id)
+        watcherSetupTask = Task { [weak self] in
+            guard let self else { return }
+            for source in visibleLocal {
+                guard !Task.isCancelled, self.watcherGeneration == generation,
+                      let url = await self.accessFolder(source), !Task.isCancelled,
+                      self.watcherGeneration == generation, self.scopeIncludes(sourceID: source.id) else { continue }
+                let watchedURL = url.hasDirectoryPath ? url : url.deletingLastPathComponent()
+                self.directoryWatchers[source.id] = DirectoryWatcher(url: watchedURL) { [weak self] batch in
+                    guard LocalFileChangeSuppression.shared.shouldRescan(batch) else { return }
+                    Task { @MainActor in
+                        guard let self, !self.isStoppingRefresh, self.watcherGeneration == generation,
+                              self.scopeIncludes(sourceID: source.id), self.sourcesByID[source.id] != nil else { return }
+                        self.rescanTasks[source.id]?.cancel()
+                        self.rescanTasks[source.id] = Task { [weak self] in
+                            try? await Task.sleep(for: .seconds(2))
+                            guard !Task.isCancelled, let self else { return }
+                            self.rescanTasks[source.id] = nil
+                            self.requestRescan(sourceID: source.id)
+                        }
                     }
                 }
             }
@@ -1091,22 +1303,13 @@ final class AppModel {
         else { refresh(sourceID: sourceID) }
     }
 
-    @discardableResult func accessFolder(_ source: SourceRecord) -> URL? {
-        if let existing = accessedFolders[source.id] { return existing }
-        var resolved = source.url
-        if let data = source.bookmarkData {
-            var stale = false
-            if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale) {
-                resolved = url
-                if stale, let renewed = try? url.bookmarkData(options: .withSecurityScope) {
-                    var updated = source; updated.bookmarkData = renewed
-                    let renewedSource = updated
-                    Task { try? await performLibraryWork { try $0.saveSource(renewedSource) } }
-                }
-            }
+    @discardableResult func accessFolder(_ source: SourceRecord) async -> URL? {
+        guard let prepared = try? await playbackPreparation.resolveSource(source), !Task.isCancelled,
+              sourcesByID[source.id] == source else { return nil }
+        if let renewed = prepared.renewedSource {
+            Task { try? await performLibraryWork { try $0.saveSource(renewed) } }
         }
-        if let resolved { _ = resolved.startAccessingSecurityScopedResource(); accessedFolders[source.id] = resolved }
-        return resolved
+        return prepared.url
     }
 
     func transport(for source: SourceRecord) -> SourceTransport {
@@ -1170,11 +1373,33 @@ final class AppModel {
     }
 
     func subsonicClient(_ source: SourceRecord) async throws -> OpenSubsonicClient {
+        if let client = clientCache[source.id] { return client }
+        if let request = clientRequests[source.id] {
+            let revision = clientRevisions[source.id, default: 0]
+            let client = try await request.value
+            try Task.checkCancellation()
+            guard clientRevisions[source.id, default: 0] == revision, sourcesByID[source.id] == source else { throw CancellationError() }
+            return client
+        }
         guard let url = source.url else { throw SourceNetworkError.invalidURL }
-        let credentials = try await Task.detached { try KeychainCredentialStore.shared.load(sourceID: source.id) }.value
-        try Task.checkCancellation()
-        guard let credentials, sources.contains(where: { $0.id == source.id }) else { throw SourceNetworkError.missingCredentials }
-        return OpenSubsonicClient(baseURL: url, credentials: credentials, transport: transport(for: source))
+        let revision = clientRevisions[source.id, default: 0], transport = transport(for: source)
+        let request = Task { @MainActor [weak self] in
+            let credentials = try await Task.detached(priority: .utility) { try KeychainCredentialStore.shared.load(sourceID: source.id) }.value
+            try Task.checkCancellation()
+            guard let self, self.sourcesByID[source.id] == source, let credentials else { throw SourceNetworkError.missingCredentials }
+            return OpenSubsonicClient(baseURL: url, credentials: credentials, transport: transport)
+        }
+        clientRequests[source.id] = request
+        defer { if clientRevisions[source.id, default: 0] == revision { clientRequests[source.id] = nil } }
+        let client = try await request.value
+        guard clientRevisions[source.id, default: 0] == revision else { throw CancellationError() }
+        clientCache[source.id] = client
+        return client
+    }
+
+    func invalidateSourceClient(_ id: String) {
+        clientRevisions[id, default: 0] &+= 1
+        clientCache[id] = nil; clientRequests.removeValue(forKey: id)?.cancel()
     }
 
     func ensureArtwork(_ track: TrackRecord) async {
@@ -1183,18 +1408,16 @@ final class AppModel {
         artworkTasks.insert(albumKey)
         defer { artworkTasks.remove(albumKey) }
         do {
-            let data = try await subsonicClient(source).coverArt(id: cover)
+            let client = try await subsonicClient(source)
+            let data = try await artworkGate.withPermit { try await client.coverArt(id: cover) }
+            try Task.checkCancellation()
+            guard sourcesByID[source.id] == source else { return }
             let url = try await cacheArtwork(data, key: StableID.make(source.id, cover))
             let record = try await performLibraryWork { store in
                 try store.cacheRemoteArtwork(sourceID: source.id, albumID: track.albumID, coverArtID: cover, path: url.path)
-                return try store.track(id: track.id)
+                return try store.albumTracks(sourceID: source.id, albumID: track.albumID)
             }
-            if let path = record?.artworkPath {
-                for index in queue.indices where queue[index].track.sourceID == source.id && queue[index].track.albumID == track.albumID && queue[index].track.artworkPath == nil {
-                    queue[index].track.artworkPath = path
-                }
-            }
-            if scopeIncludes(sourceID: source.id) { reloadLibrary() }
+            patchLibraryTracks(record, kind: .artwork)
         } catch { }
     }
 
@@ -1212,7 +1435,10 @@ final class AppModel {
 
     func rate(_ track: TrackRecord, value: Int) {
         Task {
-            do { try await performLibraryWork { try $0.setRating(trackID: track.id, rating: value) }; reloadLibrary() }
+            do {
+                let updated = try await performLibraryWork { store in try store.setRating(trackID: track.id, rating: value); return try store.track(id: track.id) }
+                if let updated { patchLibraryTracks([updated], kind: .rating) }
+            }
             catch { fail("Could not save rating", error.localizedDescription) }
         }
     }
@@ -1230,9 +1456,11 @@ final class AppModel {
     }
 
     private func playbackTick() {
+        let bufferFraction: Double?
         if let snapshot = activeStream?.snapshot, snapshot.isBuffering {
-            streamingBufferFraction = min(1, Double(snapshot.bufferedBytes) / Double(max(1, snapshot.targetBytes)))
-        } else { streamingBufferFraction = nil }
+            bufferFraction = min(1, Double(snapshot.bufferedBytes) / Double(max(1, snapshot.targetBytes)))
+        } else { bufferFraction = nil }
+        if streamingBufferFraction != bufferFraction { streamingBufferFraction = bufferFraction }
         scrobbling?.update(isPlaying: player.state == .playing, isBuffering: player.state == .buffering || streamingBufferFraction != nil,
                            position: player.position, duration: player.duration)
         if player.state == .playing, !currentIsRadio, let track = currentTrack {
@@ -1242,14 +1470,20 @@ final class AppModel {
             if !playRecorded && heardSeconds >= threshold {
                 playRecorded = true
                 Task {
-                    try? await performLibraryWork { try $0.recordPlay(trackID: track.id, at: Date()) }
-                    reloadLibrary()
+                    let updated = try? await performLibraryWork { store in try store.recordPlay(trackID: track.id, at: Date()); return try store.track(id: track.id) }
+                    if let updated { patchLibraryTracks([updated], kind: .history) }
                 }
             }
         }
-        updateNowPlaying()
         lastSavedTick += 1
-        if lastSavedTick >= 5 { lastSavedTick = 0; saveQueue() }
+        if lastSavedTick >= 5 {
+            lastSavedTick = 0; updateNowPlaying()
+            if player.state == .playing, let store {
+                queueSaveRevision &+= 1
+                let revision = queueSaveRevision, index = currentIndex ?? 0, position = currentIsRadio ? 0 : player.position
+                Task { try? await backgroundWorker.saveQueuePosition(store: store, currentIndex: index, position: position, revision: revision) }
+            }
+        }
     }
 
     private func configureControls() {
@@ -1284,7 +1518,7 @@ final class AppModel {
             }
             guard !event.isARepeat, NSApp.keyWindow === self.mainPlayerWindow,
                   NSApp.keyWindow?.attachedSheet == nil, NSApp.modalWindow == nil else { return event }
-            let editing = NSApp.keyWindow?.firstResponder is NSTextView
+            let editing = NSApp.keyWindow?.firstResponder is NSTextView || PlaybackArrowKeys.webView(for: NSApp.keyWindow?.firstResponder) != nil
             if !editing, let shortcut = KeyboardShortcuts.Shortcut(event: event) {
                 for name in ["playPause", "previousTrack", "nextTrack", "addToPlaylist", "search", "showCurrentTrack"] where self.localShortcut(name) == shortcut {
                     self.performLocalShortcut(name)
@@ -1295,17 +1529,18 @@ final class AppModel {
         }) { monitors.append(monitor) }
     }
 
-    private func updateNowPlaying() {
+    private func updateNowPlaying(state: PlaybackState? = nil) {
+        let playbackState = state ?? player.state
         guard let track = currentTrack else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; return }
         if currentIsRadio {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: track.title,
                 MPMediaItemPropertyArtist: radioBroadcastTitle ?? "Internet Radio", MPNowPlayingInfoPropertyIsLiveStream: true,
-                MPNowPlayingInfoPropertyPlaybackRate: player.state == .playing ? 1.0 : 0.0]
-            MPNowPlayingInfoCenter.default().playbackState = player.state == .playing ? .playing : player.state == .paused ? .paused : .stopped
+                MPNowPlayingInfoPropertyPlaybackRate: playbackState == .playing ? 1.0 : 0.0]
+            MPNowPlayingInfoCenter.default().playbackState = playbackState == .playing ? .playing : playbackState == .paused ? .paused : .stopped
             return
         }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: track.title, MPMediaItemPropertyArtist: track.artist, MPMediaItemPropertyAlbumTitle: track.album, MPMediaItemPropertyPlaybackDuration: player.duration > 0 ? player.duration : track.duration, MPNowPlayingInfoPropertyElapsedPlaybackTime: player.position, MPNowPlayingInfoPropertyPlaybackRate: player.state == .playing ? 1.0 : 0.0]
-        MPNowPlayingInfoCenter.default().playbackState = player.state == .playing ? .playing : player.state == .paused ? .paused : .stopped
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: track.title, MPMediaItemPropertyArtist: track.artist, MPMediaItemPropertyAlbumTitle: track.album, MPMediaItemPropertyPlaybackDuration: player.duration > 0 ? player.duration : track.duration, MPNowPlayingInfoPropertyElapsedPlaybackTime: player.position, MPNowPlayingInfoPropertyPlaybackRate: playbackState == .playing ? 1.0 : 0.0]
+        MPNowPlayingInfoCenter.default().playbackState = playbackState == .playing ? .playing : playbackState == .paused ? .paused : .stopped
     }
 }
 

@@ -7,6 +7,7 @@ enum SettingsTab: Hashable { case general, playback, shortcuts, sources, scrobbl
 
 struct SettingsView: View {
     @Bindable var model: AppModel
+    @Environment(\.openWindow) private var openWindow
     @State private var selectedTab: SettingsTab
     @State private var removal: SourceRecord?
     @State private var credentialSource: SourceRecord?
@@ -30,6 +31,7 @@ struct SettingsView: View {
             }.tag(SettingsTab.scrobbling).tabItem { Label("Scrobbling", systemImage: "waveform") }
         }
         .frame(width: 650, height: 555)
+        .onAppear { model.openMainWindow = { openWindow(id: "main") } }
         .confirmationDialog("Remove \(removal?.name ?? "Source")?", isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }), titleVisibility: .visible) {
             Button("Remove Source", role: .destructive) { if let removal { model.removeSource(removal) }; removal = nil }
             Button("Cancel", role: .cancel) { removal = nil }
@@ -55,6 +57,10 @@ struct SettingsView: View {
                 Text("Double-clicking an entry in the active playlist always plays that entry.").font(.caption).foregroundStyle(.secondary)
                 Text("Double-clicking an album or artist always adds all its tracks to the active playlist.").font(.caption).foregroundStyle(.secondary)
                 Text("Double-clicking music starts playback when the active playlist is empty.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Menu Bar") {
+                Toggle("Show Macarok in the menu bar", isOn: $model.settings.showMenuBar)
+                Text("Control playback and reopen the player while its window is closed.").font(.caption).foregroundStyle(.secondary)
             }
             Section("About") {
                 LabeledContent("Macarok", value: "0.1.0 · Private Beta")
@@ -92,6 +98,25 @@ struct SettingsView: View {
                     Button { model.cycleRepeat() } label: {
                         Label(model.settings.repeatMode.title, systemImage: model.settings.repeatMode.symbol).frame(minWidth: 85)
                     }.help("Next: \(model.settings.repeatMode.next.title)")
+                }
+            }
+            if let controller = model.podcastDownloads {
+                Section("Podcast Downloads") {
+                    Text("Episodes download only when you choose Download Episode. Completed files stay until you remove them; removed episodes move to Trash. Unfinished transfers are cleaned up automatically.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(controller.directory.path).font(.caption).textSelection(.enabled)
+                    Button("Open Downloads Folder…", action: controller.openFolder)
+                    ForEach(controller.downloads.values.sorted { $0.downloadedAt > $1.downloadedAt }) { download in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(download.title).lineLimit(1)
+                                Text(ByteCountFormatter.string(fromByteCount: download.byteCount, countStyle: .file)).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Reveal") { controller.reveal(download) }
+                            Button("Remove", role: .destructive) { controller.remove(download) }.disabled(!controller.canRemove(download))
+                        }
+                    }
                 }
             }
         }.formStyle(.grouped)
@@ -231,6 +256,7 @@ private struct CredentialEditor: View {
     private func save() {
         do {
             try KeychainCredentialStore.shared.save(useAPIKey ? SourceCredentials(apiKey: apiKey) : SourceCredentials(username: username, password: password), sourceID: source.id)
+            model.invalidateSourceClient(source.id)
             model.status = "Credentials updated for “\(source.name)”."; dismiss()
         } catch { errorMessage = error.localizedDescription }
     }

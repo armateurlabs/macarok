@@ -38,7 +38,8 @@ struct RadioLibraryView: View {
                         .contextMenu {
                             if let controller = model.radio { RadioStationActions(controller: controller, station: station) }
                         }
-                }.listStyle(.sidebar)
+                }.listStyle(.inset(alternatesRowBackgrounds: true))
+                    .background(NativeListBackground(revision: stations.hashValue))
             }
             if let error = model.radio?.errorMessage {
                 Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 13).padding(.bottom, 8)

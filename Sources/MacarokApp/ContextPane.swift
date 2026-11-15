@@ -32,6 +32,14 @@ struct ContextPane: View {
     @ViewBuilder private var playingContent: some View {
         switch model.contextMode {
         case .lyrics: LyricsPane(model: model)
+        case .wikipedia: WikipediaPane(model: model)
+        case .editAlbumMetadata:
+            if let session = model.albumMetadataEditingSession {
+                AlbumMetadataEditor(model: model, session: session, onFinish: { model.finishAlbumMetadataEditing(sessionID: session.id) })
+            } else {
+                ContentUnavailableView("Choose an Album", systemImage: "square.stack", description: Text("Play or select a song to edit its album metadata."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         case .editMetadata:
             if let session = model.metadataEditingSession {
                 InlineMetadataEditor(model: model, session: session, onFinish: { model.finishMetadataEditing(sessionID: session.id) })
@@ -152,7 +160,7 @@ struct HomeView: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
             }
         }.font(.system(size: 12)).padding(.vertical, 3).contentShape(Rectangle()).onLibraryClick(inspect: { model.inspect(track) }, add: { model.doubleClick(track) })
-            .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add to Active Playlist") { [track] } }
+            .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add to Active Playlist") { [track] }; TrackFileActions(model: model, track: track) }
     }
 
     private static let historyDate: DateFormatter = {
@@ -228,7 +236,7 @@ struct AlbumTile: View {
             SourceBadge(model: model, sourceID: album.sourceID)
         }.frame(maxWidth: .infinity, alignment: .topLeading).contentShape(Rectangle()).onLibraryClick(inspect: { model.inspect(album) }, add: { model.doubleClickSelection(model.tracksForAlbum(album)) })
             .contextMenu {
-                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
+                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }; AlbumMetadataAction(model: model, album: album)
                 Button("Shuffle Album") { model.shuffle(album.tracks) }
                 Button("Choose Artwork…") { model.artworkTrack = album.tracks.first }
             }
@@ -245,7 +253,7 @@ struct TrackContextView: View {
                 ArtworkView(track: track, model: model).frame(width: 126, height: 126)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(track.title).font(.system(size: 22, weight: .semibold)).textSelection(.enabled)
-                        .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add to Active Playlist") { [track] } }
+                        .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add to Active Playlist") { [track] }; TrackFileActions(model: model, track: track) }
                     Button(track.artist) { model.inspectArtist(track.albumArtist) }.buttonStyle(.link).font(.system(size: 13))
                         .contextMenu {
                             if model.scopeIncludes(sourceID: track.sourceID) {
@@ -255,7 +263,7 @@ struct TrackContextView: View {
                     Button(track.album) { model.inspectAlbum(containing: track) }.buttonStyle(.plain).foregroundStyle(.secondary).font(.system(size: 12))
                         .contextMenu {
                             if model.scopeIncludes(sourceID: track.sourceID), let album = model.albumsForArtist(track.albumArtist).first(where: { $0.id == track.albumID && $0.sourceID == track.sourceID }) {
-                                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
+                                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }; AlbumMetadataAction(model: model, album: album)
                             }
                         }
                     Text([track.year.map(String.init), track.genre].compactMap { $0 }.joined(separator: " · ")).font(.system(size: 11)).foregroundStyle(.secondary)
@@ -264,6 +272,7 @@ struct TrackContextView: View {
             }
             Picker("Track details", selection: $model.contextTab) { Text("Overview").tag("Overview"); Text("Tags").tag("Tags") }
                 .pickerStyle(.segmented).labelsHidden().frame(width: 185).frame(maxWidth: .infinity)
+            PodcastEpisodeActions(model: model, track: track)
             if model.contextTab == "Overview" { overview }
             else { tags }
             Divider()
@@ -283,7 +292,7 @@ struct TrackContextView: View {
                 }
             }
             Divider()
-            HStack { Text("About this recording").font(.system(size: 13, weight: .semibold)); Spacer(); Button { model.beginMetadataEditing(track) } label: { Image(systemName: "square.and.pencil") }.buttonStyle(.borderless).help("Edit metadata") }
+            HStack { Text("About this recording").font(.system(size: 13, weight: .semibold)); Spacer(); Button { model.beginMetadataEditing(track) } label: { Image(systemName: "square.and.pencil") }.buttonStyle(.borderless).help("Edit song metadata") }
             Text("\(track.title) by \(track.artist), from \(track.album).\(track.isCUETrack ? " This track is a region of a shared audio file." : "")").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
             let related = Array(model.albumsForArtist(track.albumArtist).lazy.filter { $0.id != track.albumID || $0.sourceID != track.sourceID }.prefix(4))
             if !related.isEmpty {
@@ -306,7 +315,7 @@ struct TrackContextView: View {
                 if let path = track.remotePath { tag("Server path", path) }
                 if track.metadataLocked { tag("Metadata", "Personal corrections preserved") }
             }.font(.system(size: 12)).textSelection(.enabled)
-            HStack { Button { model.beginMetadataEditing(track) } label: { Label("Edit Metadata…", systemImage: "square.and.pencil") }; Button { model.artworkTrack = track } label: { Label("Artwork…", systemImage: "photo") } }.controlSize(.small)
+            HStack { Button { model.beginMetadataEditing(track) } label: { Label("Edit Song Metadata…", systemImage: "square.and.pencil") }; Button { model.artworkTrack = track } label: { Label("Artwork…", systemImage: "photo") } }.controlSize(.small)
         }
     }
     private func tag(_ label: String, _ value: String) -> some View { GridRow(alignment: .top) { Text(label).foregroundStyle(.secondary); Text(value).frame(maxWidth: .infinity, alignment: .leading) } }
@@ -322,7 +331,7 @@ struct AlbumContextView: View {
                 ArtworkView(track: album.tracks.first, model: model).frame(width: 118, height: 118)
                 VStack(alignment: .leading, spacing: 7) {
                     Text(album.title).font(.system(size: 23, weight: .semibold))
-                        .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) } }
+                        .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }; AlbumMetadataAction(model: model, album: album) }
                     Button(album.artist) { model.inspectArtist(album.artist) }.buttonStyle(.link)
                         .contextMenu {
                             LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") {

@@ -114,7 +114,8 @@ struct LibraryPane: View {
                             }
                         }
                     }
-                }.listStyle(.sidebar).environment(\.defaultMinListRowHeight, 25)
+                }.listStyle(.inset(alternatesRowBackgrounds: true)).environment(\.defaultMinListRowHeight, 25)
+                    .background(NativeListBackground(revision: rowBackgroundRevision))
             }
             Divider()
             VStack(alignment: .leading, spacing: 7) {
@@ -138,6 +139,15 @@ struct LibraryPane: View {
 
     private var shuffleScope: [TrackRecord] { model.libraryView == .folders ? model.folderTracks : model.displayedTracks }
 
+    private var rowBackgroundRevision: Int {
+        var value = Hasher()
+        value.combine(model.libraryRevision); value.combine(model.search); value.combine(model.displayedTracks.count)
+        value.combine(model.libraryView.rawValue)
+        value.combine(expandedArtists); value.combine(expandedAlbums); value.combine(expandedYears)
+        value.combine(expandedGenres); value.combine(expandedFormats)
+        return value.finalize()
+    }
+
     private func expansion<ID: Hashable>(_ id: ID, in values: Binding<Set<ID>>) -> Binding<Bool> {
         Binding(get: { values.wrappedValue.contains(id) }, set: { expanded in
             if expanded { values.wrappedValue.insert(id) }
@@ -149,7 +159,7 @@ struct LibraryPane: View {
         HStack { Text(album.title).lineLimit(1); SourceBadge(model: model, sourceID: album.sourceID); Spacer(); Text(album.year.map(String.init) ?? "").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 11)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             .onLibraryClick(inspect: { model.inspect(album) }, add: { model.doubleClickSelection(model.tracksForAlbum(album)) })
             .contextMenu {
-                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
+                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }; AlbumMetadataAction(model: model, album: album)
                 Button("Shuffle Album") { model.shuffle(model.tracksForAlbum(album)) }
             }
     }
@@ -158,7 +168,7 @@ struct LibraryPane: View {
         HStack(spacing: 9) { ArtworkView(track: album.tracks.first, model: model).frame(width: 36, height: 36); VStack(alignment: .leading, spacing: 2) { Text(album.title).lineLimit(1); Text("\(album.artist) · \(album.year.map(String.init) ?? "—")").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1); SourceBadge(model: model, sourceID: album.sourceID) } }.font(.system(size: 12)).padding(.vertical, 3).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             .onLibraryClick(inspect: { model.inspect(album) }, add: { model.doubleClickSelection(model.tracksForAlbum(album)) })
             .contextMenu {
-                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
+                LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }; AlbumMetadataAction(model: model, album: album)
                 Button("Shuffle Album") { model.shuffle(model.tracksForAlbum(album)) }
             }
     }

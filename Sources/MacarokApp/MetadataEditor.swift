@@ -47,7 +47,7 @@ struct MetadataEditor: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Edit Metadata").font(.title2.weight(.semibold))
+                    Text("Edit Song Metadata").font(.title2.weight(.semibold))
                     Text(track.title).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
@@ -204,10 +204,12 @@ struct MetadataEditor: View {
     @ViewBuilder private var lookupActions: some View {
         Button("Find Metadata", systemImage: "magnifyingglass") { Task { await findMatches() } }
         Button("Identify Recording", systemImage: "waveform") {
-            if let source = model.sources.first(where: { $0.id == track.sourceID }), source.kind == .local {
-                _ = model.accessFolder(source)
+            Task { @MainActor in
+                if let source = model.sources.first(where: { $0.id == track.sourceID }), source.kind == .local {
+                    _ = await model.accessFolder(source)
+                }
+                identifyRecording = true
             }
-            identifyRecording = true
         }.disabled(!isLocal || isBusy)
         Button("Clean Up Tags", systemImage: "wand.and.stars") { prepareCleanup() }
     }

@@ -14,3 +14,14 @@ struct LibraryPlaybackActions: View {
         Button("Add After Current Track") { model.addAfterCurrent(tracks()) }
     }
 }
+
+struct AlbumMetadataAction: View {
+    @Bindable var model: AppModel
+    let album: AlbumRecord
+    var body: some View {
+        Divider()
+        Button("Edit Album Metadata…") {
+            if let track = model.tracksForAlbum(album).first { model.beginAlbumMetadataEditing(track) }
+        }.disabled(album.tracks.isEmpty)
+    }
+}

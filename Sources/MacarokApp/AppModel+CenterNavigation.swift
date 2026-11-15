@@ -13,10 +13,12 @@ extension AppModel {
         }
     }
 
-    var isEditingContext: Bool { metadataEditingSession != nil || editingTrack != nil || artworkTrack != nil }
+    var isEditingContext: Bool { metadataEditingSession != nil || albumMetadataEditingSession != nil || editingTrack != nil || artworkTrack != nil }
 
     var playingContextTrack: TrackRecord? {
+        if contextMode == .editAlbumMetadata, let session = albumMetadataEditingSession { return session.track }
         if let track = metadataEditingSession?.track ?? editingTrack ?? artworkTrack { return track }
+        if let session = albumMetadataEditingSession { return session.track }
         if let currentTrack, selectedTrackID == nil || selectedTrackID == currentTrack.id { return currentTrack }
         return selectedTrack
     }
@@ -32,6 +34,7 @@ extension AppModel {
         selectedFolder = nil
         contextPage = .track
         if contextMode == .editMetadata { ensureMetadataEditingSession() }
+        if contextMode == .editAlbumMetadata { ensureAlbumMetadataEditingSession() }
     }
 
     func ensureMetadataEditingSession() {
@@ -57,6 +60,26 @@ extension AppModel {
         guard metadataEditingSession?.id == sessionID else { return }
         if contextMode == .editMetadata { contextMode = .context }
         metadataEditingSession = nil
+        followPlaybackContext()
+    }
+
+    func ensureAlbumMetadataEditingSession() {
+        guard albumMetadataEditingSession == nil, let track = playingContextTrack, !isRadioTrack(track) else { return }
+        albumMetadataEditingSession = AlbumMetadataEditingSession(track: track)
+    }
+
+    func beginAlbumMetadataEditing(_ track: TrackRecord? = nil) {
+        if albumMetadataEditingSession == nil {
+            guard let target = track ?? playingContextTrack, !isRadioTrack(target) else { return }
+            albumMetadataEditingSession = AlbumMetadataEditingSession(track: target)
+        }
+        contextPage = .track; contextMode = .editAlbumMetadata
+    }
+
+    func finishAlbumMetadataEditing(sessionID: UUID) {
+        guard albumMetadataEditingSession?.id == sessionID else { return }
+        if contextMode == .editAlbumMetadata { contextMode = .context }
+        albumMetadataEditingSession = nil
         followPlaybackContext()
     }
 }

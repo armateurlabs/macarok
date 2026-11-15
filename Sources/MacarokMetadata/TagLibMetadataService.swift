@@ -158,6 +158,58 @@ public enum TagLibMetadataService {
         return try write(properties: ["CUESHEET": updated], to: audioURL)
     }
 
+    /// Applies shared album fields to one external CUE sheet in a single atomic replacement.
+    /// Track titles, indices, file references, and unrelated directives remain untouched.
+    public static func writeCUEAlbum(cueURL: URL, properties: [String: String], fallbackTrackArtists: [Int: String] = [:]) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        let fingerprint = try FileFingerprint(url: cueURL)
+        let original = try Data(contentsOf: cueURL)
+        let (text, encoding) = try decodeCUE(original)
+        let updated = try updatedCUEAlbumText(text, properties: properties, fallbackTrackArtists: fallbackTrackArtists)
+        guard let data = updated.data(using: encoding) else {
+            throw MetadataError.unsupported("The new metadata cannot be represented in this CUE sheet's text encoding.")
+        }
+        guard try FileFingerprint(url: cueURL) == fingerprint else { throw MetadataError.changedDuringEdit }
+        try data.write(to: cueURL, options: .atomic)
+    }
+
+    /// Writes the embedded CUE and shared audio tags together, making only one verified audio-file replacement.
+    @discardableResult
+    public static func writeEmbeddedCUEAlbum(audioURL: URL, properties: [String: String], fallbackTrackArtists: [Int: String] = [:]) throws -> AudioFileMetadata {
+        lock.lock()
+        defer { lock.unlock() }
+        let fingerprint = try FileFingerprint(url: audioURL)
+        let current = try self.properties(url: audioURL)
+        guard let text = current["CUESHEET"]?.first else {
+            throw MetadataError.unsupported("This file has no textual embedded CUE sheet.")
+        }
+        let updated = try updatedCUEAlbumText(text, properties: properties, fallbackTrackArtists: fallbackTrackArtists)
+        var values = properties
+        values["CUESHEET"] = updated
+        guard try FileFingerprint(url: audioURL) == fingerprint else { throw MetadataError.changedDuringEdit }
+        return try write(properties: values, to: audioURL)
+    }
+
+    private static func updatedCUEAlbumText(_ text: String, properties: [String: String], fallbackTrackArtists: [Int: String]) throws -> String {
+        guard Set(properties.keys).isSubset(of: ["ALBUM", "ALBUMARTIST", "ARTIST", "DATE", "GENRE"]) else {
+            throw MetadataError.unsupported("Album edits may change only shared album, artist, year, and genre fields.")
+        }
+        let sheet = try CUEParser.parse(text)
+        guard !sheet.tracks.isEmpty else { throw MetadataError.unsupported("The CUE sheet has no audio tracks.") }
+        var updated = text
+        for (index, track) in sheet.tracks.enumerated() {
+            updated = try updatedCUEText(updated, trackNumber: track.number, artist: properties["ARTIST"],
+                album: index == 0 ? properties["ALBUM"] : nil,
+                albumArtist: index == 0 ? properties["ALBUMARTIST"] : nil,
+                genre: index == 0 ? properties["GENRE"] : nil,
+                yearText: index == 0 ? properties["DATE"] : nil,
+                fallbackTrackArtists: fallbackTrackArtists)
+            if properties["ARTIST"] == nil { break }
+        }
+        return updated
+    }
+
     public static func updatedCUEText(
         _ text: String, trackNumber: Int, title: String? = nil, artist: String? = nil,
         album: String? = nil, albumArtist: String? = nil, year: Int? = nil, genre: String? = nil,

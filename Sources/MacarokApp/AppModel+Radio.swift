@@ -5,7 +5,7 @@ extension AppModel {
     var isRadioSource: Bool { selectedSource?.kind == .radio }
     func isRadioTrack(_ track: TrackRecord?) -> Bool {
         guard let track else { return false }
-        return track.sourceID == RadioLibrary.sourceID || sources.contains { $0.id == track.sourceID && $0.kind == .radio }
+        return track.sourceID == RadioLibrary.sourceID || radioSourceIDs.contains(track.sourceID)
     }
     var currentIsRadio: Bool { isRadioTrack(currentTrack) }
     var radioStations: [RadioStationRecord] {

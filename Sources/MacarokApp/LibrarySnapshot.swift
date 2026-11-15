@@ -28,13 +28,17 @@ struct LibraryArtistGroup: Identifiable, Sendable {
     }
 
     init(name: String, albums: [AlbumRecord]) {
-        self.id = StableID.make("artist", Self.normalizedName(name))
-        self.name = name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        self.albums = albums.sorted {
+        self.init(name: name, orderedAlbums: albums.sorted {
             if ($0.year ?? 0) != ($1.year ?? 0) { return ($0.year ?? 0) < ($1.year ?? 0) }
             let order = $0.title.localizedStandardCompare($1.title)
             return order == .orderedSame ? $0.presentationID < $1.presentationID : order == .orderedAscending
-        }
+        })
+    }
+
+    fileprivate init(name: String, orderedAlbums albums: [AlbumRecord]) {
+        self.id = StableID.make("artist", Self.normalizedName(name))
+        self.name = name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        self.albums = albums
         trackCount = albums.reduce(0) { $0 + $1.tracks.count }
         playCount = albums.reduce(0) { $0 + $1.playCount }
         sourceIDs = Set(albums.map(\.sourceID))
@@ -201,6 +205,137 @@ struct LibrarySnapshot: Sendable {
                                mostPlayedAlbums: mostPlayedAlbums, recentlyPlayed: recentlyPlayed, mostPlayedTracks: mostPlayedTracks,
                                mostPlayedArtists: mostPlayedArtists, folderNodes: folderNodes, tracksByFolder: tracksByFolder,
                                folderTitles: folderNames, stations: stations.sorted { stringOrder($0.title, $1.title) })
+    }
+
+    /// Patch frequently changing values without SQL reads, regrouping, or localized sorting.
+    /// Structural edits use the already cached complete track set as their rebuild input.
+    func updating(updatedTracks: [TrackRecord], sources: [SourceRecord]) throws -> LibrarySnapshot {
+        try Task.checkCancellation()
+        guard let scope else { return self }
+        let visibleSources = sources.filter { scope.includes(sourceID: $0.id) }
+        let registered = Set(visibleSources.map(\.id))
+        let radioSources = Set(visibleSources.filter { $0.kind == .radio }.map(\.id))
+        var updates: [String: TrackRecord] = [:]
+        var radioUpdates: [TrackRecord] = []
+        var structural = false
+        for track in updatedTracks where registered.contains(track.sourceID) {
+            try Task.checkCancellation()
+            if radioSources.contains(track.sourceID) { radioUpdates.append(track); continue }
+            // Stored track identities belong to one origin, including duplicated albums/titles.
+            if let previous = tracksByID[track.id], previous.sourceID != track.sourceID { continue }
+            if let previous = tracksByID[track.id] {
+                var unchangedStructure = track
+                unchangedStructure.playCount = previous.playCount
+                unchangedStructure.lastPlayedAt = previous.lastPlayedAt
+                unchangedStructure.rating = previous.rating
+                unchangedStructure.artworkPath = previous.artworkPath
+                unchangedStructure.metadataLocked = previous.metadataLocked
+                if unchangedStructure != previous { structural = true }
+            } else { structural = true }
+            updates[track.id] = track
+        }
+        if structural {
+            var merged = tracksByID
+            for (id, track) in updates { merged[id] = track }
+            for track in radioUpdates { merged[track.id] = track }
+            return try Self.build(scope: scope, tracks: Array(merged.values), sources: sources)
+        }
+        guard !updates.isEmpty else { return try updatingStations(radioUpdates, sources: sources) }
+
+        func patchedTracks(_ values: [TrackRecord]) throws -> [TrackRecord] {
+            var result = values
+            for (index, value) in values.enumerated() {
+                if index.isMultiple(of: 512) { try Task.checkCancellation() }
+                if let update = updates[value.id] { result[index] = update }
+            }
+            return result
+        }
+        let tracks = try patchedTracks(self.tracks)
+        var tracksByID = self.tracksByID
+        var affectedAlbums = Set<String>()
+        for track in updates.values {
+            tracksByID[track.id] = track
+            affectedAlbums.insert(StableID.make(track.sourceID, "album", track.albumID))
+        }
+        var albumsByID = self.albumsByID
+        let albums = try self.albums.map { album -> AlbumRecord in
+            guard affectedAlbums.contains(album.presentationID) else { return album }
+            let updated = AlbumRecord(orderedTracks: try patchedTracks(album.tracks))
+            albumsByID[updated.presentationID] = updated
+            return updated
+        }
+        let artists = try self.artists.map { artist -> LibraryArtistGroup in
+            try Task.checkCancellation()
+            guard artist.albums.contains(where: { affectedAlbums.contains($0.presentationID) }) else { return artist }
+            return LibraryArtistGroup(name: artist.name, orderedAlbums: artist.albums.map { albumsByID[$0.presentationID] ?? $0 })
+        }
+        let artistsByName = Dictionary(uniqueKeysWithValues: artists.map { (LibraryArtistGroup.normalizedName($0.name), $0) })
+        let years = yearGroups.map { group in
+            LibraryYearGroup(id: group.id, year: group.year, title: group.title,
+                albums: group.albums.map { albumsByID[$0.presentationID] ?? $0 })
+        }
+        func groups(_ values: [LibraryTrackGroup]) throws -> [LibraryTrackGroup] {
+            try values.map { LibraryTrackGroup(id: $0.id, title: $0.title, tracks: try patchedTracks($0.tracks)) }
+        }
+        var folders = tracksByFolder
+        for (key, values) in tracksByFolder {
+            try Task.checkCancellation()
+            folders[key] = try patchedTracks(values)
+        }
+        let updated = LibrarySnapshot(scope: scope, tracks: tracks, tracksByID: tracksByID,
+            albums: albums, albumsByID: albumsByID, artists: artists, artistsByName: artistsByName,
+            yearGroups: years, genreGroups: try groups(genreGroups), formatGroups: try groups(formatGroups),
+            recentlyAdded: recentlyAdded.map { albumsByID[$0.presentationID] ?? $0 },
+            mostPlayedAlbums: try Self.topRanked(albums, eligible: { $0.playCount > 0 }, before: { $0.playCount > $1.playCount }),
+            recentlyPlayed: try Self.topRanked(tracks, eligible: { $0.lastPlayedAt != nil }, before: { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }),
+            mostPlayedTracks: try Self.topRanked(tracks, eligible: { $0.playCount > 0 }, before: { $0.playCount > $1.playCount }),
+            mostPlayedArtists: try Self.topRanked(artists, eligible: { $0.playCount > 0 }, before: { $0.playCount > $1.playCount }),
+            folderNodes: folderNodes, tracksByFolder: folders, folderTitles: folderTitles, stations: stations)
+        return try updated.updatingStations(radioUpdates, sources: sources)
+    }
+
+    /// Radio changes must not rebuild the music catalog or introduce stations into its statistics.
+    func updatingStations(_ updatedStations: [TrackRecord], removingIDs: Set<String> = [], sources: [SourceRecord]) throws -> LibrarySnapshot {
+        try Task.checkCancellation()
+        guard let scope else { return self }
+        let radioSources = Set(sources.filter { $0.kind == .radio && scope.includes(sourceID: $0.id) }.map(\.id))
+        if updatedStations.isEmpty, removingIDs.isEmpty, stations.allSatisfy({ radioSources.contains($0.sourceID) }) { return self }
+        var indexed = Dictionary(uniqueKeysWithValues: stations.filter {
+            radioSources.contains($0.sourceID) && !removingIDs.contains($0.id)
+        }.map { ($0.id, $0) })
+        for track in updatedStations where radioSources.contains(track.sourceID) {
+            try Task.checkCancellation()
+            // Do not replace a music copy if an invalid caller supplies a colliding station ID.
+            guard tracksByID[track.id].map({ radioSources.contains($0.sourceID) }) ?? true else { continue }
+            if let previous = tracksByID[track.id], previous.sourceID != track.sourceID { continue }
+            if track.isAvailable { indexed[track.id] = track }
+            else { indexed[track.id] = nil }
+        }
+        let stations = try indexed.values.sorted { try Task.checkCancellation(); return Self.stringOrder($0.title, $1.title) }
+        var tracksByID = self.tracksByID
+        for station in self.stations { tracksByID[station.id] = nil }
+        for station in stations { tracksByID[station.id] = station }
+        return LibrarySnapshot(scope: scope, tracks: tracks, tracksByID: tracksByID,
+            albums: albums, albumsByID: albumsByID, artists: artists, artistsByName: artistsByName,
+            yearGroups: yearGroups, genreGroups: genreGroups, formatGroups: formatGroups,
+            recentlyAdded: recentlyAdded, mostPlayedAlbums: mostPlayedAlbums, recentlyPlayed: recentlyPlayed,
+            mostPlayedTracks: mostPlayedTracks, mostPlayedArtists: mostPlayedArtists,
+            folderNodes: folderNodes, tracksByFolder: tracksByFolder, folderTitles: folderTitles, stations: stations)
+    }
+
+    /// Input is already in the library's deterministic display order, which supplies every tie break.
+    private static func topRanked<Value>(_ values: [Value], eligible: (Value) -> Bool,
+                                         before: (Value, Value) -> Bool) throws -> [Value] {
+        var result: [Value] = []
+        for (index, value) in values.enumerated() {
+            if index.isMultiple(of: 512) { try Task.checkCancellation() }
+            guard eligible(value) else { continue }
+            let insertion = result.firstIndex { before(value, $0) } ?? result.count
+            guard insertion < 8 else { continue }
+            result.insert(value, at: insertion)
+            if result.count > 8 { result.removeLast() }
+        }
+        return result
     }
 
     private static func trackGroups(_ groups: [String: [TrackRecord]]) -> [LibraryTrackGroup] {

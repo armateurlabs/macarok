@@ -5,6 +5,7 @@ import SwiftUI
 
 struct MainWindow: View {
     @Bindable var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +32,7 @@ struct MainWindow: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .background(QueueUndoHost(model: model).frame(width: 0, height: 0))
+        .onAppear { model.openMainWindow = { openWindow(id: "main") } }
         .toolbar {
             ToolbarItem(placement: .principal) { Text("Macarok").font(.headline) }
             ToolbarItemGroup(placement: .primaryAction) {
@@ -58,7 +60,6 @@ struct MainWindow: View {
 struct TransportBar: View {
     @Bindable var model: AppModel
     @ObservedObject var player: VLCPlaybackEngine
-    @State private var seekInteraction = PlaybackSeekInteraction()
 
     var body: some View {
         HStack(spacing: 24) {
@@ -85,17 +86,7 @@ struct TransportBar: View {
                             if model.radioDisconnected { Button("Reconnect", action: model.reconnectRadio).buttonStyle(.link) }
                         }.font(.system(size: 10))
                     } else {
-                    let trackDuration = player.duration > 0 ? player.duration : track.duration
-                    HStack(spacing: 8) {
-                        Text((seekInteraction.isEditing ? seekInteraction.position ?? player.position : player.position).playbackTime).frame(width: 43, alignment: .trailing)
-                        Slider(value: Binding(get: { min(trackDuration > 0 ? trackDuration : 1, seekInteraction.isEditing ? seekInteraction.position ?? player.position : player.position) }, set: {
-                            seekInteraction.change(to: $0, generation: model.playbackGeneration)
-                        }), in: 0...max(1, trackDuration), onEditingChanged: { editing in
-                            if editing { seekInteraction.begin(at: player.position, generation: model.playbackGeneration) }
-                            else if let target = seekInteraction.end(generation: model.playbackGeneration) { model.seekPlayback(to: target) }
-                        }).controlSize(.mini).disabled(!player.isSeekable || trackDuration <= 0)
-                        Text(trackDuration > 0 ? trackDuration.playbackTime : "--:--").frame(width: 43, alignment: .leading)
-                    }.font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
+                    PlaybackTimelineView(model: model, timeline: player.timeline, track: track)
                     }
                 }
             } else {
@@ -108,10 +99,6 @@ struct TransportBar: View {
                 Slider(value: $model.settings.volume, in: 0...1).frame(width: 78).controlSize(.mini).help("Volume")
             }
         }.padding(.horizontal, 20).padding(.vertical, 13).background(.bar)
-            .onChange(of: model.currentQueueID) { _, _ in seekInteraction.cancel() }
-            .onChange(of: player.state) { _, state in
-                if [.opening, .stopped, .failed].contains(state) { seekInteraction.cancel() }
-            }
     }
 }
 
@@ -155,9 +142,10 @@ struct QueuePane: View {
                                 .fixedSize(horizontal: true, vertical: false)
                         }.font(.system(size: 12)).padding(.vertical, 4).contentShape(Rectangle()).tag(item.id)
                             .onTapGesture(count: 2) { model.playQueueItem(item.id) }
-                            .contextMenu { Button("Play Now") { model.playQueueItem(item.id) }; Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }; Divider(); Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } } }
+                            .contextMenu { Button("Play Now") { model.playQueueItem(item.id) }; Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }; TrackFileActions(model: model, track: item.track); Divider(); Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } } }
                     }.onMove(perform: model.moveQueue).onDelete(perform: model.removeQueue)
                 }.listStyle(.inset(alternatesRowBackgrounds: true))
+                .background(NativeListBackground(revision: model.queueRevision))
                 .onDeleteCommand { if let id = model.selectedQueueID, let index = model.queue.firstIndex(where: { $0.id == id }) { model.removeQueue(IndexSet(integer: index)) } }
             }
             Divider()
@@ -220,8 +208,9 @@ struct ArtworkView: View {
             .clipped().clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .task(id: "\(track?.artworkPath ?? track?.id ?? "")-\(model?.artworkRevision ?? 0)") {
             if let path = track?.artworkPath {
-                let data = await Task.detached(priority: .utility) { try? Data(contentsOf: URL(fileURLWithPath: path)) }.value
-                image = data.flatMap(NSImage.init(data:))
+                let thumbnail = await ArtworkThumbnailCache.shared.image(at: path, revision: model?.artworkRevision ?? 0, pixelSize: 512)
+                guard !Task.isCancelled else { return }
+                image = thumbnail.map { NSImage(cgImage: $0.cgImage, size: .zero) }
             } else { image = nil; if let track { await model?.ensureArtwork(track) } }
         }
         .accessibilityLabel(track.map { "Artwork for \($0.album)" } ?? "No artwork")
@@ -248,9 +237,10 @@ struct TrackLine: View {
             .contextMenu {
                 LibraryPlaybackActions(model: model) { [track] }
                 Divider()
-                Button("Edit Metadata…") { model.editingTrack = track }
+                Button("Edit Song Metadata…") { model.beginMetadataEditing(track) }
+                Button("Edit Album Metadata…") { model.beginAlbumMetadataEditing(track) }
                 Button("Choose Artwork…") { model.artworkTrack = track }
-                if let url = track.url, url.isFileURL { Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
+                TrackFileActions(model: model, track: track)
             }
     }
 }

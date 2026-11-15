@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import WebKit
 
 /// Uses the OS repeat events; a held key accumulates from the last requested seek, not a stale VLC sample.
 struct PlaybackArrowKeys {
@@ -24,11 +25,28 @@ struct PlaybackArrowKeys {
     @MainActor static func accepts(window: NSWindow?, mainWindow: NSWindow?) -> Bool {
         guard let window, window === mainWindow, window.isKeyWindow,
               window.attachedSheet == nil, NSApp.modalWindow == nil else { return false }
+        guard webView(for: window.firstResponder) == nil else { return false }
         var responder = window.firstResponder
         while let current = responder, current !== window {
             if current is NSTextView || current is NSControl || current is NSTableView || current is NSOutlineView || current is NSCollectionView { return false }
             responder = current.nextResponder
         }
         return true
+    }
+
+    @MainActor static func webView(for responder: NSResponder?) -> WKWebView? {
+        var responder = responder
+        while let current = responder {
+            if let webView = current as? WKWebView { return webView }
+            if let view = current as? NSView {
+                var parent = view.superview
+                while let ancestor = parent {
+                    if let webView = ancestor as? WKWebView { return webView }
+                    parent = ancestor.superview
+                }
+            }
+            responder = current.nextResponder
+        }
+        return nil
     }
 }

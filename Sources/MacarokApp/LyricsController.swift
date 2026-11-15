@@ -112,7 +112,7 @@ final class LyricsController {
         let id = UUID(); requestID = id; state = .loading
         let local = localReader
         let source = model.sources.first { $0.id == track.sourceID }
-        if let source, source.kind == .local { _ = model.accessFolder(source) }
+        if let source, source.kind == .local { _ = await model.accessFolder(source) }
         let resolver = resolver
         let task = Task { [weak self] in
             do {
@@ -225,13 +225,15 @@ final class LyricsController {
     func saveToFiles() async {
         guard canSaveToFiles, let target = track, let document, let model,
               let source = model.sources.first(where: { $0.id == target.sourceID && $0.kind == .local }) else { return }
-        _ = model.accessFolder(source)
+        _ = await model.accessFolder(source)
         isSavingToFiles = true; notice = nil
         defer { isSavingToFiles = false }
         do {
             let query = LyricsLookupQuery(track: target)
             try await model.performLibraryWork { try $0.saveLyrics(.from(document), for: query, manual: document.source == .manual) }
             let paths = try await fileWriter(document, target)
+            let written = paths + [target.url].compactMap { $0 }.filter(\.isFileURL)
+            await Task.detached(priority: .utility) { LocalFileChangeSuppression.shared.recordWrites(urls: written) }.value
             if Self.requestKey(for: track) == Self.requestKey(for: target) {
                 notice = "Saved lyrics to " + paths.map(\.lastPathComponent).joined(separator: ", ") + "."
             }

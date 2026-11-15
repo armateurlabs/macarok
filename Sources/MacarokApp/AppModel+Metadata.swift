@@ -85,10 +85,12 @@ extension AppModel {
         }, uniquingKeysWith: { first, _ in first })
         let cueAudioURLs = Set(cueTracks.compactMap(\.url).filter(\.isFileURL))
         var cueAlbumFolder = original.cuePath.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
+        var writtenURLs: [URL] = []
         if source.kind == .local, let audioURL = original.url {
-            _ = accessFolder(source)
+            _ = await accessFolder(source)
             let fileEdits = properties
-            let usesCUEAlbumFolder = try await Task.detached(priority: .userInitiated) { () throws -> Bool in
+            let fileResult = try await Task.detached(priority: .userInitiated) { () throws -> (usesCUEAlbumFolder: Bool, writtenURLs: [URL]) in
+                var written: [URL] = []
                 if original.isCUETrack, let number = original.trackNumber {
                     let shared = fileEdits.filter { ["ALBUM", "ALBUMARTIST", "DATE", "GENRE", "MUSICBRAINZ_ALBUMID"].contains($0.key) }
                     if let cuePath = original.cuePath {
@@ -99,10 +101,14 @@ extension AppModel {
                             title: fileEdits["TITLE"], artist: fileEdits["ARTIST"], album: fileEdits["ALBUM"],
                             albumArtist: fileEdits["ALBUMARTIST"], genre: fileEdits["GENRE"], yearText: fileEdits["DATE"],
                             fallbackTrackArtists: inheritedArtists)
+                        written.append(cueURL)
                         if !shared.isEmpty {
-                            for url in cueAudioURLs { try TagLibMetadataService.write(properties: shared, to: url) }
+                            for url in cueAudioURLs {
+                                try TagLibMetadataService.write(properties: shared, to: url)
+                                written.append(url)
+                            }
                         }
-                        return true
+                        return (true, written)
                     } else {
                         let current = try TagLibMetadataService.properties(url: audioURL)
                         if current["CUESHEET"]?.first != nil {
@@ -111,7 +117,8 @@ extension AppModel {
                                 albumArtist: fileEdits["ALBUMARTIST"], genre: fileEdits["GENRE"], yearText: fileEdits["DATE"],
                                 fallbackTrackArtists: inheritedArtists)
                             if !shared.isEmpty { try TagLibMetadataService.write(properties: shared, to: audioURL) }
-                            return true
+                            written.append(audioURL)
+                            return (true, written)
                         } else {
                             var native = shared
                             if fileEdits["ALBUMARTIST"] != nil {
@@ -121,15 +128,20 @@ extension AppModel {
                             }
                             if let value = fileEdits["TITLE"] { native[String(format: "MACAROK_CUE_TRACK_%02d_TITLE", number)] = value }
                             if let value = fileEdits["ARTIST"] { native[String(format: "MACAROK_CUE_TRACK_%02d_ARTIST", number)] = value }
-                            if !native.isEmpty { try TagLibMetadataService.write(properties: native, to: audioURL) }
+                            if !native.isEmpty {
+                                try TagLibMetadataService.write(properties: native, to: audioURL)
+                                written.append(audioURL)
+                            }
                         }
                     }
                 } else if !fileEdits.isEmpty {
                     try TagLibMetadataService.write(properties: fileEdits, to: audioURL)
+                    written.append(audioURL)
                 }
-                return false
+                return (false, written)
             }.value
-            if usesCUEAlbumFolder && cueAlbumFolder == nil { cueAlbumFolder = audioURL.deletingLastPathComponent() }
+            writtenURLs = fileResult.writtenURLs
+            if fileResult.usesCUEAlbumFolder && cueAlbumFolder == nil { cueAlbumFolder = audioURL.deletingLastPathComponent() }
         }
         let albumFolder = cueAlbumFolder
         let updates = try await performLibraryWork { store in
@@ -154,10 +166,17 @@ extension AppModel {
             }
             return updated
         }
-        queueMetadataOverrides.merge(updates, uniquingKeysWith: { _, latest in latest })
-        for index in queue.indices {
-            if let value = updates[queue[index].track.id] { queue[index].track = value }
+        if !writtenURLs.isEmpty {
+            let completedWrites = writtenURLs
+            await Task.detached(priority: .utility) { LocalFileChangeSuppression.shared.recordWrites(urls: completedWrites) }.value
         }
+        queueMetadataOverrides.merge(updates, uniquingKeysWith: { _, latest in latest })
+        let updatedQueue = queue.map { item -> QueueItem in
+            var item = item
+            if let value = updates[item.track.id] { item.track = value }
+            return item
+        }
+        if updatedQueue != queue { queue = updatedQueue }
         if let releaseID { UserDefaults.standard.set(releaseID, forKey: "Macarok.release.\(original.albumID)") }
         reloadLibrary()
         status = source.kind == .local ? "Metadata saved to the original files." : "Metadata saved as a local library correction."
@@ -178,19 +197,27 @@ extension AppModel {
             try store.tracks(sourceID: track.sourceID, ordered: false).filter { $0.albumID == track.albumID }
         }
         let targets = related.isEmpty ? [track] : related
-        if source.kind == .local { _ = accessFolder(source) }
+        if source.kind == .local { _ = await accessFolder(source) }
+        var writtenURLs: [URL] = []
         if source.kind == .local && (embedInFiles || saveSidecar) {
-            try await Task.detached(priority: .userInitiated) {
+            writtenURLs = try await Task.detached(priority: .userInitiated) { () throws -> [URL] in
+                var written: [URL] = []
                 let audioURLs = Array(Set(targets.compactMap(\.url))).filter(\.isFileURL)
                 if embedInFiles {
-                    for url in audioURLs { try TagLibMetadataService.write(properties: [:], artworkData: data, to: url) }
+                    for url in audioURLs {
+                        try TagLibMetadataService.write(properties: [:], artworkData: data, to: url)
+                        written.append(url)
+                    }
                 }
                 if saveSidecar {
                     guard let jpeg else { throw AppFailure.invalidArtwork }
                     for folder in Set(audioURLs.map { $0.deletingLastPathComponent() }) {
-                        try jpeg.write(to: folder.appendingPathComponent("cover.jpg"), options: .atomic)
+                        let url = folder.appendingPathComponent("cover.jpg")
+                        try jpeg.write(to: url, options: .atomic)
+                        written.append(url)
                     }
                 }
+                return written
             }.value
         }
         let cached = try await cacheArtwork(data, key: StableID.make(track.sourceID, track.albumID, "selected-artwork"))
@@ -206,20 +233,31 @@ extension AppModel {
             }
             return ids
         }
-        for index in queue.indices where updatedIDs.contains(queue[index].track.id) {
-            queue[index].track.artworkPath = cached.path
+        if !writtenURLs.isEmpty {
+            let completedWrites = writtenURLs
+            await Task.detached(priority: .utility) { LocalFileChangeSuppression.shared.recordWrites(urls: completedWrites) }.value
         }
+        let updatedQueue = queue.map { item -> QueueItem in
+            var item = item
+            if updatedIDs.contains(item.track.id) { item.track.artworkPath = cached.path }
+            return item
+        }
+        if updatedQueue != queue { queue = updatedQueue }
         for var target in targets where updatedIDs.contains(target.id) {
             target.artworkPath = cached.path
             target.metadataLocked = target.metadataLocked || !embedInFiles
             queueMetadataOverrides[target.id] = target
         }
-        reloadLibrary(); artworkRevision += 1
+        let artworkUpdates = targets.filter { updatedIDs.contains($0.id) }.map { target -> TrackRecord in
+            var target = target; target.artworkPath = cached.path; target.metadataLocked = target.metadataLocked || !embedInFiles
+            return target
+        }
+        patchLibraryTracks(artworkUpdates, kind: .artwork); artworkRevision += 1
         status = source.kind == .local && embedInFiles ? "Album artwork embedded in \(Set(targets.compactMap(\.fileURL)).count) audio files." : "Album artwork saved to the library."
     }
 
     func localArtwork(for track: TrackRecord) async -> [(name: String, detail: String, data: Data)] {
-        if let source = sources.first(where: { $0.id == track.sourceID }), source.kind == .local { _ = accessFolder(source) }
+        if let source = sources.first(where: { $0.id == track.sourceID }), source.kind == .local { _ = await accessFolder(source) }
         return await Task.detached(priority: .utility) {
             var results: [(String, String, Data)] = []
             if let url = track.url, url.isFileURL {
@@ -241,7 +279,7 @@ extension AppModel {
         }.value
     }
 
-    nonisolated private static func metadataAlbumID(for track: TrackRecord, source: SourceRecord, cueFolder: URL?) -> String {
+    nonisolated static func metadataAlbumID(for track: TrackRecord, source: SourceRecord, cueFolder: URL?) -> String {
         guard let file = track.url else { return track.albumID }
         var folder = (cueFolder ?? file.deletingLastPathComponent()).standardizedFileURL
         if cueFolder == nil && folder.lastPathComponent.range(of: #"^(?:cd|disc|disk)[\s._-]*\d+$"#, options: [.regularExpression, .caseInsensitive]) != nil {

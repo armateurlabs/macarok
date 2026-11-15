@@ -79,8 +79,8 @@ final class RadioController {
                 return (try store.sources(), try store.radioStations())
             }
             model.sources = values.0; stations = values.1; updateFavoriteResults()
-            if selectSource { model.selectAddedSource(station.sourceID) }
-            model.reloadLibrary()
+            if selectSource, !model.isAllSources { model.sourceID = station.sourceID }
+            await model.patchRadioStations(values.1.map(\.track))
             return true
         } catch { errorMessage = error.localizedDescription; return false }
     }

@@ -59,6 +59,10 @@ final class QueueUndoPresentation {
     private func targetManager() -> UndoManager? {
         guard let model, let window = keyWindow() else { return nil }
         if let editor = window.firstResponder as? NSTextView { return editor.undoManager }
+        if PlaybackArrowKeys.webView(for: window.firstResponder) != nil {
+            let manager = window.firstResponder?.undoManager
+            return manager === model.queueUndoManager ? nil : manager
+        }
         guard window === model.mainPlayerWindow, window.attachedSheet == nil, modalWindow() == nil else { return nil }
         return model.queueUndoManager
     }

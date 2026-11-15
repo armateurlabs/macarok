@@ -6,7 +6,7 @@ struct MacarokApp: App {
     @State private var model = AppModel()
 
     var body: some Scene {
-        WindowGroup("Macarok") {
+        WindowGroup("Macarok", id: "main") {
             MainWindow(model: model)
                 .frame(minWidth: 1050, minHeight: 680)
                 .preferredColorScheme(model.settings.appearance.colorScheme)
@@ -40,9 +40,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
         model.pausePlayback()
         model.scrobbling?.end()
         model.cancelRefresh()
+        model.podcastDownloads?.cancelAll()
         Task { @MainActor in
             await model.flushQueue()
             await model.scrobbling?.flush()
+            await model.finishPlaybackAccess()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
