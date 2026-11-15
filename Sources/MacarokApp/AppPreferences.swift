@@ -27,10 +27,29 @@ enum LibraryView: String, CaseIterable, Identifiable {
 
 enum ContextPage { case home, track, album, artist, folder }
 
-enum ContextMode: String, Codable, CaseIterable, Identifiable {
-    case context, lyrics
+enum CenterPage: String, CaseIterable, Identifiable {
+    case home, playing
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String { self == .home ? "Home" : "Playing" }
+}
+
+enum HomeFilter: String, CaseIterable, Identifiable {
+    case all, recentlyAdded, recentlyPlayed, mostPlayed
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .recentlyAdded: "Recently added"
+        case .recentlyPlayed: "Recently played"
+        case .mostPlayed: "Most played"
+        }
+    }
+}
+
+enum ContextMode: String, Codable, CaseIterable, Identifiable {
+    case context, lyrics, editMetadata
+    var id: String { rawValue }
+    var title: String { self == .editMetadata ? "Edit metadata" : rawValue.capitalized }
 }
 
 enum AddSourcePresenter: String, Identifiable {

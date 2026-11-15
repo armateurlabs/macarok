@@ -6,30 +6,44 @@ struct MetadataEditor: View {
     @Bindable var model: AppModel
     let track: TrackRecord
     @Environment(\.dismiss) private var dismiss
-    @State private var draft: MetadataDraft
-    @State private var protectValues = true
-    @State private var isBusy = false
-    @State private var isSaving = false
-    @State private var error: String?
-    @State private var releases: [MusicBrainzRelease] = []
-    @State private var proposal: MetadataProposal?
-    @State private var selectedFields: Set<String> = []
-    @State private var matchedReleaseID: String?
-    @State private var proposedReleaseName: String?
-    @State private var matchedReleaseName: String?
-    @State private var confirmSave = false
-    @State private var identifyRecording = false
+    @State private var ownedSession: MetadataEditingSession
+    private let suppliedSession: MetadataEditingSession?
+    private let onFinish: (() -> Void)?
 
     init(model: AppModel, track: TrackRecord) {
         self.model = model; self.track = track
-        _draft = State(initialValue: MetadataDraft(track))
+        _ownedSession = State(initialValue: MetadataEditingSession(track: track))
+        suppliedSession = nil; onFinish = nil
     }
+
+    init(model: AppModel, session: MetadataEditingSession, onFinish: @escaping () -> Void) {
+        self.model = model; track = session.track
+        _ownedSession = State(initialValue: session)
+        suppliedSession = session; self.onFinish = onFinish
+    }
+
+    private var session: MetadataEditingSession { suppliedSession ?? ownedSession }
+    private var embedded: Bool { suppliedSession != nil }
+    private var draft: MetadataDraft { get { session.draft } nonmutating set { session.draft = newValue } }
+    private var protectValues: Bool { get { session.protectValues } nonmutating set { session.protectValues = newValue } }
+    private var isBusy: Bool { get { session.isBusy } nonmutating set { session.isBusy = newValue } }
+    private var isSaving: Bool { get { session.isSaving } nonmutating set { session.isSaving = newValue } }
+    private var error: String? { get { session.error } nonmutating set { session.error = newValue } }
+    private var releases: [MusicBrainzRelease] { get { session.releases } nonmutating set { session.releases = newValue } }
+    private var proposal: MetadataProposal? { get { session.proposal } nonmutating set { session.proposal = newValue } }
+    private var selectedFields: Set<String> { get { session.selectedFields } nonmutating set { session.selectedFields = newValue } }
+    private var matchedReleaseID: String? { get { session.matchedReleaseID } nonmutating set { session.matchedReleaseID = newValue } }
+    private var proposedReleaseName: String? { get { session.proposedReleaseName } nonmutating set { session.proposedReleaseName = newValue } }
+    private var matchedReleaseName: String? { get { session.matchedReleaseName } nonmutating set { session.matchedReleaseName = newValue } }
+    private var confirmSave: Bool { get { session.confirmSave } nonmutating set { session.confirmSave = newValue } }
+    private var identifyRecording: Bool { get { session.identifyRecording } nonmutating set { session.identifyRecording = newValue } }
 
     private var isLocal: Bool { model.sources.first(where: { $0.id == track.sourceID })?.kind == .local }
     private var changes: [MetadataFieldChange] { draft.changes(from: track) }
     private var saveLabel: String { isLocal ? "Save to Files" : "Save to Library" }
 
     var body: some View {
+        @Bindable var session = self.session
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
@@ -37,37 +51,39 @@ struct MetadataEditor: View {
                     Text(track.title).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
-                Button("Done", systemImage: "xmark") { dismiss() }.labelStyle(.iconOnly).buttonStyle(.plain)
-                    .disabled(isSaving).help("Close metadata editor")
+                if !embedded {
+                    Button("Done", systemImage: "xmark", action: finish).labelStyle(.iconOnly).buttonStyle(.plain)
+                        .disabled(isSaving).help("Close metadata editor")
+                }
             }.padding(20)
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    if embedded { artworkSection }
                     Form {
-                        TextField("Title", text: $draft.title)
-                        TextField("Artist", text: $draft.artist)
-                        TextField("Album artist", text: $draft.albumArtist)
-                        TextField("Album", text: $draft.album)
+                        TextField("Title", text: $session.draft.title)
+                        TextField("Artist", text: $session.draft.artist)
+                        TextField("Album artist", text: $session.draft.albumArtist)
+                        TextField("Album", text: $session.draft.album)
                         HStack {
-                            TextField("Year", text: $draft.year)
-                            TextField("Track", text: $draft.trackNumber).disabled(track.isCUETrack)
-                            TextField("Disc", text: $draft.discNumber).disabled(track.isCUETrack)
+                            TextField("Year", text: $session.draft.year)
+                            TextField("Track", text: $session.draft.trackNumber).disabled(track.isCUETrack)
+                            TextField("Disc", text: $session.draft.discNumber).disabled(track.isCUETrack)
                         }
-                        TextField("Genre", text: $draft.genre)
-                    }.formStyle(.grouped).scrollDisabled(true)
+                        TextField("Genre", text: $session.draft.genre)
+                    }.formStyle(.grouped).scrollDisabled(true).multilineTextAlignment(.leading)
                     .frame(minHeight: 300)
 
-                    HStack {
-                        Button("Find Metadata", systemImage: "magnifyingglass") { Task { await findMatches() } }
-                        Button("Identify Recording", systemImage: "waveform") {
-                            if let source = model.sources.first(where: { $0.id == track.sourceID }), source.kind == .local {
-                                _ = model.accessFolder(source)
-                            }
-                            identifyRecording = true
-                        }.disabled(!isLocal || isBusy)
-                        Button("Clean Up Tags", systemImage: "wand.and.stars") { prepareCleanup() }
-                        Spacer()
-                        if isBusy { ProgressView().controlSize(.small) }
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            lookupActions
+                            Spacer(minLength: 0)
+                            if isBusy { ProgressView().controlSize(.small) }
+                        }
+                        VStack(alignment: .leading, spacing: 10) {
+                            lookupActions
+                            if isBusy { ProgressView().controlSize(.small) }
+                        }
                     }
                     if !releases.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
@@ -141,7 +157,7 @@ struct MetadataEditor: View {
                             }
                         }
                     }
-                    Toggle("Protect these corrections during library scans", isOn: $protectValues).toggleStyle(.checkbox)
+                    Toggle("Protect these corrections during library scans", isOn: $session.protectValues).toggleStyle(.checkbox)
                     Text(destinationDescription).font(.caption).foregroundStyle(.secondary)
                     if let error { Text(error).foregroundStyle(.red).font(.callout).textSelection(.enabled) }
                 }.padding(20)
@@ -150,24 +166,53 @@ struct MetadataEditor: View {
             HStack {
                 if isSaving { ProgressView().controlSize(.small); Text("Saving metadata…").foregroundStyle(.secondary) }
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(isSaving)
+                Button("Cancel", action: finish).keyboardShortcut(.cancelAction).disabled(isSaving)
                 Button(saveLabel) { confirmSave = true }.keyboardShortcut(.defaultAction)
                     .disabled(!draft.isValid || isSaving || isBusy || (changes.isEmpty && matchedReleaseID == nil && protectValues == track.metadataLocked))
             }.padding(16)
-        }.frame(width: 680, height: 720)
-        .sheet(isPresented: $identifyRecording) {
+        }.frame(width: embedded ? nil : 680, height: embedded ? nil : 720)
+        .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
+        .sheet(isPresented: $session.identifyRecording) {
             IdentifyRecordingSheet(track: track) { match in
                 let value = match.proposal(for: draft.applying(to: track))
                 proposal = value; selectedFields = Set(value.changes.map(\.field)); releases = []
                 proposedReleaseName = nil
             }
         }
-        .confirmationDialog(saveLabel + "?", isPresented: $confirmSave, titleVisibility: .visible) {
+        .confirmationDialog(saveLabel + "?", isPresented: $session.confirmSave, titleVisibility: .visible) {
             Button(saveLabel) { Task { await save() } }
         } message: {
             Text(isLocal ? "The changes shown above will be written to the original music metadata. Other tags are preserved." : "These corrections will be stored in Macarok. The server's audio files will not be changed.")
         }
     }
+
+    private var artworkSection: some View {
+        HStack(alignment: .top, spacing: 15) {
+            ArtworkView(track: model.queueMetadataOverrides[track.id] ?? track, model: model)
+                .frame(width: 84, height: 84)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(track.album).font(.headline).lineLimit(2)
+                Text(track.albumArtist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Button("Change Artwork…", systemImage: "photo") { model.artworkTrack = track }
+                    .disabled(isSaving)
+                Text("Artwork is saved separately.").font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder private var lookupActions: some View {
+        Button("Find Metadata", systemImage: "magnifyingglass") { Task { await findMatches() } }
+        Button("Identify Recording", systemImage: "waveform") {
+            if let source = model.sources.first(where: { $0.id == track.sourceID }), source.kind == .local {
+                _ = model.accessFolder(source)
+            }
+            identifyRecording = true
+        }.disabled(!isLocal || isBusy)
+        Button("Clean Up Tags", systemImage: "wand.and.stars") { prepareCleanup() }
+    }
+
+    private func finish() { if let onFinish { onFinish() } else { dismiss() } }
 
     private var destinationDescription: String {
         if !isLocal { return "This source provides no original file-write access. Changes are local library corrections." }
@@ -209,8 +254,11 @@ struct MetadataEditor: View {
         isSaving = true; error = nil
         defer { isSaving = false }
         do {
-            try await model.applyMetadataEdits(original: track, edited: draft.applying(to: track), releaseID: matchedReleaseID, lockMetadata: protectValues)
-            dismiss()
+            let target = track
+            let latest = try await model.performLibraryWork { try $0.track(id: target.id) } ?? target
+            guard latest.sourceID == target.sourceID else { throw AppFailure.missingSource }
+            try await model.applyMetadataEdits(original: latest, edited: session.editedTrack(preserving: latest), releaseID: matchedReleaseID, lockMetadata: protectValues)
+            finish()
         } catch { self.error = "Could not finish saving metadata: \(error.localizedDescription)" }
     }
 }

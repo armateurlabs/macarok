@@ -187,20 +187,25 @@ extension Notification.Name { static let macarokFocusSearch = Notification.Name(
 struct LibraryRefreshControl: View {
     @Bindable var model: AppModel
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        HStack(spacing: 7) {
             Button(action: model.toggleRefresh) {
                 HStack(spacing: 7) {
                     Image(systemName: model.isRefreshing ? "stop.fill" : "arrow.clockwise")
                     Text(model.isStoppingRefresh ? "Stopping…" : model.isRefreshing ? "Stop Refresh" : model.isAllSources ? "Refresh All Sources" : "Refresh Source")
-                    Spacer(minLength: 0)
-                    if model.isRefreshing { ProgressView().controlSize(.mini) }
                 }.font(.system(size: 11)).contentShape(Rectangle())
             }.buttonStyle(.plain).disabled(model.sources.isEmpty || model.isStoppingRefresh)
+                .fixedSize(horizontal: true, vertical: false)
                 .accessibilityIdentifier("libraryRefreshButton")
-            if model.isRefreshing {
-                Text(model.refreshProgress).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
+            if model.isRefreshing && !model.isStoppingRefresh {
+                Text(model.refreshProgress).font(.system(size: 10)).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading).layoutPriority(-1)
+                    .help(model.refreshProgress)
                     .accessibilityIdentifier("libraryRefreshProgress")
+            } else { Spacer(minLength: 0) }
+            if model.isRefreshing {
+                ProgressView().controlSize(.mini).frame(width: 12, height: 12)
             }
-        }
+        }.frame(maxWidth: .infinity, alignment: .leading).frame(height: 20)
     }
 }

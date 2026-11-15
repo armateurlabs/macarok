@@ -22,6 +22,7 @@ struct PanelHeader<Content: View>: View {
 struct SourceBadge: View {
     @Bindable var model: AppModel
     let sourceID: String
+    var compact = false
 
     var body: some View {
         if model.isAllSources {
@@ -30,7 +31,7 @@ struct SourceBadge: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .padding(.horizontal, 5)
-                .padding(.vertical, 2)
+                .padding(.vertical, compact ? 0 : 2)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
                 .help("Source: \(model.sourceName(for: sourceID))")
         }
@@ -72,14 +73,14 @@ struct NativeSourcePicker: NSViewRepresentable {
 
     func updateNSView(_ button: NSPopUpButton, context: Context) {
         context.coordinator.selection = $selection
-        let choices: [(LibraryScope, String, String)] = [(.all, "All Sources", "square.stack.3d.up")] + sources.map {
-            (.source($0.id), $0.name, $0.kind.librarySymbol)
+        let choices: [(LibraryScope, String, NSImage?)] = [(.all, "All Sources", NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: nil))] + sources.map {
+            (.source($0.id), $0.name, $0.kind.libraryImage)
         }
         context.coordinator.scopes = choices.map(\.0)
         button.removeAllItems()
-        for (scope, title, symbol) in choices {
+        for (scope, title, image) in choices {
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            item.image = image
             item.state = selection == scope ? .on : .off
             button.menu?.addItem(item)
         }
@@ -101,6 +102,10 @@ struct NativeSourcePicker: NSViewRepresentable {
 }
 
 extension SourceKind {
+    var libraryImage: NSImage? {
+        self == .podcasts ? PodcastSourceIcon.image : NSImage(systemSymbolName: librarySymbol, accessibilityDescription: nil)
+    }
+
     var librarySymbol: String {
         switch rawValue {
         case "local": "externaldrive"

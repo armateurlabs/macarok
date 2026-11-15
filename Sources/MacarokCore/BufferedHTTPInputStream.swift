@@ -56,6 +56,12 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
             isFinished: ended && available == 0)
     }
 
+    /// Nil until the server response establishes whether byte-range requests are supported.
+    public var supportsSeeking: Bool? {
+        condition.lock(); defer { condition.unlock() }
+        return closed ? false : seekSupported
+    }
+
     private var available: Int { buffer.count - readCursor }
 
     public override func open() {
@@ -141,6 +147,15 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         guard !closed, opened, length.map({ newOffset <= UInt64($0) }) ?? true else { condition.unlock(); return false }
         if newOffset == offset { condition.unlock(); return true }
         if seekSupported == false { condition.unlock(); return false }
+        // VLC often seeks around a nearby timestamp while decoding a compressed frame. Reuse those
+        // retained bytes instead of cancelling a good request and waiting for another full prime.
+        let retainedStart = offset - UInt64(readCursor)
+        let retainedEnd = retainedStart + UInt64(buffer.count)
+        if newOffset >= retainedStart && newOffset < retainedEnd {
+            readCursor = Int(newOffset - retainedStart); offset = newOffset; priming = false
+            condition.broadcast(); condition.unlock()
+            return true
+        }
         let oldProducer = producer
         producer = nil; generation += 1
         let current = generation

@@ -68,8 +68,11 @@ final class AppModel {
     var libraryScope: LibraryScope? {
         didSet {
             guard oldValue != libraryScope else { return }
-            selectedTrackID = nil; selectedAlbumID = nil; selectedAlbumSourceID = nil; selectedArtist = nil; selectedFolder = nil
+            if !isEditingContext {
+                selectedTrackID = nil; selectedAlbumID = nil; selectedAlbumSourceID = nil; selectedArtist = nil; selectedFolder = nil
+            }
             search = ""; reloadLibrary(); watchSelectedSource(); persistLibraryScope()
+            followPlaybackContext()
         }
     }
     var sourceID: String? {
@@ -77,9 +80,15 @@ final class AppModel {
         set { libraryScope = newValue.map(LibraryScope.source) }
     }
     var libraryView: LibraryView = .home { didSet { if libraryView == .home { contextPage = .home } } }
-    var contextMode: ContextMode = .context
+    var contextMode: ContextMode = .context {
+        didSet { if contextMode == .editMetadata { ensureMetadataEditingSession() } }
+    }
     var contextPage: ContextPage = .home
+    var homeFilter: HomeFilter = .all
     var contextTab = "Overview"
+    var metadataEditingSession: MetadataEditingSession? {
+        didSet { if oldValue != nil && metadataEditingSession == nil { followPlaybackContext() } }
+    }
     var search = "" { didSet { searchLibrary(reset: true) } }
     private var catalog = LibrarySnapshot.empty
     private var searchCatalog = LibrarySnapshot.empty
@@ -97,7 +106,9 @@ final class AppModel {
     var selectedFolder: String?
     var queue: [QueueItem] = []
     @ObservationIgnored var queueMetadataOverrides: [String: TrackRecord] = [:]
-    var currentQueueID: UUID?
+    var currentQueueID: UUID? {
+        didSet { if oldValue != currentQueueID { followPlaybackContext() } }
+    }
     var selectedQueueID: UUID?
     var playlists: [PlaylistRecord] = []
     var isRefreshing = false
@@ -122,8 +133,12 @@ final class AppModel {
         set { addSourcePresenter = newValue ? .mainWindow : nil }
     }
     func presentAddSource(from presenter: AddSourcePresenter) { addSourcePresenter = presenter }
-    var editingTrack: TrackRecord?
-    var artworkTrack: TrackRecord?
+    var editingTrack: TrackRecord? {
+        didSet { if oldValue != nil && editingTrack == nil { followPlaybackContext() } }
+    }
+    var artworkTrack: TrackRecord? {
+        didSet { if oldValue != nil && artworkTrack == nil { followPlaybackContext() } }
+    }
     var certificatePrompts: [CertificatePrompt] = []
     var artworkRevision = 0
     var streamingBufferFraction: Double?
@@ -565,9 +580,12 @@ final class AppModel {
                     try Task.checkCancellation()
                     guard self.playbackGeneration == generation, self.currentQueueID == id, self.queue.contains(where: { $0.id == id }) else { return }
                     let targetBytes = Int((self.settings.buffer ?? 20) * 192_000)
-                    let stream = BufferedHTTPInputStream(url: url, transport: transport, bufferBytes: targetBytes, bufferSeconds: self.settings.buffer, durationHint: item.track.duration)
+                    // RSS durations can be inaccurate; retain the hint for the timeline, not HTTP byte-buffer sizing.
+                    let stream = BufferedHTTPInputStream(url: url, transport: transport, bufferBytes: targetBytes, bufferSeconds: self.settings.buffer,
+                                                         durationHint: source.kind == .podcasts ? nil : item.track.duration)
                     self.activeStream = stream
-                    self.player.load(stream: stream, segmentStart: item.track.startTime ?? 0, segmentEnd: item.track.endTime, bufferSeconds: self.settings.buffer, durationHint: item.track.duration)
+                    self.player.load(stream: stream, segmentStart: item.track.startTime ?? 0, segmentEnd: item.track.endTime, bufferSeconds: self.settings.buffer, durationHint: item.track.duration,
+                                     supportsSeeking: { stream.supportsSeeking })
                 }
                 if resume > 0, source.kind != .radio { self.player.seek(to: resume) }
                 self.status = "Playing “\(item.track.title)”."

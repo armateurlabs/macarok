@@ -10,8 +10,9 @@ final class SourcePickerTests: XCTestCase {
         _ = NSApplication.shared
         let local = SourceRecord(id: "picker-local", kind: .local, name: "Local Files", location: "/tmp/music")
         let remote = SourceRecord(id: "picker-remote", kind: .openSubsonic, name: "A very long music server library name", location: "https://music.invalid")
+        let podcast = SourceRecord(id: "picker-podcast", kind: .podcasts, name: "Podcasts", location: "https://podcast.invalid/feed.xml")
         let model = AppModel(preferences: AppPreferences(), registerSystemControls: false)
-        model.sources = [local, remote, RadioLibrary.source]
+        model.sources = [local, remote, RadioLibrary.source, podcast]
         model.libraryScope = .all
         model.queue = [QueueItem(track: TrackRecord(id: "picker-queue", sourceID: local.id, title: "Queued Track"))]
         let originalQueue = model.queue
@@ -25,15 +26,16 @@ final class SourcePickerTests: XCTestCase {
             defer { window.contentView = nil; window.close() }
             for _ in 0..<10 { hosting.layoutSubtreeIfNeeded(); await Task.yield() }
             let picker = try XCTUnwrap(findPicker(in: hosting))
-            XCTAssertEqual(picker.numberOfItems, 4)
+            XCTAssertEqual(picker.numberOfItems, 5)
             XCTAssertEqual(picker.itemTitle(at: 0), "All Sources")
             XCTAssertTrue(picker.itemArray.allSatisfy { $0.image != nil })
+            XCTAssertEqual(picker.item(at: 4)?.image?.isTemplate, true)
             XCTAssertTrue(picker.isEnabled)
             XCTAssertFalse(picker.pullsDown)
             XCTAssertGreaterThan(picker.frame.width, 150, "The native picker must fill the header's usable width.")
             XCTAssertLessThanOrEqual(picker.frame.height, 42)
 
-            for (index, expected) in [(0, LibraryScope.all), (2, .source(remote.id)), (3, .source(RadioLibrary.sourceID))] {
+            for (index, expected) in [(0, LibraryScope.all), (2, .source(remote.id)), (3, .source(RadioLibrary.sourceID)), (4, .source(podcast.id))] {
                 picker.selectItem(at: index)
                 picker.sendAction(try XCTUnwrap(picker.action), to: picker.target)
                 for _ in 0..<10 { hosting.layoutSubtreeIfNeeded(); await Task.yield() }

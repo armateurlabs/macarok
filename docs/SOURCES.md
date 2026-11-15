@@ -58,8 +58,8 @@ Search only runs on submission. Requests are rate-limited and cached; a director
 | Internet Radio / Radio Browser | Saved stations, favorites, directory search, direct streams and M3U/PLS wrappers; HLS unsupported |
 | Podcasts / Podcast Index / Apple Podcasts | Feed subscription and episode playback; directories provide discovery |
 | Last.fm | Optional scrobbling; see [setup and privacy](SCROBBLING.md) |
-| [Qobuz](https://www.qobuz.com) | Official service information link; no playback connector |
-| [Deezer](https://www.deezer.com) | Official service information link; no playback connector |
-| [Spotify](https://www.spotify.com) | Official service information link; no playback connector |
+| [Qobuz](https://www.qobuz.com) | No playback connector; approved partner integration is required |
+| [Deezer](https://www.deezer.com) | No confirmed public full-playback integration route |
+| [Spotify](https://www.spotify.com) | No playback connector; developer policy restricts multi-service players |
 
-The source catalog's Other Music Services cards open official websites. They do not sign in or create a connected library.
+Add Source lists only working connectors. Qobuz, Deezer, and Spotify are not included in that dialog.

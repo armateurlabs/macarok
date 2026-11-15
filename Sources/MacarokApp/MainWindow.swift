@@ -36,6 +36,7 @@ struct MainWindow: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
                     Picker("Appearance", selection: $model.settings.appearance) { ForEach(Appearance.allCases) { Text($0.title).tag($0) } }
+                        .pickerStyle(.inline).labelsHidden()
                 } label: { Image(systemName: model.settings.appearance == .dark ? "moon" : model.settings.appearance == .light ? "sun.max" : "display") }.help("Appearance")
                 SettingsLink { Image(systemName: "slider.horizontal.3") }.help("Settings")
             }
@@ -57,8 +58,7 @@ struct MainWindow: View {
 struct TransportBar: View {
     @Bindable var model: AppModel
     @ObservedObject var player: VLCPlaybackEngine
-    @State private var dragging = false
-    @State private var seekPosition: Double = 0
+    @State private var seekInteraction = PlaybackSeekInteraction()
 
     var body: some View {
         HStack(spacing: 24) {
@@ -85,13 +85,16 @@ struct TransportBar: View {
                             if model.radioDisconnected { Button("Reconnect", action: model.reconnectRadio).buttonStyle(.link) }
                         }.font(.system(size: 10))
                     } else {
+                    let trackDuration = player.duration > 0 ? player.duration : track.duration
                     HStack(spacing: 8) {
-                        Text((dragging ? seekPosition : player.position).playbackTime).frame(width: 43, alignment: .trailing)
-                        Slider(value: Binding(get: { dragging ? seekPosition : min(player.position, max(1, player.duration)) }, set: { seekPosition = $0 }), in: 0...max(1, player.duration > 0 ? player.duration : track.duration), onEditingChanged: { editing in
-                            if editing { seekPosition = player.position; dragging = true }
-                            else { model.seekPlayback(to: seekPosition); dragging = false }
-                        }).controlSize(.mini).disabled(!player.isSeekable)
-                        Text((player.duration > 0 ? player.duration : track.duration).playbackTime).frame(width: 43, alignment: .leading)
+                        Text((seekInteraction.isEditing ? seekInteraction.position ?? player.position : player.position).playbackTime).frame(width: 43, alignment: .trailing)
+                        Slider(value: Binding(get: { min(trackDuration > 0 ? trackDuration : 1, seekInteraction.isEditing ? seekInteraction.position ?? player.position : player.position) }, set: {
+                            seekInteraction.change(to: $0, generation: model.playbackGeneration)
+                        }), in: 0...max(1, trackDuration), onEditingChanged: { editing in
+                            if editing { seekInteraction.begin(at: player.position, generation: model.playbackGeneration) }
+                            else if let target = seekInteraction.end(generation: model.playbackGeneration) { model.seekPlayback(to: target) }
+                        }).controlSize(.mini).disabled(!player.isSeekable || trackDuration <= 0)
+                        Text(trackDuration > 0 ? trackDuration.playbackTime : "--:--").frame(width: 43, alignment: .leading)
                     }.font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
                     }
                 }
@@ -105,6 +108,10 @@ struct TransportBar: View {
                 Slider(value: $model.settings.volume, in: 0...1).frame(width: 78).controlSize(.mini).help("Volume")
             }
         }.padding(.horizontal, 20).padding(.vertical, 13).background(.bar)
+            .onChange(of: model.currentQueueID) { _, _ in seekInteraction.cancel() }
+            .onChange(of: player.state) { _, state in
+                if [.opening, .stopped, .failed].contains(state) { seekInteraction.cancel() }
+            }
     }
 }
 
@@ -132,13 +139,20 @@ struct QueuePane: View {
                                 else { Text(String(format: "%02d", index + 1)).foregroundStyle(.tertiary) }
                             }.font(.system(size: 10)).frame(width: 19)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(item.track.title).fontWeight(item.id == model.currentQueueID ? .semibold : .regular).lineLimit(1)
-                                Text(item.track.artist + (item.track.isCUETrack ? " · CUE" : "")).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                                SourceBadge(model: model, sourceID: item.track.sourceID)
-                            }
+                                Text(item.track.title).fontWeight(item.id == model.currentQueueID ? .semibold : .regular).lineLimit(1, reservesSpace: true)
+                                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                                    Text(item.track.artist + (item.track.isCUETrack ? " · CUE" : ""))
+                                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1, reservesSpace: true)
+                                    if model.isAllSources {
+                                        SourceBadge(model: model, sourceID: item.track.sourceID, compact: true)
+                                            .frame(maxWidth: 80, alignment: .leading).layoutPriority(1)
+                                    }
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
                             Spacer(minLength: 3)
                             Text(model.isRadioTrack(item.track) ? "LIVE" : item.track.formattedDuration)
                                 .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
+                                .fixedSize(horizontal: true, vertical: false)
                         }.font(.system(size: 12)).padding(.vertical, 4).contentShape(Rectangle()).tag(item.id)
                             .onTapGesture(count: 2) { model.playQueueItem(item.id) }
                             .contextMenu { Button("Play Now") { model.playQueueItem(item.id) }; Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }; Divider(); Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } } }

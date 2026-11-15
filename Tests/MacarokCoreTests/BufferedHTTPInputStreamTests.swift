@@ -17,6 +17,43 @@ final class BufferedHTTPInputStreamTests: XCTestCase {
         XCTAssertFalse(fixture.finished, "Playback must begin before downloading the complete file.")
     }
 
+    func testMissingTrustedDurationUsesABoundedPodcastBuffer() async throws {
+        let fixture = ProgressiveFixture(size: 4 * 1024 * 1024, delay: 0.03)
+        // Podcast RSS durations are only display hints. Omitting that hint from the byte stream
+        // must not require the entire episode when its RSS duration is shorter than the buffer.
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport,
+            bufferBytes: 256 * 1024, bufferSeconds: 2, durationHint: nil)
+        defer { stream.close(); fixture.transport.invalidate() }
+        stream.open()
+        let first = try await read(stream, count: 4096)
+        XCTAssertEqual(first.data, fixture.data.prefix(first.count))
+        XCTAssertEqual(stream.snapshot.targetBytes, 48_000)
+        XCTAssertFalse(fixture.finished)
+    }
+
+    func testSeekingWithinRetainedBytesReusesTheRequestWithoutRepriming() async throws {
+        let fixture = ProgressiveFixture(size: 768 * 1024, delay: 0.02)
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport,
+            bufferBytes: 256 * 1024, bufferSeconds: 2, durationHint: 20)
+        defer { stream.close(); fixture.transport.invalidate() }
+        stream.open()
+        _ = try await read(stream, count: 4096)
+        let requests = fixture.offsets
+
+        XCTAssertTrue(stream.setProperty(NSNumber(value: 1024), forKey: .fileCurrentOffsetKey))
+        XCTAssertFalse(stream.snapshot.isBuffering)
+        let backward = try await read(stream, count: 1024)
+        XCTAssertEqual(backward.data, fixture.data.subdata(in: 1024..<2048))
+        XCTAssertEqual(fixture.offsets, requests)
+
+        let offset = 64 * 1024
+        XCTAssertTrue(stream.setProperty(NSNumber(value: offset), forKey: .fileCurrentOffsetKey))
+        XCTAssertFalse(stream.snapshot.isBuffering)
+        let forward = try await read(stream, count: 4096)
+        XCTAssertEqual(forward.data, fixture.data.subdata(in: offset..<(offset + 4096)))
+        XCTAssertEqual(fixture.offsets, requests, "Nearby compressed-frame seeks must reuse retained bytes.")
+    }
+
     func testShortResponseDrainsEvenWhenSmallerThanTheBufferTarget() async throws {
         let fixture = ProgressiveFixture(size: 16 * 1024, delay: 0)
         let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport, bufferSeconds: 20, durationHint: 1)
@@ -74,12 +111,13 @@ final class BufferedHTTPInputStreamTests: XCTestCase {
     }
 
     func testSeekUsesValidatedByteRangesAndDiscardsTheOldGeneration() async throws {
-        let fixture = ProgressiveFixture(size: 256 * 1024, delay: 0.02)
-        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport, durationHint: 8)
+        let fixture = ProgressiveFixture(size: 2 * 1024 * 1024, delay: 0.02)
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport,
+            bufferBytes: 256 * 1024, durationHint: 64)
         defer { stream.close(); fixture.transport.invalidate() }
         stream.open()
         _ = try await read(stream, count: 4096)
-        let offset = 196_608
+        let offset = 1_572_864
         XCTAssertTrue(stream.setProperty(NSNumber(value: offset), forKey: .fileCurrentOffsetKey))
         let result = try await read(stream, count: 4096)
         XCTAssertEqual(result.data, fixture.data.subdata(in: offset..<(offset + 4096)))
@@ -150,8 +188,10 @@ final class BufferedHTTPInputStreamTests: XCTestCase {
         let fixture = ProgressiveFixture(size: 16 * 1024, delay: 0, supportsRange: false)
         let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport)
         defer { stream.close(); fixture.transport.invalidate() }
+        XCTAssertNil(stream.supportsSeeking)
         stream.open()
         _ = try await read(stream, count: 10)
+        XCTAssertEqual(stream.supportsSeeking, false)
         XCTAssertFalse(stream.setProperty(NSNumber(value: 5000), forKey: .fileCurrentOffsetKey))
     }
 

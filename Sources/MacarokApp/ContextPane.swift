@@ -5,33 +5,56 @@ struct ContextPane: View {
     @Bindable var model: AppModel
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader {
-                Picker("Center panel", selection: $model.contextMode) {
-                    ForEach(ContextMode.allCases) { Text($0.title).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 158)
-                Spacer()
-                if model.contextMode == .context && model.contextPage != .home { Button { model.contextPage = .home; model.libraryView = .home } label: { Image(systemName: "house") }.help("Home") }
-                Button(action: model.showCurrentTrack) { Image(systemName: "waveform") }.help("Show current track").disabled(model.currentTrack == nil)
-                Button { if let track = headerTrack { model.editingTrack = track } } label: { Image(systemName: "square.and.pencil") }.help("Edit metadata").disabled(headerTrack == nil)
-            }.accessibilityIdentifier("contextPanelHeader")
-            if model.contextMode == .lyrics { LyricsPane(model: model) }
-            else if model.currentIsRadio && model.contextPage == .track { RadioNowPlayingView(model: model) }
-            else if model.sources.isEmpty { WelcomeView(model: model) }
-            else if model.isRadioSource && model.contextPage == .home {
-                ContentUnavailableView("Internet Radio", systemImage: "antenna.radiowaves.left.and.right", description: Text("Choose a station from your library, or browse the directory to find one."))
+            CenterPanelHeader(model: model)
+            if model.centerPage == .home { homeContent }
+            else { playingContent }
+        }
+    }
+
+    var showsRadioContext: Bool {
+        model.isRadioTrack(model.playingContextTrack) && (model.contextPage == .track || model.contextPage == .home)
+    }
+
+    @ViewBuilder private var homeContent: some View {
+        if model.sources.isEmpty { WelcomeView(model: model) }
+        else if model.isRadioSource {
+            ContentUnavailableView("Internet Radio", systemImage: "antenna.radiowaves.left.and.right", description: Text("Choose a station from your library, or browse the directory to find one."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if model.tracks.isEmpty && (model.homeFilter != .all || !model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
+            HomeView(model: model).padding(22).frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .textBackgroundColor))
+        } else {
+            ScrollView { HomeView(model: model).padding(22).frame(maxWidth: .infinity, alignment: .leading) }
+                .background(Color(nsColor: .textBackgroundColor))
+        }
+    }
+
+    @ViewBuilder private var playingContent: some View {
+        switch model.contextMode {
+        case .lyrics: LyricsPane(model: model)
+        case .editMetadata:
+            if let session = model.metadataEditingSession {
+                InlineMetadataEditor(model: model, session: session, onFinish: { model.finishMetadataEditing(sessionID: session.id) })
+            } else if model.isRadioTrack(model.playingContextTrack) {
+                ContentUnavailableView("Metadata Unavailable", systemImage: "antenna.radiowaves.left.and.right", description: Text("Live radio streams do not have editable music tags."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContentUnavailableView("Choose a Track", systemImage: "music.note", description: Text("Play or select a track to edit its metadata."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            else if model.contextPage == .home && model.tracks.isEmpty && (!model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
-                HomeView(model: model).padding(22).background(Color(nsColor: .textBackgroundColor))
+        case .context:
+            if showsRadioContext { RadioNowPlayingView(model: model, track: model.playingContextTrack) }
+            else if (model.contextPage == .track || model.contextPage == .home) && model.playingContextTrack == nil {
+                ContentUnavailableView("Choose a Track", systemImage: "music.note", description: Text("Play or select a track to see its context."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         switch model.contextPage {
-                        case .home: HomeView(model: model)
-                        case .track:
-                            if let track = model.selectedTrack { TrackContextView(model: model, track: track) }
-                            else { ContentUnavailableView("Choose a Track", systemImage: "music.note", description: Text("Select a track in your library or active playlist.")) }
+                        case .home, .track:
+                            if let track = model.playingContextTrack { TrackContextView(model: model, track: track) }
+                            else { ContentUnavailableView("Choose a Track", systemImage: "music.note", description: Text("Play or select a track to see its context.")) }
                         case .album:
                             if let album = model.selectedAlbum { AlbumContextView(model: model, album: album) }
                             else { ContentUnavailableView("Choose an Album", systemImage: "square.stack") }
@@ -39,14 +62,9 @@ struct ContextPane: View {
                         case .folder: FolderContextView(model: model)
                         }
                     }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
-                }.background(Color(nsColor: .textBackgroundColor))
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .textBackgroundColor))
             }
         }
-    }
-
-    private var headerTrack: TrackRecord? {
-        let track = model.contextMode == .lyrics ? model.currentTrack ?? model.selectedTrack : model.selectedTrack
-        return model.isRadioTrack(track) ? nil : track
     }
 }
 
@@ -72,12 +90,12 @@ struct HomeView: View {
         VStack(alignment: model.tracks.isEmpty ? .center : .leading, spacing: 23) {
             VStack(alignment: model.tracks.isEmpty ? .center : .leading, spacing: 5) {
                 Text(model.scopeTitle.uppercased()).font(.system(size: 10, weight: .medium)).tracking(1).foregroundStyle(.secondary)
-                Text("Your Library").font(.system(size: 27, weight: .semibold))
+                Text(model.homeFilter == .all ? "Your Library" : model.homeFilter.title).font(.system(size: 27, weight: .semibold))
                 Text("\(model.albums.count) albums · \(model.tracks.count) tracks").font(.system(size: 12)).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: model.tracks.isEmpty ? .center : .leading)
             .multilineTextAlignment(model.tracks.isEmpty ? .center : .leading)
-            if model.tracks.isEmpty && (!model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
+            if model.tracks.isEmpty && (model.homeFilter != .all || !model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
                 Spacer(minLength: 0)
                 VStack(spacing: 16) {
                     Image(systemName: "music.note").font(.system(size: 42)).foregroundStyle(.tertiary)
@@ -94,22 +112,30 @@ struct HomeView: View {
                 Spacer(minLength: 0)
             } else {
                 if !model.tracks.isEmpty {
-                VStack(alignment: .leading, spacing: 11) {
-                    Text("Recently Added").font(.system(size: 14, weight: .semibold))
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 16) { ForEach(model.recentlyAdded, id: \.presentationID) { AlbumTile(model: model, album: $0) } }
+                    if model.homeFilter == .all || model.homeFilter == .recentlyAdded {
+                        VStack(alignment: .leading, spacing: 11) {
+                            if model.homeFilter == .all { Text("Recently Added").font(.system(size: 14, weight: .semibold)) }
+                            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                                ForEach(model.recentlyAdded, id: \.presentationID) { AlbumTile(model: model, album: $0) }
+                            }
+                        }
+                    }
+                    if model.homeFilter == .all || model.homeFilter == .recentlyPlayed {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if model.homeFilter == .all { Text("Recently Played").font(.system(size: 14, weight: .semibold)) }
+                            if model.recentlyPlayed.isEmpty { emptyHistory }
+                            else { ForEach(model.recentlyPlayed.prefix(model.homeFilter == .all ? 5 : 8)) { track in historyRow(track) } }
+                        }
+                    }
+                    if model.homeFilter == .all || model.homeFilter == .mostPlayed {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if model.homeFilter == .all { Text("Most Played").font(.system(size: 14, weight: .semibold)) }
+                            if model.mostPlayedTracks.isEmpty { emptyHistory }
+                            else { mostPlayedRows }
+                        }
+                    }
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Recently Played").font(.system(size: 14, weight: .semibold))
-                    if model.recentlyPlayed.isEmpty { emptyHistory }
-                    else { ForEach(model.recentlyPlayed.prefix(5)) { track in historyRow(track) } }
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Most Played").font(.system(size: 14, weight: .semibold))
-                    if model.mostPlayedTracks.isEmpty { emptyHistory }
-                    else { mostPlayedRows }
-                }
-                }
-                if model.isAllSources { RadioFavoritesSection(model: model) }
+                if model.isAllSources && model.homeFilter == .all { RadioFavoritesSection(model: model) }
             }
         }.frame(maxWidth: .infinity, maxHeight: model.tracks.isEmpty ? .infinity : nil)
     }
@@ -236,7 +262,8 @@ struct TrackContextView: View {
                     Text((track.isCUETrack ? "CUE + " : "") + track.format.uppercased()).font(.system(size: 9, weight: .medium)).padding(.horizontal, 5).padding(.vertical, 2).overlay(RoundedRectangle(cornerRadius: 3).stroke(.quaternary))
                 }
             }
-            Picker("Track details", selection: $model.contextTab) { Text("Overview").tag("Overview"); Text("Tags").tag("Tags") }.pickerStyle(.segmented)
+            Picker("Track details", selection: $model.contextTab) { Text("Overview").tag("Overview"); Text("Tags").tag("Tags") }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 185).frame(maxWidth: .infinity)
             if model.contextTab == "Overview" { overview }
             else { tags }
             Divider()
@@ -256,7 +283,7 @@ struct TrackContextView: View {
                 }
             }
             Divider()
-            HStack { Text("About this recording").font(.system(size: 13, weight: .semibold)); Spacer(); Button { model.editingTrack = track } label: { Image(systemName: "square.and.pencil") }.buttonStyle(.borderless).help("Edit metadata") }
+            HStack { Text("About this recording").font(.system(size: 13, weight: .semibold)); Spacer(); Button { model.beginMetadataEditing(track) } label: { Image(systemName: "square.and.pencil") }.buttonStyle(.borderless).help("Edit metadata") }
             Text("\(track.title) by \(track.artist), from \(track.album).\(track.isCUETrack ? " This track is a region of a shared audio file." : "")").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
             let related = Array(model.albumsForArtist(track.albumArtist).lazy.filter { $0.id != track.albumID || $0.sourceID != track.sourceID }.prefix(4))
             if !related.isEmpty {
@@ -279,7 +306,7 @@ struct TrackContextView: View {
                 if let path = track.remotePath { tag("Server path", path) }
                 if track.metadataLocked { tag("Metadata", "Personal corrections preserved") }
             }.font(.system(size: 12)).textSelection(.enabled)
-            HStack { Button { model.editingTrack = track } label: { Label("Edit Metadata…", systemImage: "square.and.pencil") }; Button { model.artworkTrack = track } label: { Label("Artwork…", systemImage: "photo") } }.controlSize(.small)
+            HStack { Button { model.beginMetadataEditing(track) } label: { Label("Edit Metadata…", systemImage: "square.and.pencil") }; Button { model.artworkTrack = track } label: { Label("Artwork…", systemImage: "photo") } }.controlSize(.small)
         }
     }
     private func tag(_ label: String, _ value: String) -> some View { GridRow(alignment: .top) { Text(label).foregroundStyle(.secondary); Text(value).frame(maxWidth: .infinity, alignment: .leading) } }

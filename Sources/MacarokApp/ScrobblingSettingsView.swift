@@ -8,8 +8,20 @@ struct ScrobblingSettingsView: View {
     var body: some View {
         Form {
             Section("Personal Last.fm API Credentials") {
-                TextField("API key", text: $controller.apiKeyInput).textFieldStyle(.roundedBorder)
-                SecureField("Shared secret", text: $controller.apiSecretInput).textFieldStyle(.roundedBorder)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("API key").frame(width: 92, alignment: .leading)
+                    TextField("API key", text: $controller.apiKeyInput)
+                        .labelsHidden().textFieldStyle(.roundedBorder).multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("lastFMAPIKey")
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Shared secret").frame(width: 92, alignment: .leading)
+                    SecureField("Shared secret", text: $controller.apiSecretInput)
+                        .labelsHidden().textFieldStyle(.roundedBorder).multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("lastFMSharedSecret")
+                }
                 HStack {
                     Link("Create an API account…", destination: URL(string: "https://www.last.fm/api/account/create")!)
                     Spacer()

@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import MacarokAudio
 import MacarokCore
@@ -5,6 +6,102 @@ import Network
 import XCTest
 
 final class ProgressivePlaybackTests: XCTestCase {
+    @MainActor
+    func testVariableBitratePodcastSeeksToSettledPlaybackWithAnInaccurateRSSDuration() async throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "variable-bitrate-podcast.mp3", withExtension: nil,
+                                                  subdirectory: "Fixtures"))
+        let data = try Data(contentsOf: url)
+        let server = try ProgressiveHTTPServer(data: data, chunkDelay: 0.08,
+                                               contentType: "audio/mpeg", path: "/podcast.mp3")
+        defer { server.stop() }
+        let transport = SourceTransport(sourceID: "test.podcast.vlc.\(UUID().uuidString)")
+        // A deliberately wrong RSS value must not determine the HTTP buffering target or replace
+        // the duration decoded from the VBR headers. Only the engine receives the initial UI hint.
+        let stream = BufferedHTTPInputStream(url: server.url, transport: transport,
+            bufferBytes: 256 * 1024, bufferSeconds: 1, durationHint: nil)
+        let player = VLCPlaybackEngine()
+        player.volume = 0
+        defer { player.stop(); stream.close(); transport.invalidate() }
+        player.load(stream: stream, bufferSeconds: 1, durationHint: 1, supportsSeeking: { stream.supportsSeeking })
+        player.seek(to: 40)
+        XCTAssertEqual(player.position, 40, accuracy: 0.01,
+                       "A pending resume point must not be truncated to the unverified RSS duration.")
+        try await eventually(player: player, timeout: 15) {
+            player.state == .playing && player.isSeekable && player.duration > 120 && player.position > 40.5
+        }
+        XCTAssertEqual(player.duration, 128, accuracy: 0.5)
+        XCTAssertLessThan(player.position, 43)
+
+        var positions: [Double] = []
+        let observation = player.$position.sink { positions.append($0) }
+        defer { observation.cancel() }
+        positions.removeAll()
+        player.seek(to: 80)
+        XCTAssertEqual(player.position, 80, accuracy: 0.01)
+        // Reaching a later timestamp, rather than merely the optimistic target, proves VLC resumed
+        // actual decoding at the requested point and acknowledged the seek.
+        try await eventually(player: player) { player.state == .playing && player.position > 80.5 }
+        XCTAssertLessThan(player.position, 83)
+        XCTAssertTrue(positions.allSatisfy { $0 >= 79.5 }, "Cached pre-seek times must not move the cursor backward.")
+
+        player.pause()
+        try await eventually(player: player) { player.state == .paused }
+        player.seek(to: 17.5)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(player.position, 17.5, accuracy: 0.2)
+        player.play()
+        try await eventually(player: player) { player.state == .playing && player.position > 18 }
+        XCTAssertLessThan(player.position, 20.5)
+        XCTAssertEqual(stream.supportsSeeking, true)
+        XCTAssertNil(player.lastError)
+        XCTAssertNil(stream.streamError)
+
+        player.stop(); stream.close()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(player.state, .stopped)
+        XCTAssertEqual(player.position, 0)
+        XCTAssertFalse(player.isSeekable)
+    }
+
+    @MainActor
+    func testPodcastWithoutByteRangesRejectsPendingAndLaterSeeksWithoutFreezingPlayback() async throws {
+        let server = try ProgressiveHTTPServer(data: wave(duration: 8, sampleRate: 48_000, channels: 2),
+                                               chunkDelay: 0.03, supportsRanges: false)
+        defer { server.stop() }
+        let transport = SourceTransport(sourceID: "test.podcast.unseekable.\(UUID().uuidString)")
+        let stream = BufferedHTTPInputStream(url: server.url, transport: transport,
+            bufferBytes: 256 * 1024, bufferSeconds: 1)
+        let player = VLCPlaybackEngine()
+        player.volume = 0
+        defer { player.stop(); stream.close(); transport.invalidate() }
+        XCTAssertNil(stream.supportsSeeking)
+        player.load(stream: stream, bufferSeconds: 1, durationHint: 8,
+                    supportsSeeking: { stream.supportsSeeking })
+        player.seek(to: 6)
+        try await eventually(player: player, timeout: 15) {
+            player.state == .playing && player.position > 0.2 && player.position < 2 && !player.isSeekable
+        }
+        XCTAssertEqual(stream.supportsSeeking, false)
+        let before = player.position
+        player.seek(to: 6)
+        XCTAssertEqual(player.position, before, accuracy: 0.01)
+        try await eventually(player: player) { player.position > before + 0.5 }
+        XCTAssertLessThan(player.position, 3)
+
+        player.pause()
+        try await eventually(player: player) { player.state == .paused }
+        let paused = player.position
+        player.seek(to: 7)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(player.position, paused, accuracy: 0.15)
+        player.play()
+        try await eventually(player: player) { player.state == .playing && player.position > paused + 0.4 }
+        XCTAssertFalse(player.isSeekable)
+        XCTAssertEqual(server.requestedOffsets, [0], "Unsupported seeks must not restart the HTTP transfer.")
+        XCTAssertNil(player.lastError)
+        XCTAssertNil(stream.streamError)
+    }
+
     @MainActor
     func testRealHTTPProgressivePlaybackStartsBeforeFullDownloadAndSupportsSegmentSeek() async throws {
         let data = wave(duration: 20, sampleRate: 48_000, channels: 2)
@@ -79,14 +176,18 @@ private final class ProgressiveHTTPServer: @unchecked Sendable {
     private let lock = NSLock()
     private let data: Data
     private let chunkDelay: TimeInterval
+    private let contentType: String
+    private let supportsRanges: Bool
     private var connections: [UUID: NWConnection] = [:]
     private var servedRanges: [Range<Int>] = []
     private var offsets: [Int] = []
     private var isStopped = false
     let url: URL
 
-    init(data: Data, chunkDelay: TimeInterval) throws {
-        self.data = data; self.chunkDelay = chunkDelay
+    init(data: Data, chunkDelay: TimeInterval, contentType: String = "audio/wav", path: String = "/album.wav",
+         supportsRanges: Bool = true) throws {
+        self.data = data; self.chunkDelay = chunkDelay; self.contentType = contentType
+        self.supportsRanges = supportsRanges
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters, on: .any)
@@ -109,7 +210,7 @@ private final class ProgressiveHTTPServer: @unchecked Sendable {
         }
         let port = try startup.result!.get()
         listener.stateUpdateHandler = nil
-        url = URL(string: "http://127.0.0.1:\(port)/album.wav")!
+        url = URL(string: "http://127.0.0.1:\(port)\(path)")!
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
     }
 
@@ -159,7 +260,7 @@ private final class ProgressiveHTTPServer: @unchecked Sendable {
 
     private func respond(_ connection: NWConnection, id: UUID, request: String) {
         let rangeHeader = request.components(separatedBy: "\r\n").first { $0.lowercased().hasPrefix("range:") }
-        let offset = rangeHeader.flatMap { line in
+        let offset = (supportsRanges ? rangeHeader : nil).flatMap { line in
             line.range(of: "bytes=", options: .caseInsensitive).flatMap { Int(line[$0.upperBound...].split(separator: "-").first ?? "0") }
         } ?? 0
         lock.lock(); offsets.append(offset); lock.unlock()
@@ -168,9 +269,10 @@ private final class ProgressiveHTTPServer: @unchecked Sendable {
             connection.send(content: Data(header.utf8), completion: .contentProcessed { [weak self] _ in self?.close(connection, id: id) })
             return
         }
-        let status = rangeHeader == nil ? "200 OK" : "206 Partial Content"
-        var header = "HTTP/1.1 \(status)\r\nContent-Type: audio/wav\r\nAccept-Ranges: bytes\r\nContent-Length: \(data.count - offset)\r\nConnection: close\r\n"
-        if rangeHeader != nil { header += "Content-Range: bytes \(offset)-\(data.count - 1)/\(data.count)\r\n" }
+        let partial = supportsRanges && rangeHeader != nil
+        let status = partial ? "206 Partial Content" : "200 OK"
+        var header = "HTTP/1.1 \(status)\r\nContent-Type: \(contentType)\r\nAccept-Ranges: \(supportsRanges ? "bytes" : "none")\r\nContent-Length: \(data.count - offset)\r\nConnection: close\r\n"
+        if partial { header += "Content-Range: bytes \(offset)-\(data.count - 1)/\(data.count)\r\n" }
         header += "\r\n"
         connection.send(content: Data(header.utf8), completion: .contentProcessed { [weak self] error in
             guard let self, error == nil else { return }

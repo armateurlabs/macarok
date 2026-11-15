@@ -146,16 +146,36 @@ struct RadioFavoritesSection: View {
 
 struct RadioNowPlayingView: View {
     @Bindable var model: AppModel
+    private let inspectedTrack: TrackRecord?
     @ObservedObject private var player: VLCPlaybackEngine
-    init(model: AppModel) { self.model = model; _player = ObservedObject(wrappedValue: model.player) }
+    init(model: AppModel, track: TrackRecord? = nil) {
+        self.model = model; inspectedTrack = track
+        _player = ObservedObject(wrappedValue: model.player)
+    }
+
+    var displayedTrack: TrackRecord? { inspectedTrack ?? model.currentTrack }
+    var showsCurrentBroadcast: Bool {
+        guard let track = displayedTrack, let current = model.currentTrack else { return false }
+        return model.isRadioTrack(current) && track.id == current.id && track.sourceID == current.sourceID
+    }
+
     var body: some View {
         VStack(spacing: 18) {
             Image(systemName: "antenna.radiowaves.left.and.right").font(.system(size: 56)).foregroundStyle(.secondary)
-            Text(model.currentTrack?.title ?? "Internet Radio").font(.title.weight(.semibold)).multilineTextAlignment(.center)
-            Label(model.radioDisconnected ? "Disconnected" : player.state == .paused ? "Paused" : "Live Radio", systemImage: model.radioDisconnected ? "wifi.slash" : player.state == .paused ? "pause.circle" : "dot.radiowaves.left.and.right")
-                .font(.callout).foregroundStyle(.secondary)
-            if let title = model.radioBroadcastTitle, !title.isEmpty { Text(title).font(.title3).multilineTextAlignment(.center).textSelection(.enabled) }
-            if model.radioDisconnected { Button("Reconnect", action: model.reconnectRadio).buttonStyle(.borderedProminent) }
+            Text(displayedTrack?.title ?? "Internet Radio").font(.title.weight(.semibold)).multilineTextAlignment(.center)
+            if showsCurrentBroadcast {
+                Label(model.radioDisconnected ? "Disconnected" : player.state == .paused ? "Paused" : "Live Radio", systemImage: model.radioDisconnected ? "wifi.slash" : player.state == .paused ? "pause.circle" : "dot.radiowaves.left.and.right")
+                    .font(.callout).foregroundStyle(.secondary)
+                if let title = model.radioBroadcastTitle, !title.isEmpty { Text(title).font(.title3).multilineTextAlignment(.center).textSelection(.enabled) }
+                if model.radioDisconnected { Button("Reconnect", action: model.reconnectRadio).buttonStyle(.borderedProminent) }
+            } else {
+                Label("Radio Station", systemImage: "antenna.radiowaves.left.and.right").font(.callout).foregroundStyle(.secondary)
+                if let track = displayedTrack,
+                   let station = model.radio?.stations.first(where: { $0.id == track.id && $0.sourceID == track.sourceID }),
+                   !station.description.isEmpty {
+                    Text(station.description).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
+            }
         }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

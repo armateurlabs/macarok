@@ -29,6 +29,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     private var player: VLCMediaPlayer?
     private var proxy: PlaybackDelegate?
     private var heldStream: InputStream?
+    private var streamSupportsSeeking: (@Sendable () -> Bool?)?
     private var generation = UUID()
     private var segmentStart: Double = 0
     private var segmentEnd: Double?
@@ -37,6 +38,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     private var didComplete = false
     private var explicitlyStopped = false
     private var pendingSeek: Double?
+    private var inFlightSeek: (target: Double, startedAt: TimeInterval)?
     private var timelineTimer: Timer?
     private var live = false
 
@@ -59,7 +61,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             return
         }
         install(media: media, stream: nil, segmentStart: segmentStart, segmentEnd: segmentEnd,
-                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay, live: live)
+                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay, live: live, supportsSeeking: nil)
     }
 
     /// The caller may supply a seekable stream backed by the shared source transport.
@@ -71,14 +73,15 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         bufferSeconds: Double? = nil,
         durationHint: Double? = nil,
         autoplay: Bool = true,
-        live: Bool = false
+        live: Bool = false,
+        supportsSeeking: (@Sendable () -> Bool?)? = nil
     ) {
         guard let media = VLCMedia(stream: stream) else {
             reportError("The audio stream could not be opened.")
             return
         }
         install(media: media, stream: stream, segmentStart: segmentStart, segmentEnd: segmentEnd,
-                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay, live: live)
+                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay, live: live, supportsSeeking: supportsSeeking)
     }
 
     public func play() {
@@ -99,7 +102,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     public func pauseLive() {
         stopTimelineUpdates(); generation = UUID(); explicitlyStopped = true
         heldStream?.close(); heldStream = nil; player?.delegate = nil; player?.stop()
-        pendingSeek = nil; state = .paused; position = 0; duration = 0; isSeekable = false
+        pendingSeek = nil; inFlightSeek = nil; state = .paused; position = 0; duration = 0; isSeekable = false
     }
 
     public func togglePlayPause() {
@@ -110,34 +113,55 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         stopTimelineUpdates()
         explicitlyStopped = true
         pendingSeek = nil
+        inFlightSeek = nil
         player?.stop()
         state = .stopped
         position = 0
         bufferingProgress = 1
+        isSeekable = false
     }
 
     public func seek(to seconds: Double) {
         guard !live, let player, seconds.isFinite else { return }
-        let target = max(0, duration > 0 ? min(seconds, duration) : seconds)
+        guard streamSupportsSeeking?() != false else {
+            pendingSeek = nil; inFlightSeek = nil; isSeekable = false
+            return
+        }
+        let target = boundedSeekTarget(seconds)
         guard player.isSeekable else {
             pendingSeek = target
+            inFlightSeek = nil
             position = target
             return
         }
         pendingSeek = nil
+        inFlightSeek = (target, ProcessInfo.processInfo.systemUptime)
         player.time = VLCTime(number: NSNumber(value: (target + segmentStart) * 1_000))
         position = target
     }
 
+    private func boundedSeekTarget(_ seconds: Double) -> Double {
+        // RSS durations are provisional. In particular, a saved resume point can arrive before
+        // VLC opens the episode, so only a CUE boundary or decoded duration may truncate it.
+        let limit: Double?
+        if let end = segmentEnd { limit = end - segmentStart }
+        else if let milliseconds = player?.media?.length.value?.doubleValue,
+                milliseconds.isFinite, milliseconds > 0 { limit = max(0, milliseconds / 1_000 - segmentStart) }
+        else { limit = nil }
+        return max(0, limit.map { min(seconds, $0) } ?? seconds)
+    }
+
     private func install(
         media: VLCMedia, stream: InputStream?, segmentStart: Double, segmentEnd: Double?,
-        bufferSeconds: Double?, durationHint: Double?, autoplay: Bool, live: Bool
+        bufferSeconds: Double?, durationHint: Double?, autoplay: Bool, live: Bool,
+        supportsSeeking: (@Sendable () -> Bool?)?
     ) {
         stopTimelineUpdates()
         generation = UUID()
         player?.delegate = nil
         player?.stop()
         heldStream = stream
+        streamSupportsSeeking = supportsSeeking
         self.live = live
         self.segmentStart = max(0, segmentStart.isFinite ? segmentStart : 0)
         self.segmentEnd = segmentEnd.flatMap { $0.isFinite && $0 > self.segmentStart ? $0 : nil }
@@ -148,6 +172,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         didComplete = false
         explicitlyStopped = false
         pendingSeek = nil
+        inFlightSeek = nil
         lastError = nil
         isSeekable = false
         bufferingProgress = 0
@@ -193,6 +218,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     fileprivate func receiveState(_ value: VLCMediaPlayerState, generation: UUID) {
         guard generation == self.generation else { return }
+        guard !explicitlyStopped || value == .stopped else { return }
         switch value {
         case .opening:
             state = .opening
@@ -221,7 +247,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     }
 
     fileprivate func receiveBuffering(_ value: Float, generation: UUID) {
-        guard generation == self.generation else { return }
+        guard generation == self.generation, !explicitlyStopped else { return }
         bufferingProgress = min(1, max(0, Double(value)))
         if value < 1 && state != .paused { state = .buffering }
         else if hasStarted && state == .buffering { state = .playing }
@@ -234,7 +260,9 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         if let end = segmentEnd { duration = end - segmentStart }
         else if sourceDuration > 0 { duration = max(0, sourceDuration - segmentStart) }
         else if let durationHint { duration = durationHint }
-        isSeekable = !live && player.isSeekable
+        let transportAllowsSeeking = streamSupportsSeeking?() != false
+        isSeekable = !live && transportAllowsSeeking && player.isSeekable
+        if !transportAllowsSeeking { pendingSeek = nil; inFlightSeek = nil }
         if live { duration = 0 }
         if let target = pendingSeek {
             if isSeekable {
@@ -243,7 +271,20 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             }
             return
         }
-        position = max(0, absolute - segmentStart)
+        let reportedPosition = max(0, absolute - segmentStart)
+        if let request = inFlightSeek {
+            let elapsed = ProcessInfo.processInfo.systemUptime - request.startedAt
+            let target = boundedSeekTarget(request.target)
+            let acknowledged = reportedPosition >= target - 0.5 && reportedPosition <= target + max(1, elapsed + 0.5)
+            if !acknowledged, elapsed < 15 {
+                // VLCKit can report its cached pre-seek time while the new byte range is buffering.
+                // Do not move the cursor back or evaluate a CUE end boundary from that old sample.
+                position = target
+                return
+            }
+            inFlightSeek = nil
+        }
+        position = reportedPosition
         if duration > 0 { position = min(position, duration) }
         if hasStarted, let end = segmentEnd, absolute >= end - 0.015, !didComplete {
             finish()
@@ -255,6 +296,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         stopTimelineUpdates()
         didComplete = true
         explicitlyStopped = true
+        inFlightSeek = nil
         state = .stopped
         if duration > 0 { position = duration }
         player?.stop()
@@ -264,6 +306,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     private func reportError(_ message: String) {
         stopTimelineUpdates()
         explicitlyStopped = true
+        pendingSeek = nil; inFlightSeek = nil; isSeekable = false
         player?.stop()
         lastError = message
         state = .failed

@@ -23,6 +23,9 @@ enum SourceCatalogKind: String, CaseIterable, Identifiable {
         }
     }
     var isServer: Bool { self == .openSubsonic || self == .bandcamp }
+    var image: Image {
+        self == .podcasts ? Image(nsImage: PodcastSourceIcon.image).renderingMode(.template) : Image(systemName: symbol)
+    }
 }
 
 struct AddSourceSheet: View {
@@ -65,7 +68,7 @@ struct AddSourceSheet: View {
                     Text("MUSIC SOURCES").font(.caption2.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 9).padding(.bottom, 4)
                     ForEach(SourceCatalogKind.allCases) { item in
                         Button { kind = item } label: {
-                            Label(item.title, systemImage: item.symbol)
+                            Label { Text(item.title) } icon: { item.image }
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(9)
                                 .background(kind == item ? Color.accentColor.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 6))
                                 .contentShape(Rectangle())
@@ -78,7 +81,7 @@ struct AddSourceSheet: View {
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 15) {
-                        Label(kind.title, systemImage: kind.symbol).font(.title3.weight(.semibold))
+                        Label { Text(kind.title) } icon: { kind.image }.font(.title3.weight(.semibold))
                         Group {
                             switch kind {
                             case .local: localForm
@@ -87,8 +90,6 @@ struct AddSourceSheet: View {
                             case .podcasts: podcastForm
                             }
                         }.disabled(isConnecting)
-                        Divider().padding(.top, 8)
-                        serviceInformation
                     }.padding(.leading, 20).padding(.trailing, 2)
                 }
             }.frame(maxHeight: .infinity)
@@ -195,27 +196,6 @@ struct AddSourceSheet: View {
                 .disabled(model.radio == nil)
             Text("Live stations are saved separately from your music albums and tracks.").font(.caption).foregroundStyle(.secondary)
         }.textFieldStyle(.roundedBorder)
-    }
-
-    private var serviceInformation: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("Other Music Services").font(.headline)
-            Text("Playback from these services is not available in Macarok.").font(.caption).foregroundStyle(.secondary)
-            VStack(spacing: 8) {
-                serviceCard("Qobuz", detail: "Full playback requires an approved partner integration.", url: "https://www.qobuz.com/ca-en/page/annonceurs-partenariats")
-                serviceCard("Deezer", detail: "A public full-playback integration route is not currently confirmed.", url: "https://en.deezercommunity.com/features-feedback-44/apis-to-enable-3rd-party-apps-ndk-not-available-javascript-sdk-not-working-76108?sort=mostLiked")
-                serviceCard("Spotify", detail: "Spotify’s developer policy restricts integration into multi-service music players.", url: "https://developer.spotify.com/policy")
-            }
-        }
-    }
-
-    private func serviceCard(_ title: String, detail: String, url: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).fontWeight(.medium)
-            Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Link("Official Information ↗", destination: URL(string: url)!).font(.caption)
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 7))
     }
 
     private var podcastForm: some View {

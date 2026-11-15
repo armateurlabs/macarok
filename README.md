@@ -33,8 +33,9 @@ To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.1.0 1`.
 - CUE sheets expose individual tracks without splitting the original audio.
 - Persistent playlists, queue, listening history, ratings, and scope-aware search through SQLite/FTS5.
 - Home includes Recently Added, Recently Played with fixed local dates, separate Tracks, Artists, and Albums rankings, and Radio Favorites in All Sources.
+- Centered Home / Playing navigation has a fixed second menu row: Home filters or Context / Lyrics / Edit metadata. Track changes retain the selected mode and detail tab; active metadata and artwork editors keep their original target.
 - Synchronized lyrics from local files, OpenSubsonic, and LRCLIB, with manual search/corrections, caching, highlighting, and optional file export.
-- Double-click a track, album, or artist to start an empty playlist; track double-click choices include Add to End, Add After Current Track, and Play Now. Album and artist actions always use their complete track lists.
+- Double-click a track, album, or artist to start an empty playlist; track double-click choices include Add to Playlist, Add After Current Track, and Play Now. Album and artist actions always use their complete track lists.
 - Playlist controls at the top and bottom, contextual shuffle that appends to an existing queue, None / Playlist / Track repeat, and native Undo / Redo for playlist edits.
 - Mac media keys, configurable local and global shortcuts, held Left / Right keys for seeking, and adjustable streaming buffering.
 - Optional Last.fm scrobbling with personal API credentials, browser authorization, source exclusions, and a persistent submission queue.
@@ -42,7 +43,7 @@ To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.1.0 1`.
 - Optional recording identification through Chromaprint and AcoustID, using your own application client key stored in Keychain.
 - HTTP and HTTPS, with explicit server-specific trust for self-signed certificates shared by library, artwork, and audio requests.
 
-Single-source browsing remains the default. All Sources combines cached indexes and refreshes each source serially when requested; it does not merge stored copies. The library footer starts or stops refresh and shows progress. Crossfade and quality-tuning controls are outside the current scope. Gapless playback is optional. Bandcamp uses its OpenSubsonic endpoint and generated credentials. Qobuz, Deezer, and Spotify have service information links, without playback connectors. See [source setup and availability](docs/SOURCES.md).
+Single-source browsing remains the default. All Sources combines cached indexes and refreshes each source serially when requested; it does not merge stored copies. The library footer starts or stops refresh and shows progress. Crossfade and quality-tuning controls are outside the current scope. Gapless playback is optional. Bandcamp uses its OpenSubsonic endpoint and generated credentials. Qobuz, Deezer, and Spotify do not have playback connectors. See [source setup and availability](docs/SOURCES.md).
 
 Clear Playlist keeps the current entry while it is playing or opening. When paused or stopped, it empties the playlist. Command-Z and Shift-Command-Z undo and redo playlist content edits; text fields keep their own undo history. Bare Left / Right seek by five seconds per key press and continue while held; Command-Left / Command-Right remain Previous / Next by default.
 
@@ -63,6 +64,10 @@ Offscreen renders of the implemented SwiftUI views, using the synthetic demo col
 ![Native CUE album in dark mode](design/native/cue-album-dark.png)
 
 ![Synchronized lyrics in dark mode](design/native/lyrics-dark.png)
+
+The metadata editor keeps its target and draft while the next track plays:
+
+![Pinned metadata editor in dark mode](design/native/metadata-dark.png)
 
 ## Explore the mockups
 

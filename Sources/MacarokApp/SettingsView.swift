@@ -162,8 +162,11 @@ struct SettingsView: View {
                 ForEach(model.sources) { source in
                     Section {
                         HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: source.kind.librarySymbol)
-                                .font(.title3).foregroundStyle(Color.accentColor).frame(width: 25)
+                            Group {
+                                if source.kind == .podcasts { Image(nsImage: PodcastSourceIcon.image).renderingMode(.template) }
+                                else { Image(systemName: source.kind.librarySymbol) }
+                            }
+                            .font(.title3).foregroundStyle(source.kind == .podcasts ? Color.primary : Color.accentColor).frame(width: 25)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(source.name).fontWeight(.medium)
                                 Text(source.location).font(.caption).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
