@@ -54,6 +54,117 @@ final class BufferedHTTPInputStreamTests: XCTestCase {
         XCTAssertEqual(fixture.offsets, requests, "Nearby compressed-frame seeks must reuse retained bytes.")
     }
 
+    func testRetainedRangesDoNotClaimADownloadedPrefixAfterARangeSeek() async throws {
+        let fixture = ProgressiveFixture(size: 2 * 1024 * 1024, delay: 0.01)
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport,
+                                            bufferBytes: 256 * 1024, bufferSeconds: 1)
+        defer { stream.close(); fixture.transport.invalidate() }
+        stream.open()
+        _ = try await read(stream, count: 4096)
+        let first = stream.snapshot
+        XCTAssertEqual(first.retainedRanges.first?.lowerBound, 0)
+        XCTAssertTrue(first.retainedRanges.contains { $0.contains(0) })
+
+        let requested = UInt64(1_572_864)
+        XCTAssertTrue(stream.setProperty(NSNumber(value: requested), forKey: .fileCurrentOffsetKey))
+        let received = try await read(stream, count: 8192)
+        XCTAssertEqual(received.data, fixture.data.subdata(in: Int(requested)..<(Int(requested) + 8192)))
+        let snapshot = stream.snapshot
+        XCTAssertTrue(snapshot.retainedRanges.allSatisfy { $0.lowerBound >= requested })
+        XCTAssertFalse(snapshot.retainedRanges.contains { $0.contains(0) })
+        XCTAssertLessThanOrEqual(snapshot.retainedRanges.reduce(0) { $0 + Int($1.count) }, snapshot.capacityBytes)
+        stream.close()
+        XCTAssertTrue(stream.snapshot.retainedRanges.isEmpty)
+    }
+
+    func testBoundedChunkStorageEvictsConsumedBytesAndPreservesTheTail() async throws {
+        let fixture = ProgressiveFixture(size: 3 * 1024 * 1024 + 71, delay: 0)
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport,
+                                            bufferBytes: 256 * 1024, bufferSeconds: 1)
+        defer { stream.close(); fixture.transport.invalidate() }
+        stream.open()
+        var received = Data()
+        while true {
+            let next = try await read(stream, count: 61_019)
+            XCTAssertGreaterThanOrEqual(next.count, 0)
+            if next.count == 0 { break }
+            received.append(next.data)
+            let snapshot = stream.snapshot
+            XCTAssertLessThanOrEqual(snapshot.retainedRanges.reduce(0) { $0 + Int($1.count) }, snapshot.capacityBytes)
+        }
+        XCTAssertEqual(received, fixture.data)
+        let retained = try XCTUnwrap(stream.snapshot.retainedRanges.first)
+        XCTAssertGreaterThan(retained.lowerBound, 0)
+        let oldRequests = fixture.offsets
+        let back = fixture.data.count - 32_000
+        XCTAssertTrue(stream.setProperty(NSNumber(value: back), forKey: .fileCurrentOffsetKey))
+        let tail = try await read(stream, count: 32_000)
+        XCTAssertEqual(tail.data, fixture.data.suffix(32_000))
+        XCTAssertEqual(fixture.offsets, oldRequests)
+    }
+
+    func testDecoderUnderrunWaitsAreMeasuredAndTheProducerWakesWithoutPolling() async throws {
+        let fixture = ProgressiveFixture(size: 256 * 1024, delay: 0.02, pauseAfterFirstChunk: true)
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport, bufferSeconds: 1)
+        defer { fixture.releaseRemainder(); stream.close(); fixture.transport.invalidate() }
+        stream.open()
+        let reading = Task {
+            var bytes = Data()
+            while bytes.count < 128 * 1024 {
+                let next = try await read(stream, count: 64 * 1024)
+                guard next.count > 0 else { break }
+                bytes.append(next.data)
+            }
+            return bytes
+        }
+        for _ in 0..<400 where stream.snapshot.underrunCount == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertGreaterThanOrEqual(stream.snapshot.underrunCount, 1)
+        fixture.releaseRemainder()
+        let received = try await reading.value
+        XCTAssertEqual(received, fixture.data.prefix(received.count))
+        XCTAssertGreaterThanOrEqual(received.count, 128 * 1024)
+        XCTAssertGreaterThan(stream.snapshot.readerWaitDuration, 0)
+    }
+
+    func testTransportInvalidationUnblocksAWaitingDecoder() async throws {
+        let fixture = ProgressiveFixture(size: 1024 * 1024, delay: 0.1)
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport,
+                                            bufferSeconds: 120, durationHint: 1)
+        defer { stream.close(); fixture.transport.invalidate() }
+        stream.open()
+        let reading = Task { try await read(stream, count: 4096) }
+        for _ in 0..<100 where fixture.offsets.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        fixture.transport.invalidate()
+        let result = try await reading.value
+        XCTAssertEqual(result.count, -1)
+        XCTAssertNotNil(stream.streamError)
+    }
+
+    func testAFullPlaybackBufferDoesNotBlockCatalogRequestsForTheSameSource() async throws {
+        let fixture = ProgressiveFixture(size: 2 * 1024 * 1024, delay: 0.003)
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport,
+                                            bufferBytes: 256 * 1024, bufferSeconds: 1)
+        defer { stream.close(); fixture.transport.invalidate() }
+        stream.open()
+        for _ in 0..<400 where stream.snapshot.bufferedBytes < 256 * 1024 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(stream.snapshot.bufferedBytes, 256 * 1024)
+        let data = try await withThrowingTaskGroup(of: Data.self) { group in
+            group.addTask { try await fixture.transport.data(from: fixture.url) }
+            group.addTask {
+                try await Task.sleep(for: .seconds(4))
+                stream.close()
+                throw ReadFailure.timeout
+            }
+            let data = try await group.next()!
+            group.cancelAll()
+            return data
+        }
+        XCTAssertEqual(data, fixture.data)
+        XCTAssertEqual(stream.snapshot.bufferedBytes, 256 * 1024)
+    }
+
     func testShortResponseDrainsEvenWhenSmallerThanTheBufferTarget() async throws {
         let fixture = ProgressiveFixture(size: 16 * 1024, delay: 0)
         let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport, bufferSeconds: 20, durationHint: 1)
@@ -237,18 +348,21 @@ private final class ProgressiveFixture: @unchecked Sendable {
     let truncateAt: Int?
     let contentEncoding: String?
     let status: Int?
+    let pauseAfterFirstChunk: Bool
+    private let remainderGate = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var completed = false
     private var stops = 0
     private var requestedOffsets: [UInt64] = []
 
     init(size: Int, delay: Double, supportsRange: Bool = true, invalidRange: Bool = false,
-         truncateAt: Int? = nil, contentEncoding: String? = nil, status: Int? = nil) {
+         truncateAt: Int? = nil, contentEncoding: String? = nil, status: Int? = nil, pauseAfterFirstChunk: Bool = false) {
         let host = "buffer-\(UUID().uuidString.lowercased()).invalid"
         url = URL(string: "https://\(host)/audio.flac")!
         data = Data((0..<size).map { UInt8($0 % 251) })
         self.delay = delay; self.supportsRange = supportsRange; self.invalidRange = invalidRange
         self.truncateAt = truncateAt; self.contentEncoding = contentEncoding; self.status = status
+        self.pauseAfterFirstChunk = pauseAfterFirstChunk
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ProgressiveURLProtocol.self]
         transport = SourceTransport(sourceID: host, configuration: configuration)
@@ -260,6 +374,8 @@ private final class ProgressiveFixture: @unchecked Sendable {
     func didRequest(_ offset: UInt64) { lock.lock(); requestedOffsets.append(offset); lock.unlock() }
     func didFinish() { lock.lock(); completed = true; lock.unlock() }
     func didStop() { lock.lock(); stops += 1; lock.unlock() }
+    func waitForRemainderIfRequested() { if pauseAfterFirstChunk { _ = remainderGate.wait(timeout: .now() + 5) } }
+    func releaseRemainder() { remainderGate.signal() }
 }
 
 private final class ProgressiveURLProtocol: URLProtocol, @unchecked Sendable {
@@ -304,6 +420,7 @@ private final class ProgressiveURLProtocol: URLProtocol, @unchecked Sendable {
             let limit = min(fixture.truncateAt ?? fixture.data.count, fixture.data.count)
             let end = min(offset + 64 * 1024, limit)
             self.client?.urlProtocol(self, didLoad: fixture.data.subdata(in: offset..<end))
+            if offset == 0 { fixture.waitForRemainderIfRequested() }
             if end < limit { self.send(from: end) }
             else { fixture.didFinish(); self.client?.urlProtocolDidFinishLoading(self) }
         }

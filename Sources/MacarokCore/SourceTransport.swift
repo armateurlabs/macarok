@@ -152,6 +152,10 @@ public final class SourceTransport: NSObject, URLSessionDelegate, URLSessionTask
     private let approval: CertificateApproval?
     private let configuration: URLSessionConfiguration
     private var session: URLSession!
+    private var playbackSession: URLSession!
+    private var playbackDelegate: SourceTransferDelegate!
+    private var downloadSession: URLSession!
+    private var downloadDelegate: SourceTransferDelegate!
 
     public init(sourceID: String, configuration: URLSessionConfiguration = .ephemeral,
                 certificateStore: CertificateTrustStore = .shared,
@@ -162,6 +166,22 @@ public final class SourceTransport: NSObject, URLSessionDelegate, URLSessionTask
         self.approval = certificateApproval
         super.init()
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        playbackDelegate = SourceTransferDelegate(owner: self)
+        downloadDelegate = SourceTransferDelegate(owner: self)
+        let playbackQueue = OperationQueue()
+        playbackQueue.name = "Macarok.PlaybackHTTP.\(sourceID)"
+        playbackQueue.qualityOfService = .userInitiated
+        playbackQueue.maxConcurrentOperationCount = 1
+        let downloadQueue = OperationQueue()
+        downloadQueue.name = "Macarok.DownloadHTTP.\(sourceID)"
+        downloadQueue.qualityOfService = .utility
+        downloadQueue.maxConcurrentOperationCount = 1
+        // Keep playback sockets and callbacks independent of catalog, artwork, and download work.
+        let playbackConfiguration = configuration.copy() as! URLSessionConfiguration
+        playbackConfiguration.urlCache = nil
+        playbackConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        playbackSession = URLSession(configuration: playbackConfiguration, delegate: playbackDelegate, delegateQueue: playbackQueue)
+        downloadSession = URLSession(configuration: configuration, delegate: downloadDelegate, delegateQueue: downloadQueue)
     }
 
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -194,6 +214,23 @@ public final class SourceTransport: NSObject, URLSessionDelegate, URLSessionTask
         return (bytes, response)
     }
 
+    /// Chunk callbacks run in order on the playback session's dedicated delegate queue. A consumer
+    /// may wait there for buffer capacity; it never occupies Swift's cooperative executor.
+    /// The returned task is suspended so the consumer can install cancellation state before resuming it.
+    @discardableResult
+    public func startPlaybackStream(for request: URLRequest,
+                                    onResponse: @escaping @Sendable (HTTPURLResponse) throws -> Void,
+                                    onData: @escaping @Sendable (Data) throws -> Void,
+                                    onComplete: @escaping @Sendable (Error?) -> Void) throws -> URLSessionDataTask {
+        guard let url = request.url, Self.isValidURL(url) else { throw SourceNetworkError.invalidURL }
+        var request = request
+        request.networkServiceType = .avStreaming
+        let task = playbackSession.dataTask(with: request)
+        task.priority = URLSessionTask.highPriority
+        playbackDelegate.register(task, response: onResponse, data: onData, completion: onComplete)
+        return task
+    }
+
     public func range(from url: URL, offset: Int64, length: Int64) async throws -> (Data, HTTPURLResponse) {
         guard offset >= 0, length > 0, length - 1 <= Int64.max - offset else { throw SourceNetworkError.invalidRange }
         let end = offset + length - 1
@@ -213,21 +250,32 @@ public final class SourceTransport: NSObject, URLSessionDelegate, URLSessionTask
     }
 
     @discardableResult
-    public func download(from url: URL, to destination: URL) async throws -> URL {
+    public func download(from url: URL, to destination: URL,
+                         progress: (@Sendable (Int64, Int64?) -> Void)? = nil) async throws -> URL {
         guard Self.isValidURL(url) else {
             throw SourceNetworkError.invalidURL
         }
-        let (temporary, response) = try await session.download(for: URLRequest(url: url))
-        guard let response = response as? HTTPURLResponse else { throw SourceNetworkError.invalidResponse }
-        guard (200...299).contains(response.statusCode) else { throw SourceNetworkError.httpStatus(response.statusCode) }
-        let manager = FileManager.default
-        try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if manager.fileExists(atPath: destination.path) { _ = try manager.replaceItemAt(destination, withItemAt: temporary) }
-        else { try manager.moveItem(at: temporary, to: destination) }
-        return destination
+        let cancellation = SourceTransferCancellation()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                let task = downloadSession.downloadTask(with: URLRequest(url: url))
+                task.priority = URLSessionTask.lowPriority
+                downloadDelegate.register(task, destination: destination, progress: progress) {
+                    continuation.resume(with: $0)
+                }
+                cancellation.install(task)
+                task.resume()
+            }
+        } onCancel: { cancellation.cancel() }
     }
 
-    public func invalidate() { session.invalidateAndCancel() }
+    public func invalidate() {
+        playbackDelegate.cancelStreams()
+        session.invalidateAndCancel()
+        playbackSession.invalidateAndCancel()
+        downloadSession.invalidateAndCancel()
+    }
 
     private static func isValidURL(_ url: URL) -> Bool {
         ["http", "https"].contains(url.scheme?.lowercased() ?? "") && url.host != nil && url.user == nil && url.password == nil
@@ -243,7 +291,7 @@ public final class SourceTransport: NSObject, URLSessionDelegate, URLSessionTask
         handle(challenge, completionHandler: completionHandler)
     }
 
-    private func handle(_ challenge: URLAuthenticationChallenge,
+    func handle(_ challenge: URLAuthenticationChallenge,
                         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         let protection = challenge.protectionSpace
         guard protection.authenticationMethod == NSURLAuthenticationMethodServerTrust,

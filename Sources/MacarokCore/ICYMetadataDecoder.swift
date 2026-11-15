@@ -21,17 +21,24 @@ public struct ICYMetadataDecoder: Sendable {
     public mutating func consume(_ data: Data) -> (audio: Data, updates: [ICYTitleUpdate]) {
         var audio = Data(); audio.reserveCapacity(data.count)
         var updates: [ICYTitleUpdate] = []
-        for byte in data {
+        var cursor = data.startIndex
+        while cursor < data.endIndex {
             if remainingAudio > 0 {
-                audio.append(byte); remainingAudio -= 1; audioOffset += 1
+                let count = min(remainingAudio, data.distance(from: cursor, to: data.endIndex))
+                let end = data.index(cursor, offsetBy: count)
+                audio.append(contentsOf: data[cursor..<end])
+                remainingAudio -= count; audioOffset += UInt64(count); cursor = end
             } else if let remaining = remainingMetadata {
-                metadata.append(byte); remainingMetadata = remaining - 1
-                if remaining == 1 {
+                let count = min(remaining, data.distance(from: cursor, to: data.endIndex))
+                let end = data.index(cursor, offsetBy: count)
+                metadata.append(contentsOf: data[cursor..<end]); remainingMetadata = remaining - count; cursor = end
+                if remaining == count {
                     if let title = Self.title(from: metadata) { updates.append(.init(audioOffset: audioOffset, title: title)) }
                     metadata.removeAll(keepingCapacity: true); remainingMetadata = nil; remainingAudio = interval
                 }
             } else {
-                let count = Int(byte) * 16
+                let count = Int(data[cursor]) * 16
+                cursor = data.index(after: cursor)
                 if count == 0 { remainingAudio = interval }
                 else { remainingMetadata = count }
             }

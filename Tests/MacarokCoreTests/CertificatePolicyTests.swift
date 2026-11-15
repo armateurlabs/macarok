@@ -5,6 +5,74 @@ import Darwin
 @testable import MacarokCore
 
 final class CertificatePolicyTests: XCTestCase {
+    func testDedicatedPlaybackChunksAndDownloadsShareExplicitCertificateTrust() async throws {
+        let fixture = try CertificateFixture(host: "localhost")
+        let server = try LocalTLSServer(certificate: fixture)
+        defer { server.stop() }
+        let suite = "MacarokTransferTLS.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CertificateTrustStore(defaults: defaults)
+        let probe = ApprovalProbe(accept: true)
+        let transport = SourceTransport(sourceID: "chunked", certificateStore: store, certificateApproval: { probe.record($0) })
+        defer { transport.invalidate() }
+        let received = try await playbackData(transport, from: server.url)
+        XCTAssertEqual(received.count, 262_144)
+        XCTAssertEqual(probe.count, 1)
+
+        let progress = TransferProgressProbe()
+        let destination = fixture.directory.appendingPathComponent("downloaded.flac")
+        let saved = try await transport.download(from: server.url, to: destination, progress: { progress.record($0, $1) })
+        XCTAssertEqual(saved, destination)
+        XCTAssertEqual(try Data(contentsOf: saved), received)
+        XCTAssertEqual(progress.last?.0, 262_144)
+        XCTAssertEqual(progress.last?.1, 262_144)
+        XCTAssertEqual(probe.count, 1, "The playback and download sessions must honor the same accepted leaf pin.")
+
+        let other = SourceTransport(sourceID: "other", certificateStore: store)
+        defer { other.invalidate() }
+        do { _ = try await playbackData(other, from: server.url); XCTFail("A separate playback session must retain source-specific certificate isolation.") }
+        catch { XCTAssertTrue(error is URLError) }
+    }
+
+    func testCancelledDownloadDoesNotReplaceAnExistingDestination() async throws {
+        let fixture = try CertificateFixture(host: "localhost")
+        let server = try LocalTLSServer(certificate: fixture)
+        defer { server.stop() }
+        let transport = SourceTransport(sourceID: UUID().uuidString, certificateApproval: { _ in true })
+        defer { transport.invalidate() }
+        let destination = fixture.directory.appendingPathComponent("kept.flac")
+        let original = Data("An existing download".utf8)
+        try original.write(to: destination)
+        let rejected = server.url.deletingLastPathComponent().appendingPathComponent("error.flac")
+        do { _ = try await transport.download(from: rejected, to: destination); XCTFail("HTTP error bodies must not replace audio files.") }
+        catch SourceNetworkError.httpStatus(let status) { XCTAssertEqual(status, 503) }
+        XCTAssertEqual(try Data(contentsOf: destination), original)
+        let progress = expectation(description: "The download received an initial chunk")
+        progress.assertForOverFulfill = false
+        let slow = server.url.deletingLastPathComponent().appendingPathComponent("slow.flac")
+        let download = Task { try await transport.download(from: slow, to: destination, progress: { _, _ in progress.fulfill() }) }
+        await fulfillment(of: [progress], timeout: 5)
+        download.cancel()
+        do { _ = try await download.value; XCTFail("Cancellation must not publish a complete download.") }
+        catch { XCTAssertTrue(error is CancellationError || (error as? URLError)?.code == .cancelled) }
+        XCTAssertEqual(try Data(contentsOf: destination), original)
+    }
+
+    private func playbackData(_ transport: SourceTransport, from url: URL) async throws -> Data {
+        let received = TransferDataProbe()
+        return try await withCheckedThrowingContinuation { continuation in
+            do {
+                let task = try transport.startPlaybackStream(for: URLRequest(url: url), onResponse: { _ in },
+                    onData: { received.append($0) }, onComplete: { error in
+                        if let error { continuation.resume(throwing: error) }
+                        else { continuation.resume(returning: received.data) }
+                    })
+                task.resume()
+            } catch { continuation.resume(throwing: error) }
+        }
+    }
+
     func testLiveHTTPSDataAndProgressiveBytesShareExplicitCertificateTrust() async throws {
         let fixture = try CertificateFixture(host: "localhost")
         let server = try LocalTLSServer(certificate: fixture)
@@ -125,6 +193,20 @@ final class CertificatePolicyTests: XCTestCase {
     }
 }
 
+private final class TransferDataProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes = Data()
+    var data: Data { lock.lock(); defer { lock.unlock() }; return bytes }
+    func append(_ data: Data) { lock.lock(); bytes.append(data); lock.unlock() }
+}
+
+private final class TransferProgressProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: (Int64, Int64?)?
+    var last: (Int64, Int64?)? { lock.lock(); defer { lock.unlock() }; return value }
+    func record(_ received: Int64, _ expected: Int64?) { lock.lock(); value = (received, expected); lock.unlock() }
+}
+
 private final class ApprovalProbe: @unchecked Sendable {
     let accept: Bool
     private let lock = NSLock()
@@ -214,7 +296,7 @@ private final class LocalTLSServer {
             def do_GET(self):
                 value = self.headers.get('Range', 'bytes=0-')
                 offset = int(value.split('=')[1].split('-')[0])
-                self.send_response(206 if 'Range' in self.headers else 200)
+                self.send_response(503 if self.path == '/error.flac' else 206 if 'Range' in self.headers else 200)
                 self.send_header('Content-Length', str(len(payload) - offset))
                 self.send_header('Accept-Ranges', 'bytes')
                 self.send_header('Content-Type', 'audio/flac')
@@ -222,7 +304,7 @@ private final class LocalTLSServer {
                     self.send_header('Content-Range', f'bytes {offset}-{len(payload)-1}/{len(payload)}')
                 self.end_headers()
                 for index in range(offset, len(payload), 65536):
-                    self.wfile.write(payload[index:index+65536]); self.wfile.flush(); time.sleep(0.02)
+                    self.wfile.write(payload[index:index+65536]); self.wfile.flush(); time.sleep(0.3 if self.path == '/slow.flac' else 0.02)
             def log_message(self, *args):
                 pass
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)

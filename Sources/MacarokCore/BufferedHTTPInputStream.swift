@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public struct StreamBufferSnapshot: Sendable {
     public let bufferedBytes: Int
@@ -7,6 +8,20 @@ public struct StreamBufferSnapshot: Sendable {
     public let offset: UInt64
     public let isBuffering: Bool
     public let isFinished: Bool
+    /// Only bytes currently retained and reusable, not a cumulative downloaded prefix.
+    public let retainedRanges: [Range<UInt64>]
+    public let capacityBytes: Int
+    public let underrunCount: Int
+    public let readerWaitDuration: TimeInterval
+
+    public init(bufferedBytes: Int, targetBytes: Int, totalBytes: Int64?, offset: UInt64,
+                isBuffering: Bool, isFinished: Bool, retainedRanges: [Range<UInt64>] = [],
+                capacityBytes: Int = 0, underrunCount: Int = 0, readerWaitDuration: TimeInterval = 0) {
+        self.bufferedBytes = bufferedBytes; self.targetBytes = targetBytes; self.totalBytes = totalBytes
+        self.offset = offset; self.isBuffering = isBuffering; self.isFinished = isFinished
+        self.retainedRanges = retainedRanges; self.capacityBytes = capacityBytes
+        self.underrunCount = underrunCount; self.readerWaitDuration = readerWaitDuration
+    }
 }
 
 /// A seekable byte stream for libVLC using the same transport and certificate policy as its source.
@@ -23,18 +38,21 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     private let fallbackCapacity: Int
     private var capacity: Int
     private var targetBytes = 128 * 1024
-    private var buffer = Data()
-    private var readCursor = 0
+    private let buffer = RetainedStreamBuffer()
     private var offset: UInt64 = 0
     private var generation = 0
     private var ended = false
     private var closed = false
     private var failure: Error?
-    private var producer: Task<Void, Never>?
+    private var producer: URLSessionDataTask?
     private var opened = false
     private var priming = true
     private var length: Int64?
     private var seekSupported: Bool?
+    private var hasRead = false
+    private var underruns = 0
+    private var readerWaitDuration: TimeInterval = 0
+    private let signposter = OSSignposter(subsystem: "labs.armateur.Macarok", category: "Playback HTTP")
 
     public init(url: URL, transport: SourceTransport, bufferBytes: Int = 4 * 1024 * 1024,
                 bufferSeconds: Double? = nil, durationHint: Double? = nil, live: Bool = false,
@@ -53,7 +71,9 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         condition.lock(); defer { condition.unlock() }
         return StreamBufferSnapshot(bufferedBytes: available, targetBytes: targetBytes,
             totalBytes: length, offset: offset, isBuffering: priming && !ended && !closed && failure == nil,
-            isFinished: ended && available == 0)
+            isFinished: ended && available == 0,
+            retainedRanges: buffer.count > 0 ? [buffer.startOffset..<buffer.endOffset] : [],
+            capacityBytes: capacity, underrunCount: underruns, readerWaitDuration: readerWaitDuration)
     }
 
     /// Nil until the server response establishes whether byte-range requests are supported.
@@ -62,7 +82,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         return closed ? false : seekSupported
     }
 
-    private var available: Int { buffer.count - readCursor }
+    private var available: Int { Int(buffer.endOffset - offset) }
 
     public override func open() {
         condition.lock()
@@ -77,7 +97,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         condition.lock()
         closed = true; generation += 1
         let task = producer; producer = nil
-        buffer.removeAll(); titleUpdates.removeAll(); readCursor = 0; condition.broadcast()
+        buffer.reset(at: offset); titleUpdates.removeAll(); condition.broadcast()
         condition.unlock()
         task?.cancel()
     }
@@ -106,26 +126,28 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         var titles: [String] = []
         defer { condition.unlock(); for title in titles { onTitle?(title) } }
         guard opened else { return -1 }
-        if available == 0 && !ended && failure == nil { priming = true }
-        while !closed && !ended && failure == nil && (available == 0 || (priming && available < targetBytes)) {
-            condition.wait()
+        if !closed && available == 0 && !ended && failure == nil {
+            priming = true
+            if hasRead { underruns += 1 }
+        }
+        if !closed && !ended && failure == nil && (available == 0 || (priming && available < targetBytes)) {
+            let interval = signposter.beginInterval("StreamBufferWait")
+            let began = ProcessInfo.processInfo.systemUptime
+            while !closed && !ended && failure == nil && (available == 0 || (priming && available < targetBytes)) {
+                condition.wait()
+            }
+            readerWaitDuration += ProcessInfo.processInfo.systemUptime - began
+            signposter.endInterval("StreamBufferWait", interval)
         }
         if closed { return 0 }
         if available == 0 { return failure == nil ? 0 : -1 }
-        priming = false
-        let count = min(len, available)
-        // Removing a consumed prefix can leave Data with a nonzero startIndex.
-        let start = buffer.index(buffer.startIndex, offsetBy: readCursor)
-        let end = buffer.index(start, offsetBy: count)
-        buffer.copyBytes(to: destination, from: start..<end)
-        readCursor += count
+        priming = false; hasRead = true
+        let count = buffer.read(into: destination, from: offset, maxLength: len)
         offset += UInt64(count)
         while let update = titleUpdates.first, update.audioOffset <= offset {
             titleUpdates.removeFirst()
             titles.append(update.title)
         }
-        if readCursor == buffer.count { buffer.removeAll(keepingCapacity: true); readCursor = 0 }
-        else if readCursor >= 1024 * 1024 { buffer.removeFirst(readCursor); readCursor = 0 }
         condition.broadcast()
         return count
     }
@@ -147,19 +169,18 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         guard !closed, opened, length.map({ newOffset <= UInt64($0) }) ?? true else { condition.unlock(); return false }
         if newOffset == offset { condition.unlock(); return true }
         if seekSupported == false { condition.unlock(); return false }
+        hasRead = false // A requested seek starts a new prime, not a spontaneous decoder underrun.
         // VLC often seeks around a nearby timestamp while decoding a compressed frame. Reuse those
         // retained bytes instead of cancelling a good request and waiting for another full prime.
-        let retainedStart = offset - UInt64(readCursor)
-        let retainedEnd = retainedStart + UInt64(buffer.count)
-        if newOffset >= retainedStart && newOffset < retainedEnd {
-            readCursor = Int(newOffset - retainedStart); offset = newOffset; priming = false
+        if buffer.contains(newOffset) {
+            offset = newOffset; priming = false
             condition.broadcast(); condition.unlock()
             return true
         }
         let oldProducer = producer
         producer = nil; generation += 1
         let current = generation
-        offset = newOffset; buffer.removeAll(keepingCapacity: true); readCursor = 0
+        offset = newOffset; buffer.reset(at: newOffset)
         ended = length.map { newOffset == UInt64($0) } ?? false
         failure = nil; priming = true
         let atEnd = ended
@@ -173,78 +194,80 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     public override func remove(from aRunLoop: RunLoop, forMode mode: RunLoop.Mode) {}
 
     private func begin(offset requestedOffset: UInt64, generation requestedGeneration: Int) {
-        let task = Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
-            do {
-                var request = URLRequest(url: self.remoteURL)
-                if !self.live { request.setValue("bytes=\(requestedOffset)-", forHTTPHeaderField: "Range") }
-                else {
-                    request.setValue("1", forHTTPHeaderField: "Icy-MetaData")
-                    request.setValue("Macarok/0.1 (macOS; https://github.com/armateurlabs/macarok)", forHTTPHeaderField: "User-Agent")
-                }
-                request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-                let (bytes, response) = try await self.transport.bytes(for: request)
-                defer { bytes.task.cancel() }
-                let expectedBytes = try self.acceptResponse(response, requestedOffset: requestedOffset, generation: requestedGeneration)
-                var decoder: ICYMetadataDecoder?
-                if self.live, let raw = response.value(forHTTPHeaderField: "icy-metaint") {
-                    guard let interval = Int(raw) else { throw RadioError.invalidResponse }
-                    decoder = try ICYMetadataDecoder(interval: interval)
-                }
-                var receivedBytes: UInt64 = 0
-                var chunk = Data(); chunk.reserveCapacity(64 * 1024)
-                for try await byte in bytes {
-                    try Task.checkCancellation()
-                    receivedBytes += 1
-                    if let expectedBytes, receivedBytes > expectedBytes { throw StreamFailure.invalidRange }
-                    chunk.append(byte)
-                    if chunk.count >= 64 * 1024 {
-                        let content = decoder?.consume(chunk) ?? (audio: chunk, updates: [])
-                        guard await self.enqueue(content.audio, updates: content.updates, task: bytes.task, generation: requestedGeneration) else { return }
-                        chunk.removeAll(keepingCapacity: true)
-                    }
-                }
-                if let expectedBytes, receivedBytes != expectedBytes { throw StreamFailure.truncatedResponse }
-                if !chunk.isEmpty {
-                    let content = decoder?.consume(chunk) ?? (audio: chunk, updates: [])
-                    _ = await self.enqueue(content.audio, updates: content.updates, task: bytes.task, generation: requestedGeneration)
-                }
-                self.finish(error: nil, generation: requestedGeneration)
-            } catch is CancellationError { }
-            catch { self.finish(error: error, generation: requestedGeneration) }
+        var request = URLRequest(url: remoteURL)
+        if !live { request.setValue("bytes=\(requestedOffset)-", forHTTPHeaderField: "Range") }
+        else {
+            request.setValue("1", forHTTPHeaderField: "Icy-MetaData")
+            request.setValue("Macarok/0.1 (macOS; https://github.com/armateurlabs/macarok)", forHTTPHeaderField: "User-Agent")
         }
-        condition.lock()
-        if generation == requestedGeneration && !closed { producer = task } else { task.cancel() }
-        condition.unlock()
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        let state = Producer(stream: self, offset: requestedOffset, generation: requestedGeneration)
+        do {
+            let task = try transport.startPlaybackStream(for: request,
+                onResponse: { try state.accept($0) }, onData: { try state.receive($0) }, onComplete: { state.complete($0) })
+            condition.lock()
+            if generation == requestedGeneration && !closed { producer = task; condition.unlock(); task.resume() }
+            else { condition.unlock(); task.cancel() }
+        } catch { finish(error: error, generation: requestedGeneration) }
     }
 
-    private enum EnqueueResult { case accepted, full, obsolete }
-
-    private func tryEnqueue(_ chunk: Data, updates: [ICYTitleUpdate], generation expected: Int) -> EnqueueResult {
-        condition.lock(); defer { condition.unlock() }
-        guard generation == expected && !closed else { return .obsolete }
-        guard available < capacity else { return .full }
-        if readCursor > 0 && buffer.count + chunk.count > capacity + 1024 * 1024 {
-            buffer.removeFirst(readCursor); readCursor = 0
+    /// These callbacks are serialized by the playback session, independently of Swift tasks and UI work.
+    private final class Producer: @unchecked Sendable {
+        private weak var stream: BufferedHTTPInputStream?
+        private let offset: UInt64
+        private let generation: Int
+        private var expectedBytes: UInt64?
+        private var receivedBytes: UInt64 = 0
+        private var decoder: ICYMetadataDecoder?
+        init(stream: BufferedHTTPInputStream, offset: UInt64, generation: Int) {
+            self.stream = stream; self.offset = offset; self.generation = generation
         }
-        buffer.append(chunk); condition.broadcast()
-        titleUpdates.append(contentsOf: updates)
-        // Bound metadata as well as audio, including broadcasts with unusually small ICY intervals.
-        if titleUpdates.count > 512 { titleUpdates.removeFirst(titleUpdates.count - 512) }
-        return .accepted
-    }
-
-    private func enqueue(_ chunk: Data, updates: [ICYTitleUpdate] = [], task: URLSessionTask, generation expected: Int) async -> Bool {
-        var suspended = false
-        defer { if suspended { task.resume() } }
-        while !Task.isCancelled {
-            switch tryEnqueue(chunk, updates: updates, generation: expected) {
-            case .accepted: return true
-            case .obsolete: return false
-            case .full:
-                if !suspended { task.suspend(); suspended = true }
-                do { try await Task.sleep(for: .milliseconds(20)) } catch { return false }
+        func accept(_ response: HTTPURLResponse) throws {
+            guard let stream else { throw CancellationError() }
+            expectedBytes = try stream.acceptResponse(response, requestedOffset: offset, generation: generation)
+            if stream.live, let raw = response.value(forHTTPHeaderField: "icy-metaint") {
+                guard let interval = Int(raw) else { throw RadioError.invalidResponse }
+                decoder = try ICYMetadataDecoder(interval: interval)
             }
+        }
+        func receive(_ data: Data) throws {
+            guard let stream else { throw CancellationError() }
+            receivedBytes += UInt64(data.count)
+            if let expectedBytes, receivedBytes > expectedBytes { throw StreamFailure.invalidRange }
+            // Bound chunk size even if URLSession coalesces several network reads into one callback.
+            var start = data.startIndex
+            while start < data.endIndex {
+                let end = data.index(start, offsetBy: min(64 * 1024, data.distance(from: start, to: data.endIndex)))
+                let chunk = start == data.startIndex && end == data.endIndex ? data : data.subdata(in: start..<end)
+                let content = decoder?.consume(chunk) ?? (audio: chunk, updates: [])
+                guard stream.enqueue(content.audio, updates: content.updates, generation: generation) else { throw CancellationError() }
+                start = end
+            }
+        }
+        func complete(_ error: Error?) {
+            guard let stream else { return }
+            let error = error ?? expectedBytes.flatMap { receivedBytes == $0 ? nil : StreamFailure.truncatedResponse }
+            stream.finish(error: error, generation: generation)
+        }
+    }
+
+    /// Wait only on the dedicated HTTP delegate thread. Decoder reads, seeks, and close wake it directly.
+    private func enqueue(_ chunk: Data, updates: [ICYTitleUpdate], generation expected: Int) -> Bool {
+        condition.lock()
+        let task = producer
+        var suspended = false
+        defer { condition.unlock(); if suspended { task?.resume() } }
+        while generation == expected && !closed && !ended && failure == nil {
+            buffer.makeSpace(for: chunk.count, before: offset, capacity: capacity)
+            if buffer.count + chunk.count <= capacity {
+                buffer.append(chunk)
+                titleUpdates.append(contentsOf: updates)
+                if titleUpdates.count > 512 { titleUpdates.removeFirst(titleUpdates.count - 512) }
+                condition.broadcast()
+                return true
+            }
+            if !suspended { task?.suspend(); suspended = true }
+            condition.wait()
         }
         return false
     }
@@ -252,7 +275,9 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     private func finish(error: Error?, generation expected: Int) {
         condition.lock(); defer { condition.unlock() }
         guard generation == expected && !closed else { return }
-        failure = error; ended = true; condition.broadcast()
+        failure = error; ended = true; producer = nil
+        if error != nil && priming { buffer.reset(at: offset) }
+        condition.broadcast()
     }
 
     private func acceptResponse(_ response: HTTPURLResponse, requestedOffset: UInt64, generation expected: Int) throws -> UInt64? {
