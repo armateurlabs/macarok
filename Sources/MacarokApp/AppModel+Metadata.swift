@@ -154,6 +154,7 @@ extension AppModel {
             }
             return updated
         }
+        queueMetadataOverrides.merge(updates, uniquingKeysWith: { _, latest in latest })
         for index in queue.indices {
             if let value = updates[queue[index].track.id] { queue[index].track = value }
         }
@@ -207,6 +208,11 @@ extension AppModel {
         }
         for index in queue.indices where updatedIDs.contains(queue[index].track.id) {
             queue[index].track.artworkPath = cached.path
+        }
+        for var target in targets where updatedIDs.contains(target.id) {
+            target.artworkPath = cached.path
+            target.metadataLocked = target.metadataLocked || !embedInFiles
+            queueMetadataOverrides[target.id] = target
         }
         reloadLibrary(); artworkRevision += 1
         status = source.kind == .local && embedInFiles ? "Album artwork embedded in \(Set(targets.compactMap(\.fileURL)).count) audio files." : "Album artwork saved to the library."

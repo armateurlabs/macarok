@@ -30,6 +30,12 @@ actor LibraryBackgroundWorker {
         try store.replaceSourceTracks(sourceID: sourceID, with: tracks)
     }
 
+    func updateRadioStation(store: LibraryStore, station: RadioStationRecord, generation: UUID) throws {
+        try requireCurrent(sourceID: station.sourceID, generation: generation)
+        guard try store.sources().contains(where: { $0.id == station.sourceID && $0.kind == .radio }) else { throw CancellationError() }
+        try store.saveRadioStation(station, favorite: true)
+    }
+
     func finishCatalog(store: LibraryStore, sourceID: String, generation: UUID,
                        activeIDs: Set<String>, incompleteKey: String) throws {
         try requireCurrent(sourceID: sourceID, generation: generation)

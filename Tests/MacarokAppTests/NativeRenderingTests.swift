@@ -35,6 +35,8 @@ final class NativeRenderingTests: XCTestCase {
         XCTAssertTrue(scan.warnings.isEmpty, scan.warnings.joined(separator: "\n"))
         try store.saveSource(source)
         try store.upsertTracks(scan.tracks)
+        try store.saveRadioStation(RadioStationRecord(id: "native-render-radio", name: "Macarok Demo Radio", streamURL: "https://radio.invalid/live.mp3",
+                                                     country: "France", language: "English", codec: "MP3", bitrate: 192, isFavorite: true))
 
         // Seed only the isolated index so Home has visible listening history.
         for (index, track) in scan.tracks.prefix(5).enumerated() {
@@ -46,11 +48,13 @@ final class NativeRenderingTests: XCTestCase {
         preferences.volume = 0
         let model = AppModel(store: store, preferences: preferences, registerSystemControls: false)
         await model.start()
+        model.scrobbling = ScrobblingController(store: store, credentials: NativePreviewLastFMKeys())
         let emptyStore = try LibraryStore(url: temporary.appendingPathComponent("empty.sqlite"))
         try emptyStore.saveSource(source)
         let emptyModel = AppModel(store: emptyStore, preferences: preferences, registerSystemControls: false)
         await emptyModel.start()
         model.sourceID = source.id
+        await model.waitForLibraryLoad()
         let cueAlbum = try XCTUnwrap(model.albums.first { $0.tracks.contains(where: \.isCUETrack) })
         XCTAssertEqual(cueAlbum.tracks.count, 3)
         let cueTrack = try XCTUnwrap(cueAlbum.tracks.dropFirst().first)
@@ -88,8 +92,26 @@ final class NativeRenderingTests: XCTestCase {
 
             try await render(SettingsView(model: model), size: NSSize(width: 650, height: 555), scheme: scheme,
                              destination: output.appendingPathComponent("settings-\(suffix).png"))
+            try await render(SettingsView(model: model, initialTab: .scrobbling), size: NSSize(width: 650, height: 555), scheme: scheme,
+                             destination: output.appendingPathComponent("settings-scrobbling-\(suffix).png"))
             try await render(MetadataEditor(model: model, track: cueTrack), size: NSSize(width: 680, height: 720), scheme: scheme,
                              destination: output.appendingPathComponent("metadata-editor-\(suffix).png"))
+            try await render(AddSourceSheet(model: model, initialKind: .bandcamp), size: NSSize(width: 790, height: 650), scheme: scheme,
+                             destination: output.appendingPathComponent("source-catalog-\(suffix).png"))
+            try await render(PodcastDiscoverySheet { _ in }, size: NSSize(width: 650, height: 590), scheme: scheme,
+                             destination: output.appendingPathComponent("podcast-discovery-\(suffix).png"))
+            for repeatMode in RepeatMode.allCases {
+                model.settings.repeatMode = repeatMode
+                try await render(QueuePane(model: model, player: model.player), size: NSSize(width: 270, height: 680), scheme: scheme,
+                                 destination: output.appendingPathComponent("playlist-\(repeatMode.rawValue)-\(suffix).png"))
+            }
+            model.libraryScope = .source(RadioLibrary.sourceID)
+            await model.waitForLibraryLoad()
+            model.contextPage = .home
+            try await render(MainWindow(model: model), size: NSSize(width: 1050, height: 680), scheme: scheme,
+                             destination: output.appendingPathComponent("radio-library-\(suffix).png"))
+            model.libraryScope = .source(source.id)
+            await model.waitForLibraryLoad()
         }
         let duplicateSource = SourceRecord(id: "native-render-secondary", kind: .openSubsonic, name: "Second Library", location: "https://music.invalid")
         try store.saveSource(duplicateSource)
@@ -198,4 +220,10 @@ final class NativeRenderingTests: XCTestCase {
         var expectedTracks: Int
         enum CodingKeys: String, CodingKey { case name; case expectedTracks = "expected_tracks" }
     }
+}
+
+private struct NativePreviewLastFMKeys: LastFMCredentialStorage {
+    func load() throws -> LastFMCredentialRecord? { nil }
+    func save(_ credentials: LastFMCredentialRecord) throws { }
+    func delete() throws { }
 }

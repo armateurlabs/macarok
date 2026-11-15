@@ -33,6 +33,12 @@ final class ClearPlaylistTests: XCTestCase {
         XCTAssertEqual(model.currentIndex, 0)
         XCTAssertEqual(model.player.state, .playing)
         XCTAssertEqual(model.player.position, position, accuracy: 0.001)
+        model.queueUndoManager.undo()
+        XCTAssertEqual(model.currentQueueID, current.id)
+        XCTAssertEqual(model.player.state, .playing)
+        model.queueUndoManager.redo()
+        XCTAssertEqual(model.queue, [current])
+        XCTAssertEqual(model.player.position, position, accuracy: 0.001)
         try await eventually(model) { model.player.position > position + 0.2 }
         await model.flushQueue()
         let saved = try XCTUnwrap(fixture.store.loadQueue())
@@ -42,7 +48,7 @@ final class ClearPlaylistTests: XCTestCase {
         XCTAssertNil(model.message)
     }
 
-    func testClearKeepsPausedTrackPositionAndAllowsResume() async throws {
+    func testClearEmptiesPausedQueueAndUndoParksItsResumePosition() async throws {
         let fixture = try makeFixture()
         defer { fixture.removeFiles() }
         let model = fixture.model
@@ -60,20 +66,25 @@ final class ClearPlaylistTests: XCTestCase {
 
         model.clearQueue()
 
-        XCTAssertEqual(model.queue, [current])
-        XCTAssertEqual(model.player.state, .paused)
-        XCTAssertEqual(model.player.position, position, accuracy: 0.001)
+        XCTAssertTrue(model.queue.isEmpty)
+        XCTAssertNil(model.currentQueueID)
+        XCTAssertEqual(model.player.state, .stopped)
+        model.queueUndoManager.undo()
+        XCTAssertEqual(model.queue.count, 3)
+        XCTAssertEqual(model.currentQueueID, current.id)
+        XCTAssertEqual(model.player.state, .stopped)
+        XCTAssertEqual(model.player.position, 0)
         await model.flushQueue()
         let saved = try XCTUnwrap(fixture.store.loadQueue())
-        XCTAssertEqual(saved.trackIDs, [fixture.track.id])
-        XCTAssertEqual(saved.currentIndex, 0)
+        XCTAssertEqual(saved.trackIDs, [fixture.other.id, fixture.track.id, fixture.other.id])
+        XCTAssertEqual(saved.currentIndex, 1)
         XCTAssertEqual(saved.position, position, accuracy: 0.001)
-        model.player.play()
+        model.togglePlayback()
         try await eventually(model) { model.player.state == .playing && model.player.position > position + 0.2 }
         XCTAssertNil(model.message)
     }
 
-    func testClearKeepsRestoredCurrentEntryAndItsResumePositionWithoutAutoplay() async throws {
+    func testClearEmptiesRestoredQueueAndUndoRestoresItsPositionWithoutAutoplay() async throws {
         let fixture = try makeFixture()
         defer { fixture.removeFiles() }
         try fixture.store.saveQueue(trackIDs: [fixture.track.id, fixture.other.id, fixture.track.id],
@@ -85,12 +96,18 @@ final class ClearPlaylistTests: XCTestCase {
         model.clearQueue()
         await model.flushQueue()
 
-        XCTAssertEqual(model.queue, [current])
+        XCTAssertTrue(model.queue.isEmpty)
+        XCTAssertNil(model.currentQueueID)
+        XCTAssertEqual(model.player.state, .stopped)
+        XCTAssertEqual(try fixture.store.loadQueue()?.position, 0)
+        model.queueUndoManager.undo()
+        await model.flushQueue()
+        XCTAssertEqual(model.queue.count, 3)
         XCTAssertEqual(model.currentQueueID, current.id)
         XCTAssertEqual(model.player.state, .stopped)
         let saved = try XCTUnwrap(fixture.store.loadQueue())
-        XCTAssertEqual(saved.trackIDs, [fixture.track.id])
-        XCTAssertEqual(saved.currentIndex, 0)
+        XCTAssertEqual(saved.trackIDs, [fixture.track.id, fixture.other.id, fixture.track.id])
+        XCTAssertEqual(saved.currentIndex, 2)
         XCTAssertEqual(saved.position, 7.25, accuracy: 0.001)
     }
 

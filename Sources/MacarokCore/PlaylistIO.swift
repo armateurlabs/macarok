@@ -8,19 +8,22 @@ public struct PlaylistEntry: Sendable, Equatable {
     public var endTime: Double?
     public var trackID: String?
     public var sourceID: String?
+    public var isLiveRadio: Bool
 
     public init(url: URL, title: String? = nil, duration: Double? = nil,
                 startTime: Double? = nil, endTime: Double? = nil,
-                trackID: String? = nil, sourceID: String? = nil) {
-        self.url = url; self.title = title; self.duration = duration
-        self.startTime = startTime; self.endTime = endTime
-        self.trackID = trackID; self.sourceID = sourceID
+                trackID: String? = nil, sourceID: String? = nil, isLiveRadio: Bool = false) {
+        let live = isLiveRadio || sourceID == RadioLibrary.sourceID
+        self.url = url; self.title = title; self.duration = live ? nil : duration
+        self.startTime = live ? nil : startTime; self.endTime = live ? nil : endTime
+        self.trackID = trackID; self.sourceID = sourceID; self.isLiveRadio = live
     }
 
-    public init(track: TrackRecord) {
+    public init(track: TrackRecord, isLiveRadio: Bool = false) {
+        let live = isLiveRadio || track.sourceID == RadioLibrary.sourceID
         let fallback = URL(string: "macarok://source/\(track.sourceID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? track.sourceID)/track/\(track.id)")!
-        self.init(url: track.url ?? fallback, title: "\(track.artist) - \(track.title)", duration: track.duration,
-                  startTime: track.startTime, endTime: track.endTime, trackID: track.id, sourceID: track.sourceID)
+        self.init(url: track.url ?? fallback, title: live ? track.title : "\(track.artist) - \(track.title)", duration: track.duration,
+                  startTime: track.startTime, endTime: track.endTime, trackID: track.id, sourceID: track.sourceID, isLiveRadio: live)
     }
 }
 
@@ -68,17 +71,18 @@ public enum PlaylistIO {
         case .m3u:
             var lines = ["#EXTM3U"]
             for entry in entries {
-                let duration = entry.duration.flatMap { $0.isFinite && $0 >= 0 ? String(Int($0)) : nil } ?? "-1"
+                let duration = entry.isLiveRadio ? "-1" : entry.duration.flatMap { $0.isFinite && $0 >= 0 ? String(Int($0)) : nil } ?? "-1"
                 lines.append("#EXTINF:\(duration),\(singleLine(entry.title ?? entry.url.deletingPathExtension().lastPathComponent))")
-                if let value = entry.startTime, value.isFinite, value >= 0 { lines.append("#EXTVLCOPT:start-time=\(value)") }
-                if let value = entry.endTime, value.isFinite, value >= 0 { lines.append("#EXTVLCOPT:stop-time=\(value)") }
+                if !entry.isLiveRadio, let value = entry.startTime, value.isFinite, value >= 0 { lines.append("#EXTVLCOPT:start-time=\(value)") }
+                if !entry.isLiveRadio, let value = entry.endTime, value.isFinite, value >= 0 { lines.append("#EXTVLCOPT:stop-time=\(value)") }
+                if entry.isLiveRadio { lines.append("#MACAROK-MEDIA-KIND:radio") }
                 if let value = entry.trackID { lines.append("#MACAROK-TRACK-ID:\(singleLine(value))") }
                 if let value = entry.sourceID { lines.append("#MACAROK-SOURCE-ID:\(singleLine(value))") }
                 lines.append(location(for: entry.url, relativeTo: playlistURL))
             }
             return lines.joined(separator: "\n") + "\n"
         case .pls:
-            guard !entries.contains(where: { $0.startTime != nil || $0.endTime != nil }) else {
+            guard !entries.contains(where: { !$0.isLiveRadio && ($0.startTime != nil || $0.endTime != nil) }) else {
                 throw PlaylistIOError.segmentsRequireM3U
             }
             var lines = ["[playlist]", "NumberOfEntries=\(entries.count)"]
@@ -86,9 +90,10 @@ public enum PlaylistIO {
                 let number = index + 1
                 lines.append("File\(number)=\(location(for: entry.url, relativeTo: playlistURL))")
                 lines.append("Title\(number)=\(singleLine(entry.title ?? entry.url.deletingPathExtension().lastPathComponent))")
-                lines.append("Length\(number)=\(entry.duration.flatMap { $0.isFinite && $0 >= 0 ? String(Int($0)) : nil } ?? "-1")")
-                if let value = entry.startTime, value.isFinite, value >= 0 { lines.append("StartTime\(number)=\(value)") }
-                if let value = entry.endTime, value.isFinite, value >= 0 { lines.append("EndTime\(number)=\(value)") }
+                lines.append("Length\(number)=\((entry.isLiveRadio ? nil : entry.duration).flatMap { $0.isFinite && $0 >= 0 ? String(Int($0)) : nil } ?? "-1")")
+                if !entry.isLiveRadio, let value = entry.startTime, value.isFinite, value >= 0 { lines.append("StartTime\(number)=\(value)") }
+                if !entry.isLiveRadio, let value = entry.endTime, value.isFinite, value >= 0 { lines.append("EndTime\(number)=\(value)") }
+                if entry.isLiveRadio { lines.append("MediaKind\(number)=radio") }
                 if let value = entry.trackID { lines.append("TrackID\(number)=\(singleLine(value))") }
                 if let value = entry.sourceID { lines.append("SourceID\(number)=\(singleLine(value))") }
             }
@@ -105,6 +110,7 @@ public enum PlaylistIO {
         var end: Double?
         var trackID: String?
         var sourceID: String?
+        var isLiveRadio = false
         for raw in text.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.isEmpty { continue }
@@ -116,12 +122,13 @@ public enum PlaylistIO {
             else if line.hasPrefix("#EXTVLCOPT:stop-time=") { end = validTime(String(line.dropFirst(21))) }
             else if line.hasPrefix("#MACAROK-TRACK-ID:") { trackID = String(line.dropFirst(18)) }
             else if line.hasPrefix("#MACAROK-SOURCE-ID:") { sourceID = String(line.dropFirst(19)) }
+            else if line == "#MACAROK-MEDIA-KIND:radio" { isLiveRadio = true }
             else if line.hasPrefix("#") { continue }
             else {
                 if let url = resolve(line, relativeTo: playlistURL) {
-                    result.append(.init(url: url, title: title, duration: duration, startTime: start, endTime: end, trackID: trackID, sourceID: sourceID))
+                    result.append(.init(url: url, title: title, duration: duration, startTime: start, endTime: end, trackID: trackID, sourceID: sourceID, isLiveRadio: isLiveRadio))
                 }
-                title = nil; duration = nil; start = nil; end = nil; trackID = nil; sourceID = nil
+                title = nil; duration = nil; start = nil; end = nil; trackID = nil; sourceID = nil; isLiveRadio = false
             }
         }
         return result
@@ -138,7 +145,7 @@ public enum PlaylistIO {
             guard let location = values["file\(index)"], let url = resolve(location, relativeTo: playlistURL) else { return nil }
             return .init(url: url, title: values["title\(index)"], duration: values["length\(index)"].flatMap(validTime),
                          startTime: values["starttime\(index)"].flatMap(validTime), endTime: values["endtime\(index)"].flatMap(validTime),
-                         trackID: values["trackid\(index)"], sourceID: values["sourceid\(index)"])
+                         trackID: values["trackid\(index)"], sourceID: values["sourceid\(index)"], isLiveRadio: values["mediakind\(index)"]?.lowercased() == "radio")
         }
     }
 

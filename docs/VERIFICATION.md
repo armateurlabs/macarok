@@ -2,7 +2,14 @@
 
 Baseline verified on 14 November 2026 with Xcode 27.1, Swift 6.4, and macOS 27.2.1 on Apple Silicon. Native empty-window layout follow-up verified on 15 November 2026.
 
+The completed-check records below describe their respective revisions. The current playback follow-up changes empty-queue double-click and paused/stopped Clear Playlist semantics; see [current product behavior](PRODUCT.md), [source setup](SOURCES.md), and [Last.fm setup](SCROBBLING.md).
+
 ## Completed checks
+
+- The playback, queue undo, scrobbling, radio, and podcast-discovery follow-up passed the complete suite on 15 November 2026: **255 tests, zero failures** — Core 118, Metadata 17, Audio 9, App 111. The run includes native Light/Dark component renders, all repeat modes at the minimum playlist width, interrupted imports, stale radio refreshes, live VLC playback, ICY framing, directory cancellation/rate limits, native undo routing, and injected Last.fm authorization/outbox tests. Logs: `.build/playback-final-test.log`.
+- An isolated Release app was exercised with silent synthetic files and a loopback M3U/ICY radio server. Empty-queue artist double-click started playback; arrows sought by five seconds and accepted held repeats. Native Edit → Undo restored Clear, AZERTY Command-Z and Shift-Command-Z undid/redid the queue, and text-field Undo changed only the text. Both repeat controls stayed synchronized. The window retained its central title and native controls without the old left application block.
+- The loopback radio displayed its broadcast title, closed its HTTP connection on pause, reconnected with a new request, and retained the queue entry with Reconnect after EOF. Requests contained `Icy-MetaData: 1` and no Range header. Settings showed personal Last.fm fields without making an authorization request. With the main window closed, Settings-owned Add Source subscribed to a redirected synthetic RSS feed; subscribing again kept one canonical source. All validation app instances and the loopback server were stopped afterward.
+- The final Release bundle passed `codesign --verify --deep --strict`. Its executable still declares macOS **14.0** as its minimum version. Updated component previews are checked into `design/native`; the Release build log is `.build/playback-release-build.log`. The existing public v0.1.0 release was not replaced.
 
 - The unified-library and synchronized-lyrics implementation passed the full suite on 15 November: **186 tests, zero failures** — Core 88, Metadata 17, Audio 8, App 73. A subsequent 13-test native UI/controller run passed after the final menu alignment and caption changes. Twenty-six isolated native renders cover both appearances, narrow/wide layouts, duplicate source names/albums, synchronized/empty lyrics, and Settings Sources. Gated tests exercise stale loads, serial partial refresh, local rescan queues, dialog-owned/late certificate approvals, and retained editor targets. File tests verify supported-codec tags, CUE sidecar boundaries, export reloads, audio preservation, and cache retention after partial writes.
 - The Release bundle was built and passed deep strict signature verification. A separately identified validation copy used an isolated SQLite directory and synthetic HTTPS server. With the main window closed, Settings → Sources successfully opened Add Source, presented its nested certificate prompt, accepted the test leaf, and created/indexed the source. A second connection rejected the certificate and was cancelled without adding another source. The validation app/server were stopped and their synthetic credentials removed afterward.
@@ -37,7 +44,7 @@ The Mac was locked during the initial automated run. On 15 November, the empty-w
 
 File pickers, drag/reorder, custom shortcut recording, and Mac media keys still need manual verification. The corresponding controller/transport paths have automated coverage. Artist/album double-clicks and Settings-owned certificate acceptance/rejection with the main window closed were exercised in the isolated validation app.
 
-Live MusicBrainz/AcoustID results and personal OpenSubsonic servers have not been verified. Metadata lookup protocol tests use fixtures; AcoustID requires your own application client key. Follow `TESTING.md` and `DEMO-SERVER.md` for a reproducible manual session with synthetic data.
+Live MusicBrainz/AcoustID results and personal OpenSubsonic servers have not been verified. Metadata lookup protocol tests use fixtures; AcoustID requires your own application client key. Live Bandcamp authentication, public podcast/radio directory availability, and personal Last.fm browser authorization/submission require separate manual checks; their automated paths use isolated fixtures. Last.fm requires personal API credentials and an explicitly authorized account. Follow `TESTING.md` and `DEMO-SERVER.md` for a reproducible manual session with synthetic data.
 
 ## Current boundaries
 
@@ -46,4 +53,6 @@ Live MusicBrainz/AcoustID results and personal OpenSubsonic servers have not bee
 - Recording fingerprint identification supports whole local files. Individual CUE tracks and remote streams use metadata search instead.
 - Servers that compress byte-range responses or cap an open-ended range before EOF fail explicitly; automatic stitching of such ranges is not implemented.
 - Gapless playback is optional. Crossfade, dedicated commercial-service connectors, and direct cloud-storage integration are outside this iteration. All Sources unifies presentation while retaining separate stored copies and origin references.
+- Internet radio supports direct HTTP/HTTPS streams and M3U/PLS wrappers; HLS is unsupported. Live radio has no seeking or saved resume offset and uses explicit reconnection after a disconnect. Radio remains outside music rankings and Last.fm scrobbling.
+- Qobuz, Deezer, and Spotify currently provide official information links only. Bandcamp uses its OpenSubsonic preset rather than a separate proprietary playback connector.
 - Release DMGs currently target Apple Silicon and macOS 14 or later. The application is ad-hoc signed without Apple notarization.

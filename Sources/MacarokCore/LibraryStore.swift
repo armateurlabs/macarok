@@ -123,6 +123,8 @@ public final class LibraryStore: @unchecked Sendable {
             try db.execute(sql: "ALTER TABLE tracks ADD COLUMN coverArtID TEXT")
         }
         LyricsCacheStorage.registerMigration(&migrator)
+        RadioStoreStorage.registerMigration(&migrator)
+        LastFMStoreStorage.registerMigration(&migrator)
         try migrator.migrate(database)
     }
 

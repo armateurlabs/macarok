@@ -30,11 +30,9 @@ struct MainWindow: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .background(QueueUndoHost(model: model).frame(width: 0, height: 0))
         .toolbar {
-            ToolbarItemGroup(placement: .navigation) {
-                Button { model.refresh() } label: { Image(systemName: "arrow.clockwise") }.help(model.isAllSources ? "Refresh all sources" : "Refresh selected source").disabled(model.sources.isEmpty || model.isRefreshing)
-            }
-            ToolbarItem(placement: .principal) { Text("Macarok").fontWeight(.semibold) }
+            ToolbarItem(placement: .principal) { Text("Macarok").font(.headline) }
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
                     Picker("Appearance", selection: $model.settings.appearance) { ForEach(Appearance.allCases) { Text($0.title).tag($0) } }
@@ -45,7 +43,7 @@ struct MainWindow: View {
         .sheet(isPresented: Binding(get: { model.addSourcePresenter == .mainWindow }, set: { if !$0 && model.addSourcePresenter == .mainWindow { model.addSourcePresenter = nil } })) { AddSourceSheet(model: model) }
         .sheet(item: $model.editingTrack) { MetadataEditor(model: model, track: $0) }
         .sheet(item: $model.artworkTrack) { ArtworkChooser(model: model, track: $0) }
-        .sheet(isPresented: Binding(get: { model.addSourcePresenter == nil && !model.certificatePrompts.isEmpty }, set: { if !$0 && model.addSourcePresenter == nil { model.answerCertificate(false) } })) {
+        .sheet(isPresented: Binding(get: { model.addSourcePresenter == nil && !model.radioDiscoveryOwnsCertificates && !model.certificatePrompts.isEmpty }, set: { if !$0 && model.addSourcePresenter == nil && !model.radioDiscoveryOwnsCertificates { model.answerCertificate(false) } })) {
             if let prompt = model.certificatePrompts.first { CertificateSheet(prompt: prompt, answer: model.answerCertificate) }
         }
         .alert(item: $model.message) { Alert(title: Text($0.title), message: Text($0.detail), dismissButton: .default(Text("OK"))) }
@@ -66,7 +64,7 @@ struct TransportBar: View {
         HStack(spacing: 24) {
             HStack(spacing: 12) {
                 Button(action: model.previous) { Image(systemName: "backward.end.fill") }.help("Previous track")
-                Button(action: model.togglePlayback) { Image(systemName: player.state == .playing ? "pause.fill" : "play.fill").font(.system(size: 19)).frame(width: 34, height: 34) }
+                Button(action: model.togglePlayback) { Image(systemName: [.playing, .opening, .buffering].contains(player.state) || model.playbackIntentQueueID != nil ? "pause.fill" : "play.fill").font(.system(size: 19)).frame(width: 34, height: 34) }
                     .buttonStyle(.bordered).clipShape(Circle()).help("Play / Pause (Space)")
                 Button { model.advance() } label: { Image(systemName: "forward.end.fill") }.help("Next track")
             }.buttonStyle(.borderless).disabled(model.queue.isEmpty && model.selectedTrack == nil)
@@ -78,14 +76,24 @@ struct TransportBar: View {
                         Spacer()
                         Text(track.artist).foregroundStyle(.secondary).lineLimit(1)
                     }.font(.system(size: 12))
+                    if model.currentIsRadio {
+                        HStack(spacing: 7) {
+                            Circle().fill(model.radioDisconnected || player.state == .paused ? Color.secondary : .red).frame(width: 5, height: 5)
+                            Text(model.radioDisconnected ? "DISCONNECTED" : player.state == .paused ? "PAUSED" : "LIVE").fontWeight(.semibold)
+                            Text(model.radioBroadcastTitle ?? "Internet Radio").foregroundStyle(.secondary).lineLimit(1)
+                            Spacer(minLength: 0)
+                            if model.radioDisconnected { Button("Reconnect", action: model.reconnectRadio).buttonStyle(.link) }
+                        }.font(.system(size: 10))
+                    } else {
                     HStack(spacing: 8) {
                         Text((dragging ? seekPosition : player.position).playbackTime).frame(width: 43, alignment: .trailing)
                         Slider(value: Binding(get: { dragging ? seekPosition : min(player.position, max(1, player.duration)) }, set: { seekPosition = $0 }), in: 0...max(1, player.duration > 0 ? player.duration : track.duration), onEditingChanged: { editing in
                             if editing { seekPosition = player.position; dragging = true }
-                            else { player.seek(to: seekPosition); dragging = false }
+                            else { model.seekPlayback(to: seekPosition); dragging = false }
                         }).controlSize(.mini).disabled(!player.isSeekable)
                         Text((player.duration > 0 ? player.duration : track.duration).playbackTime).frame(width: 43, alignment: .leading)
                     }.font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
+                    }
                 }
             } else {
                 VStack(alignment: .leading, spacing: 4) { Text("Nothing playing").fontWeight(.medium); Text("Find something in your library and add it to the playlist.").foregroundStyle(.secondary) }.font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
@@ -107,13 +115,10 @@ struct QueuePane: View {
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader {
-                Text("Active Playlist").fontWeight(.semibold)
-                Text("\(model.queue.count)").foregroundStyle(.secondary)
-                Spacer(minLength: 5)
-                Button(action: model.shuffleQueue) { Image(systemName: "shuffle") }.help("Shuffle playlist").disabled(model.queue.count < 2)
-                Button(action: model.cycleRepeat) { Image(systemName: model.settings.repeatMode.symbol).frame(width: 23, height: 23).background(model.settings.repeatMode == .none ? Color.clear : Color.accentColor.opacity(0.17), in: RoundedRectangle(cornerRadius: 5)).foregroundStyle(model.settings.repeatMode == .none ? Color.secondary : Color.accentColor) }
-                    .help("Repeat: \(model.settings.repeatMode.title) · Next: \(model.settings.repeatMode.next.title)").accessibilityLabel("Repeat: \(model.settings.repeatMode.title)")
-                Menu { Button("Save Playlist…") { model.savePlaylist() }; Button("Export Playlist…") { model.exportPlaylist() }; Divider(); Button("Clear Playlist", role: .destructive, action: model.clearQueue) } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
+                Text("Active Playlist").fontWeight(.semibold).lineLimit(1)
+                Text("\(model.queue.count)").foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 0)
+                PlaylistControls(model: model, location: "top")
             }.accessibilityIdentifier("playlistPanelHeader")
             if model.queue.isEmpty {
                 ContentUnavailableView { Label("Your playlist is empty", systemImage: "music.note.list") } description: { Text("Double-click a library track to add it here.") }
@@ -132,7 +137,8 @@ struct QueuePane: View {
                                 SourceBadge(model: model, sourceID: item.track.sourceID)
                             }
                             Spacer(minLength: 3)
-                            Text(item.track.formattedDuration).font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
+                            Text(model.isRadioTrack(item.track) ? "LIVE" : item.track.formattedDuration)
+                                .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
                         }.font(.system(size: 12)).padding(.vertical, 4).contentShape(Rectangle()).tag(item.id)
                             .onTapGesture(count: 2) { model.playQueueItem(item.id) }
                             .contextMenu { Button("Play Now") { model.playQueueItem(item.id) }; Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }; Divider(); Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } } }
@@ -141,8 +147,40 @@ struct QueuePane: View {
                 .onDeleteCommand { if let id = model.selectedQueueID, let index = model.queue.firstIndex(where: { $0.id == id }) { model.removeQueue(IndexSet(integer: index)) } }
             }
             Divider()
-            HStack { Image(systemName: "cursorarrow.click.2"); Text("Double-click a track to play"); Spacer() }.font(.system(size: 10)).foregroundStyle(.secondary).padding(10)
+            HStack { Spacer(minLength: 0); PlaylistControls(model: model, location: "bottom") }
+                .padding(.horizontal, 13).frame(height: 42).background(.bar)
+                .accessibilityIdentifier("playlistPanelFooter")
         }
+    }
+}
+
+struct PlaylistControls: View {
+    @Bindable var model: AppModel
+    let location: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Button(action: model.shuffleQueue) { Image(systemName: "shuffle").frame(width: 22, height: 23) }
+                .help("Shuffle playlist").accessibilityLabel("Shuffle playlist")
+                .accessibilityIdentifier("playlistShuffle-\(location)").disabled(model.queue.count < 2)
+            Button(action: model.cycleRepeat) {
+                Image(systemName: model.settings.repeatMode.symbol).frame(width: 22, height: 23)
+                    .background(model.settings.repeatMode == .none ? Color.clear : Color.accentColor.opacity(0.17), in: RoundedRectangle(cornerRadius: 5))
+                    .foregroundStyle(model.settings.repeatMode == .none ? Color.secondary : Color.accentColor)
+            }
+            .help("Repeat: \(model.settings.repeatMode.title) · Next: \(model.settings.repeatMode.next.title)")
+            .accessibilityLabel("Repeat: \(model.settings.repeatMode.title)").accessibilityIdentifier("playlistRepeat-\(location)")
+            Button(action: model.clearQueue) { Image(systemName: "trash").frame(width: 22, height: 23) }
+                .help("Clear playlist").accessibilityLabel("Clear playlist")
+                .accessibilityIdentifier("playlistClear-\(location)").disabled(model.queue.isEmpty)
+            Menu {
+                Button("Save Playlist…", action: model.savePlaylist).disabled(model.queue.isEmpty)
+                Button("Export Playlist…", action: model.exportPlaylist).disabled(model.queue.isEmpty)
+            } label: { Image(systemName: "ellipsis").frame(width: 22, height: 23) }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("Playlist actions").accessibilityLabel("Playlist actions").accessibilityIdentifier("playlistMore-\(location)")
+        }
+        .font(.system(size: 12)).buttonStyle(.borderless).fixedSize().layoutPriority(1)
     }
 }
 

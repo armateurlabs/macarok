@@ -68,11 +68,12 @@ struct LibrarySnapshot: Sendable {
     let folderNodes: [FolderNode]
     let tracksByFolder: [String: [TrackRecord]]
     let folderTitles: [String: String]
+    let stations: [TrackRecord]
 
     static let empty = LibrarySnapshot(scope: nil, tracks: [], tracksByID: [:], albums: [], albumsByID: [:],
                                        artists: [], artistsByName: [:], yearGroups: [], genreGroups: [], formatGroups: [],
                                        recentlyAdded: [], mostPlayedAlbums: [], recentlyPlayed: [], mostPlayedTracks: [],
-                                       mostPlayedArtists: [], folderNodes: [], tracksByFolder: [:], folderTitles: [:])
+                                       mostPlayedArtists: [], folderNodes: [], tracksByFolder: [:], folderTitles: [:], stations: [])
 
     static func build(sourceID: String, tracks: [TrackRecord], sources: [SourceRecord]) throws -> LibrarySnapshot {
         try build(scope: .source(sourceID), tracks: tracks, sources: sources)
@@ -82,29 +83,33 @@ struct LibrarySnapshot: Sendable {
         try Task.checkCancellation()
         let visibleSources = sources.filter { scope.includes(sourceID: $0.id) }
         let registeredIDs = Set(visibleSources.map(\.id))
+        let radioIDs = Set(visibleSources.filter { $0.kind == .radio }.map(\.id))
+        let musicSources = visibleSources.filter { $0.kind != .radio }
         var seen: Set<String> = []
         var tracks: [TrackRecord] = []
+        var stations: [TrackRecord] = []
         tracks.reserveCapacity(input.count)
         for (index, track) in input.enumerated() {
             if index.isMultiple(of: 256) { try Task.checkCancellation() }
             guard scope.includes(sourceID: track.sourceID), registeredIDs.contains(track.sourceID),
                   track.isAvailable, seen.insert(track.id).inserted else { continue }
-            tracks.append(track)
+            if radioIDs.contains(track.sourceID) { stations.append(track) }
+            else { tracks.append(track) }
         }
         tracks = try tracks.sorted { try Task.checkCancellation(); return TrackRecord.libraryOrder($0, $1) }
 
-        var tracksByID: [String: TrackRecord] = [:]
+        var tracksByID = Dictionary(uniqueKeysWithValues: stations.map { ($0.id, $0) })
         var albumTracks: [LibraryAlbumKey: [TrackRecord]] = [:]
         var genres: [String: [TrackRecord]] = [:]
         var formats: [String: [TrackRecord]] = [:]
         var tracksByFolder: [String: [TrackRecord]] = ["": tracks]
         var folderNames: [String: String] = [:]
         var childFolders: [String: [String]] = [:]
-        let resolver = LibraryFolderPathResolver(sources: visibleSources)
+        let resolver = LibraryFolderPathResolver(sources: musicSources)
         let allSources = scope == .all
-        let sourceRootIDs = Dictionary(uniqueKeysWithValues: visibleSources.map { ($0.id, "source:" + StableID.make($0.id)) })
+        let sourceRootIDs = Dictionary(uniqueKeysWithValues: musicSources.map { ($0.id, "source:" + StableID.make($0.id)) })
         func rootKey(_ sourceID: String) -> String { allSources ? sourceRootIDs[sourceID, default: ""] : "" }
-        for source in visibleSources {
+        for source in musicSources {
             let root = rootKey(source.id)
             folderNames[root] = source.name
             if allSources { tracksByFolder[root] = [] }
@@ -172,9 +177,9 @@ struct LibrarySnapshot: Sendable {
         }
         let folderNodes: [FolderNode]
         if allSources {
-            folderNodes = try visibleSources.map { try folder(rootKey($0.id), name: $0.name) }
+            folderNodes = try musicSources.map { try folder(rootKey($0.id), name: $0.name) }
         } else {
-            folderNodes = [try folder("", name: visibleSources.first?.name ?? "Music")]
+            folderNodes = musicSources.isEmpty ? [] : [try folder("", name: musicSources.first?.name ?? "Music")]
         }
         let recentlyAdded = Array(albums.sorted { $0.addedAt == $1.addedAt ? albumOrder($0, $1) : $0.addedAt > $1.addedAt }.prefix(8))
         let mostPlayedAlbums = Array(albums.filter { $0.playCount > 0 }.sorted {
@@ -195,7 +200,7 @@ struct LibrarySnapshot: Sendable {
                                genreGroups: trackGroups(genres), formatGroups: trackGroups(formats), recentlyAdded: recentlyAdded,
                                mostPlayedAlbums: mostPlayedAlbums, recentlyPlayed: recentlyPlayed, mostPlayedTracks: mostPlayedTracks,
                                mostPlayedArtists: mostPlayedArtists, folderNodes: folderNodes, tracksByFolder: tracksByFolder,
-                               folderTitles: folderNames)
+                               folderTitles: folderNames, stations: stations.sorted { stringOrder($0.title, $1.title) })
     }
 
     private static func trackGroups(_ groups: [String: [TrackRecord]]) -> [LibraryTrackGroup] {

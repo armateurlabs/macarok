@@ -33,8 +33,8 @@ struct LyricsPane: View {
                             .font(.system(size: 12))
                     }
                     HStack(spacing: 8) {
-                        Button("Find Lyrics…", action: controller.openSearch)
-                        Button("Edit / Paste…", action: controller.openEditor)
+                        Button("Find Lyrics…", action: controller.openSearch).disabled(controller.isLiveRadio)
+                        Button("Edit / Paste…", action: controller.openEditor).disabled(controller.isLiveRadio)
                         Button("Save to Files") { Task { await controller.saveToFiles() } }
                             .disabled(!controller.canSaveToFiles || controller.isSavingToFiles)
                         if controller.isSavingToFiles { ProgressView().controlSize(.mini) }
@@ -96,8 +96,10 @@ struct LyricsPane: View {
             } description: {
                 Text(controller.errorMessage ?? "Lyrics could not be loaded. Try again or search manually.")
             } actions: {
-                Button("Try Again") { Task { await controller.reload() } }
-                Button("Find Lyrics…", action: controller.openSearch)
+                if !controller.isLiveRadio {
+                    Button("Try Again") { Task { await controller.reload() } }
+                    Button("Find Lyrics…", action: controller.openSearch)
+                }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

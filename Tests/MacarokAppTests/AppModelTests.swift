@@ -265,6 +265,31 @@ final class AppModelTests: XCTestCase {
         await expectEventually { !fixture.model.isRefreshing }
     }
 
+    func testStopRefreshCancelsQueuedWatcherFollowUp() async throws {
+        let gate = ScanGate()
+        let fixture = try makeFixture(localScan: { source, progress in
+            await gate.enter()
+            return try await LibraryScanner().scan(source: source, metadataReader: { _ in AudioFileMetadata() }, progress: progress)
+        })
+        defer { fixture.removeFiles() }
+        await fixture.model.start()
+        fixture.model.sourceID = fixture.local.id
+        fixture.model.refresh()
+        let started = await gate.waitForCalls(1)
+        XCTAssertTrue(started)
+        fixture.model.requestRescan(sourceID: fixture.local.id)
+        fixture.model.toggleRefresh()
+        XCTAssertTrue(fixture.model.isStoppingRefresh)
+        fixture.model.requestRescan(sourceID: fixture.local.id)
+        await gate.release(0)
+        await expectEventually { !fixture.model.isRefreshing }
+        try await Task.sleep(for: .milliseconds(100))
+        let calls = await gate.callCount
+        XCTAssertEqual(calls, 1)
+        XCTAssertFalse(fixture.model.isStoppingRefresh)
+        XCTAssertNil(fixture.model.message)
+    }
+
     func testDisabledShortcutDiffersFromDefaultAndCanBeRestored() async throws {
         let fixture = try makeFixture()
         defer { fixture.removeFiles() }
@@ -364,6 +389,7 @@ final class AppModelTests: XCTestCase {
 }
 
 private actor ScanGate {
+    var callCount: Int { continuations.count }
     private var continuations: [CheckedContinuation<Void, Never>?] = []
     func enter() async { await withCheckedContinuation { continuations.append($0) } }
     func release(_ index: Int) { if continuations.indices.contains(index) { continuations[index]?.resume(); continuations[index] = nil } }

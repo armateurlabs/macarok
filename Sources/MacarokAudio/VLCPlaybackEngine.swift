@@ -38,6 +38,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     private var explicitlyStopped = false
     private var pendingSeek: Double?
     private var timelineTimer: Timer?
+    private var live = false
 
     public override init() { super.init() }
     deinit { timelineTimer?.invalidate() }
@@ -50,14 +51,15 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         segmentEnd: Double? = nil,
         bufferSeconds: Double? = nil,
         durationHint: Double? = nil,
-        autoplay: Bool = true
+        autoplay: Bool = true,
+        live: Bool = false
     ) {
         guard let media = VLCMedia(url: url) else {
             reportError("The audio resource could not be opened.")
             return
         }
         install(media: media, stream: nil, segmentStart: segmentStart, segmentEnd: segmentEnd,
-                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay)
+                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay, live: live)
     }
 
     /// The caller may supply a seekable stream backed by the shared source transport.
@@ -68,14 +70,15 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         segmentEnd: Double? = nil,
         bufferSeconds: Double? = nil,
         durationHint: Double? = nil,
-        autoplay: Bool = true
+        autoplay: Bool = true,
+        live: Bool = false
     ) {
         guard let media = VLCMedia(stream: stream) else {
             reportError("The audio stream could not be opened.")
             return
         }
         install(media: media, stream: stream, segmentStart: segmentStart, segmentEnd: segmentEnd,
-                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay)
+                bufferSeconds: bufferSeconds, durationHint: durationHint, autoplay: autoplay, live: live)
     }
 
     public func play() {
@@ -92,6 +95,13 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     public func pause() { player?.pause() }
 
+    /// A live source resumes by installing a new connection, rather than retaining old broadcast audio.
+    public func pauseLive() {
+        stopTimelineUpdates(); generation = UUID(); explicitlyStopped = true
+        heldStream?.close(); heldStream = nil; player?.delegate = nil; player?.stop()
+        pendingSeek = nil; state = .paused; position = 0; duration = 0; isSeekable = false
+    }
+
     public func togglePlayPause() {
         if isPlaying { pause() } else { play() }
     }
@@ -107,7 +117,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     }
 
     public func seek(to seconds: Double) {
-        guard let player, seconds.isFinite else { return }
+        guard !live, let player, seconds.isFinite else { return }
         let target = max(0, duration > 0 ? min(seconds, duration) : seconds)
         guard player.isSeekable else {
             pendingSeek = target
@@ -121,13 +131,14 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     private func install(
         media: VLCMedia, stream: InputStream?, segmentStart: Double, segmentEnd: Double?,
-        bufferSeconds: Double?, durationHint: Double?, autoplay: Bool
+        bufferSeconds: Double?, durationHint: Double?, autoplay: Bool, live: Bool
     ) {
         stopTimelineUpdates()
         generation = UUID()
         player?.delegate = nil
         player?.stop()
         heldStream = stream
+        self.live = live
         self.segmentStart = max(0, segmentStart.isFinite ? segmentStart : 0)
         self.segmentEnd = segmentEnd.flatMap { $0.isFinite && $0 > self.segmentStart ? $0 : nil }
         self.durationHint = durationHint.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
@@ -223,7 +234,8 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         if let end = segmentEnd { duration = end - segmentStart }
         else if sourceDuration > 0 { duration = max(0, sourceDuration - segmentStart) }
         else if let durationHint { duration = durationHint }
-        isSeekable = player.isSeekable
+        isSeekable = !live && player.isSeekable
+        if live { duration = 0 }
         if let target = pendingSeek {
             if isSeekable {
                 pendingSeek = nil

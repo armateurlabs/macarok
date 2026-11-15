@@ -60,6 +60,7 @@ final class AppModel {
             searchTask?.cancel(); searchTask = nil; searchRequestID = UUID(); searchNeedsReload = false; isSearching = false
             if !Set(oldValue.map(\.id)).subtracting(sources.map(\.id)).isEmpty {
                 catalog = .empty; searchCatalog = .empty; libraryRevision &+= 1
+                queueUndoManager.removeAllActions()
             }
             if libraryScope != nil { reloadLibrary(); watchSelectedSource() }
         }
@@ -95,10 +96,12 @@ final class AppModel {
     var selectedArtist: String?
     var selectedFolder: String?
     var queue: [QueueItem] = []
+    @ObservationIgnored var queueMetadataOverrides: [String: TrackRecord] = [:]
     var currentQueueID: UUID?
     var selectedQueueID: UUID?
     var playlists: [PlaylistRecord] = []
     var isRefreshing = false
+    var isStoppingRefresh = false
     var refreshProgress = ""
     var status = "Add a music folder or connect a source to get started."
     var message: AppMessage?
@@ -125,6 +128,11 @@ final class AppModel {
     var artworkRevision = 0
     var streamingBufferFraction: Double?
     var scanWarnings: [String] = []
+    var radio: RadioController?
+    var scrobbling: ScrobblingController?
+    var radioBroadcastTitle: String?
+    var radioDisconnected = false
+    var radioDiscoveryOwnsCertificates = false
     @ObservationIgnored var store: LibraryStore?
     @ObservationIgnored private var started = false
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
@@ -147,8 +155,15 @@ final class AppModel {
     @ObservationIgnored private var queueSaveRevision = 0
     @ObservationIgnored private var remoteCatalogProgress: RemoteCatalogProgress?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
-    @ObservationIgnored private var playbackTask: Task<Void, Never>?
-    @ObservationIgnored private var activeStream: BufferedHTTPInputStream?
+    @ObservationIgnored var playbackTask: Task<Void, Never>?
+    @ObservationIgnored var activeStream: BufferedHTTPInputStream?
+    @ObservationIgnored var playbackGeneration = UUID()
+    @ObservationIgnored var playbackIntentQueueID: UUID?
+    @ObservationIgnored private let queueUndoController = QueueUndoController()
+    @ObservationIgnored weak var mainPlayerWindow: NSWindow?
+    @ObservationIgnored private var arrowKeys = PlaybackArrowKeys()
+    var queueUndoManager: UndoManager { queueUndoController.manager }
+    @ObservationIgnored lazy var queueUndoPresentation = QueueUndoPresentation(model: self)
     @ObservationIgnored private var monitors: [Any] = []
     @ObservationIgnored private var tick: AnyCancellable?
     @ObservationIgnored private var eventSubscriptions: Set<AnyCancellable> = []
@@ -159,7 +174,7 @@ final class AppModel {
     @ObservationIgnored private var artworkTasks: Set<String> = []
     @ObservationIgnored private var heardSeconds: Double = 0
     @ObservationIgnored private var playRecorded = false
-    @ObservationIgnored private var restorePosition: Double = 0
+    @ObservationIgnored var restorePosition: Double = 0
     @ObservationIgnored private var lastSavedTick = 0
     @ObservationIgnored private var directoryWatchers: [String: DirectoryWatcher] = [:]
     @ObservationIgnored private var rescanTasks: [String: Task<Void, Never>] = [:]
@@ -249,6 +264,10 @@ final class AppModel {
                 return (sources: sources, playlists: try store.playlists(), queue: snapshot, restored: restored, incomplete: incomplete)
             }
             sources = initial.sources
+            radio = RadioController(model: self)
+            if let store { scrobbling = ScrobblingController(store: store) }
+            await radio?.reload()
+            if registerSystemControls { await scrobbling?.start() }
             let previous = selectionDefaults.string(forKey: "Macarok.selectedSource")
             let savedScope = savesLibrarySelection ? selectionDefaults.data(forKey: "Macarok.libraryScope").flatMap { try? JSONDecoder().decode(LibraryScope.self, from: $0) } : nil
             if !sources.isEmpty, let savedScope, savedScope == .all || sources.contains(where: { $0.id == savedScope.sourceID }) {
@@ -259,14 +278,32 @@ final class AppModel {
                 let restored = initial.restored.map { (originalIndex: $0.0, item: QueueItem(track: $0.1)) }
                 queue = restored.map(\.item)
                 if let current = restored.first(where: { $0.originalIndex == snapshot.currentIndex }) {
-                    currentQueueID = current.item.id; restorePosition = snapshot.position
+                    currentQueueID = current.item.id; restorePosition = isRadioTrack(current.item.track) ? 0 : snapshot.position
                 } else {
                     currentQueueID = restored.first(where: { $0.originalIndex > snapshot.currentIndex })?.item.id ?? restored.last?.item.id
                 }
             }
             player.volume = settings.volume
-            player.onCompletion = { [weak self] in self?.advance(manual: false) }
-            player.onError = { [weak self] error in self?.fail("Playback failed", error) }
+            player.onCompletion = { [weak self] in
+                guard let self else { return }
+                if self.currentIsRadio { self.radioDisconnected = true; self.playbackIntentQueueID = nil; self.activeStream?.close(); self.activeStream = nil; self.status = "Radio disconnected. Reconnect to listen live." }
+                else { self.advance(manual: false) }
+            }
+            player.onError = { [weak self] error in
+                guard let self else { return }
+                self.playbackIntentQueueID = nil
+                if self.currentIsRadio { self.radioDisconnected = true; self.activeStream?.close(); self.activeStream = nil; self.status = "Radio disconnected. Reconnect to listen live." }
+                else { self.fail("Playback failed", error) }
+            }
+            player.$state.sink { [weak self] state in
+                guard let self else { return }
+                self.scrobbling?.update(isPlaying: state == .playing, isBuffering: state == .buffering || self.activeStream?.snapshot.isBuffering == true,
+                                        position: self.player.position, duration: self.player.duration)
+                if [.paused, .stopped, .failed].contains(state) { self.resetArrowSeek() }
+                if state == .paused || state == .failed { self.playbackIntentQueueID = nil }
+            }.store(in: &eventSubscriptions)
+            NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
+                .sink { [weak self] _ in self?.scrobbling?.suspend(); self?.resetArrowSeek() }.store(in: &eventSubscriptions)
             if registerSystemControls {
                 configureControls()
                 tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.playbackTick() }
@@ -335,6 +372,9 @@ final class AppModel {
     }
 
     private func updateQueuedMetadata(from snapshot: LibrarySnapshot) {
+        for id in queueMetadataOverrides.keys {
+            if let updated = snapshot.tracksByID[id] { queueMetadataOverrides[id] = updated }
+        }
         for index in queue.indices {
             if let updated = snapshot.tracksByID[queue[index].track.id], queue[index].track != updated {
                 queue[index].track = updated
@@ -396,47 +436,122 @@ final class AppModel {
         inspect(track)
     }
 
+    private func queueEditState() -> QueueEditState {
+        QueueEditState(items: queue, currentID: currentQueueID, selectionID: selectedQueueID,
+                       resumePosition: player.position > 0 ? player.position : restorePosition)
+    }
+
+    private func registerQueueEdit(_ before: QueueEditState, name: String) {
+        guard before.items != queue else { return }
+        for item in before.items where queueMetadataOverrides[item.track.id] == nil {
+            queueMetadataOverrides[item.track.id] = item.track
+        }
+        queueUndoController.register(model: self, state: before, name: name)
+    }
+
+    func restoreQueueEdit(_ state: QueueEditState, name: String) {
+        let inverse = queueEditState()
+        let liveSession = playbackTask != nil || [.playing, .paused, .opening, .buffering].contains(player.state)
+        let current = currentQueueID
+        let currentMetadata = Dictionary(queue.map { ($0.track.id, $0.track) }, uniquingKeysWith: { first, _ in first })
+        let restored = state.items.map { item -> QueueItem in
+            var item = item
+            item.track = queueMetadataOverrides[item.track.id] ?? catalog.tracksByID[item.track.id] ?? currentMetadata[item.track.id] ?? item.track
+            return item
+        }
+        let preservePlayback = liveSession && current.map { id in restored.contains { $0.id == id } } == true
+        if liveSession && !preservePlayback { stopPlayback(clearCurrent: true) }
+        queue = restored
+        if !preservePlayback {
+            currentQueueID = state.currentID.flatMap { id in restored.contains { $0.id == id } ? id : nil }
+            restorePosition = currentQueueID == nil || currentIsRadio ? 0 : state.resumePosition
+        }
+        selectedQueueID = state.selectionID.flatMap { id in restored.contains { $0.id == id } ? id : nil }
+        queueUndoController.register(model: self, state: inverse, name: name)
+        saveQueue(); updateNowPlaying()
+    }
+
     func add(_ values: [TrackRecord], play: Bool = false) {
         guard !values.isEmpty else { return }
         let new = values.filter(\.isAvailable).map { QueueItem(track: $0) }
         guard !new.isEmpty else { fail("Tracks unavailable", "The selected files are no longer available. Rescan the source after reconnecting it."); return }
+        let before = queueEditState()
         queue.append(contentsOf: new)
         status = new.count == 1 ? "Added “\(new[0].track.title)” to the active playlist." : "Added \(new.count) tracks to the active playlist."
-        saveQueue()
+        registerQueueEdit(before, name: "Add to Playlist"); saveQueue()
         if play, let first = new.first { playQueueItem(first.id) }
     }
 
-    /// Inserts the complete ordered selection without replacing or restarting the current queue entry.
     func addAfterCurrent(_ values: [TrackRecord]) {
         guard !values.isEmpty else { return }
         let new = values.filter(\.isAvailable).map { QueueItem(track: $0) }
         guard !new.isEmpty else { fail("Tracks unavailable", "The selected files are no longer available. Rescan the source after reconnecting it."); return }
-        let insertionIndex = currentIndex.map { $0 + 1 } ?? queue.endIndex
-        let hasCurrent = currentIndex != nil
-        queue.insert(contentsOf: new, at: insertionIndex)
-        if hasCurrent {
-            status = new.count == 1 ? "Added “\(new[0].track.title)” after the current track." : "Added \(new.count) tracks after the current track."
-        } else {
-            status = new.count == 1 ? "Added “\(new[0].track.title)” to the active playlist." : "Added \(new.count) tracks to the active playlist."
-        }
-        saveQueue()
+        let before = queueEditState()
+        let current = currentIndex
+        queue.insert(contentsOf: new, at: current.map { $0 + 1 } ?? queue.endIndex)
+        status = current == nil ? "Added \(new.count) tracks to the active playlist." : "Added \(new.count) tracks after the current track."
+        registerQueueEdit(before, name: "Add After Current Track"); saveQueue()
     }
 
-    func doubleClick(_ track: TrackRecord) { add([track], play: settings.doubleClickPlays) }
+    /// Complete artist/album selections always append; an empty queue starts with their first track.
+    func doubleClickSelection(_ tracks: [TrackRecord]) { add(tracks, play: queue.isEmpty) }
+
+    func doubleClick(_ track: TrackRecord) {
+        if queue.isEmpty { add([track], play: true); return }
+        switch settings.trackDoubleClickAction {
+        case .append: add([track])
+        case .afterCurrent: addAfterCurrent([track])
+        case .playNow: add([track], play: true)
+        }
+    }
+
+    func isReservedArrowShortcut(_ shortcut: KeyboardShortcuts.Shortcut) -> Bool {
+        (shortcut.key == .leftArrow || shortcut.key == .rightArrow)
+            && shortcut.modifiers.intersection([.command, .option, .control, .shift]).isEmpty
+    }
+
+    func resetArrowSeek() { arrowKeys.reset() }
+
+    func seekWithArrow(keyCode: UInt16, isRepeat: Bool) {
+        guard player.isSeekable, [123, 124].contains(keyCode) else { resetArrowSeek(); return }
+        guard let target = arrowKeys.target(keyCode: keyCode, isRepeat: isRepeat, generation: playbackGeneration,
+                                           position: player.position, duration: player.duration) else { return }
+        seekPlayback(to: target)
+    }
+
+    func seekPlayback(to seconds: Double) {
+        guard !currentIsRadio, player.isSeekable else { return }
+        scrobbling?.seek(); player.seek(to: seconds)
+    }
+
+    func stopPlayback(clearCurrent: Bool) {
+        scrobbling?.end()
+        playbackGeneration = UUID(); playbackIntentQueueID = nil; resetArrowSeek()
+        playbackTask?.cancel(); playbackTask = nil; activeStream?.close(); activeStream = nil
+        player.stop(); restorePosition = 0; streamingBufferFraction = nil
+        if clearCurrent { currentQueueID = nil; radioBroadcastTitle = nil; radioDisconnected = false }
+    }
 
     func playQueueItem(_ id: UUID) {
         guard let item = queue.first(where: { $0.id == id }) else { return }
+        scrobbling?.end(); radioBroadcastTitle = nil; radioDisconnected = false
         let resume = id == currentQueueID ? restorePosition : 0
         restorePosition = 0
         playbackTask?.cancel(); activeStream?.close(); activeStream = nil
+        playbackGeneration = UUID(); let generation = playbackGeneration
+        playbackIntentQueueID = id; resetArrowSeek()
         player.stop(); currentQueueID = id; heardSeconds = 0; playRecorded = false
         playbackTask = Task { [weak self] in
             guard let self else { return }
+            defer { if self.playbackGeneration == generation { self.playbackTask = nil } }
             do {
                 try Task.checkCancellation()
-                guard self.currentQueueID == id, self.queue.contains(where: { $0.id == id }) else { return }
+                guard self.playbackGeneration == generation, self.currentQueueID == id, self.queue.contains(where: { $0.id == id }) else { return }
                 guard let source = self.sources.first(where: { $0.id == item.track.sourceID }) else { throw AppFailure.missingSource }
-                if source.kind == .local {
+                self.scrobbling?.begin(track: item.track, source: source, occurrenceID: generation)
+                if source.kind == .radio {
+                    try await self.loadRadio(item: item, source: source, generation: generation)
+                } else if source.kind == .local {
                     _ = self.accessFolder(source)
                     guard let url = item.track.url, FileManager.default.fileExists(atPath: url.path) else { throw AppFailure.missingFile }
                     self.player.load(url: url, segmentStart: item.track.startTime ?? 0, segmentEnd: item.track.endTime, bufferSeconds: self.settings.buffer, durationHint: item.track.duration)
@@ -448,25 +563,57 @@ final class AppModel {
                         url = try await self.subsonicClient(source).streamURL(songID: remoteID)
                     } else { guard let enclosure = item.track.url else { throw AppFailure.missingFile }; url = enclosure }
                     try Task.checkCancellation()
-                    guard self.currentQueueID == id, self.queue.contains(where: { $0.id == id }) else { return }
+                    guard self.playbackGeneration == generation, self.currentQueueID == id, self.queue.contains(where: { $0.id == id }) else { return }
                     let targetBytes = Int((self.settings.buffer ?? 20) * 192_000)
                     let stream = BufferedHTTPInputStream(url: url, transport: transport, bufferBytes: targetBytes, bufferSeconds: self.settings.buffer, durationHint: item.track.duration)
                     self.activeStream = stream
                     self.player.load(stream: stream, segmentStart: item.track.startTime ?? 0, segmentEnd: item.track.endTime, bufferSeconds: self.settings.buffer, durationHint: item.track.duration)
                 }
-                if resume > 0 { self.player.seek(to: resume) }
+                if resume > 0, source.kind != .radio { self.player.seek(to: resume) }
                 self.status = "Playing “\(item.track.title)”."
                 self.updateNowPlaying(); self.saveQueue()
             } catch is CancellationError { }
-            catch { if !Task.isCancelled, self.currentQueueID == id { self.fail("Could not play the track", error.localizedDescription) } }
+            catch { if !Task.isCancelled, self.playbackGeneration == generation, self.currentQueueID == id {
+                self.playbackIntentQueueID = nil
+                if self.currentIsRadio { self.radioDisconnected = true }
+                self.fail("Could not play the track", error.localizedDescription)
+            } }
         }
     }
 
     func togglePlayback() {
+        if [.playing, .opening, .buffering].contains(player.state) || playbackTask != nil {
+            pausePlayback(); return
+        }
+        if currentIsRadio {
+            if let id = currentQueueID { playQueueItem(id) }
+            return
+        }
         if player.state == .stopped || player.state == .failed {
             if let id = currentQueueID ?? queue.first?.id { playQueueItem(id) }
             else if let track = selectedTrack { add([track], play: true) }
-        } else { player.togglePlayPause(); updateNowPlaying(); saveQueue() }
+        } else { resumePlayback(); updateNowPlaying(); saveQueue() }
+    }
+
+    func pausePlayback() {
+        scrobbling?.suspend(); playbackIntentQueueID = nil; resetArrowSeek()
+        if currentIsRadio {
+            playbackGeneration = UUID(); playbackTask?.cancel(); playbackTask = nil
+            activeStream?.close(); activeStream = nil; player.pauseLive(); restorePosition = 0
+        } else {
+            if playbackTask != nil {
+                playbackGeneration = UUID(); playbackTask?.cancel(); playbackTask = nil
+                activeStream?.close(); activeStream = nil
+            }
+            player.pause()
+        }
+        updateNowPlaying(); saveQueue()
+    }
+
+    func resumePlayback() {
+        if currentIsRadio || player.state == .stopped || player.state == .failed {
+            if let id = currentQueueID ?? queue.first?.id { playQueueItem(id) }
+        } else { player.play() }
     }
 
     func advance(manual: Bool = true) {
@@ -474,46 +621,53 @@ final class AppModel {
         if !manual && settings.repeatMode == .track { playQueueItem(queue[index].id) }
         else if index + 1 < queue.count { playQueueItem(queue[index + 1].id) }
         else if settings.repeatMode == .playlist, let first = queue.first { playQueueItem(first.id) }
-        else { playbackTask?.cancel(); player.stop(); activeStream?.close(); activeStream = nil; status = "Playback finished."; saveQueue(); updateNowPlaying() }
+        else { stopPlayback(clearCurrent: false); status = "Playback finished."; saveQueue(); updateNowPlaying() }
     }
 
     func previous() {
-        if player.position > 3 { player.seek(to: 0); return }
+        if !currentIsRadio, player.position > 3 { seekPlayback(to: 0); return }
         guard let index = currentIndex else { return }
         if index > 0 { playQueueItem(queue[index - 1].id) }
         else if settings.repeatMode == .playlist, let last = queue.last { playQueueItem(last.id) }
-        else { player.seek(to: 0) }
+        else if !currentIsRadio { seekPlayback(to: 0) }
     }
 
     func shuffle(_ values: [TrackRecord]) {
         guard !values.isEmpty else { return }
         let available = values.filter(\.isAvailable)
         guard !available.isEmpty else { fail("Tracks unavailable", "Reconnect the source and refresh its library before shuffling these tracks."); return }
-        queue = available.shuffled().map { QueueItem(track: $0) }
-        if let first = queue.first { playQueueItem(first.id) }
+        add(available.shuffled(), play: queue.isEmpty)
     }
     func shuffleQueue() {
-        if let index = currentIndex { let current = queue.remove(at: index); queue.shuffle(); queue.insert(current, at: 0); currentQueueID = current.id }
+        let before = queueEditState()
+        if let index = currentIndex { let current = queue.remove(at: index); queue.shuffle(); queue.insert(current, at: 0) }
         else { queue.shuffle() }
-        saveQueue()
+        registerQueueEdit(before, name: "Shuffle Playlist"); saveQueue()
     }
-    func moveQueue(from offsets: IndexSet, to destination: Int) { queue.move(fromOffsets: offsets, toOffset: destination); saveQueue() }
+    func moveQueue(from offsets: IndexSet, to destination: Int) {
+        let before = queueEditState()
+        queue.move(fromOffsets: offsets, toOffset: destination)
+        registerQueueEdit(before, name: "Move Playlist Items"); saveQueue()
+    }
     func removeQueue(_ offsets: IndexSet) {
+        let before = queueEditState()
         let deletingCurrent = offsets.contains { queue[$0].id == currentQueueID }
         queue.remove(atOffsets: offsets)
-        if deletingCurrent { playbackTask?.cancel(); player.stop(); activeStream?.close(); currentQueueID = nil; restorePosition = 0; updateNowPlaying() }
-        saveQueue()
+        if deletingCurrent { stopPlayback(clearCurrent: true); updateNowPlaying() }
+        if let selection = selectedQueueID, !queue.contains(where: { $0.id == selection }) { selectedQueueID = nil }
+        registerQueueEdit(before, name: "Remove from Playlist"); saveQueue()
     }
     func clearQueue() {
-        if let current = queue.first(where: { $0.id == currentQueueID }) {
-            queue = [current]
-            selectedQueueID = current.id
-            saveQueue()
+        let before = queueEditState()
+        let active = [.playing, .opening, .buffering].contains(player.state)
+            || (playbackTask != nil && playbackIntentQueueID == currentQueueID)
+        if active, let current = queue.first(where: { $0.id == currentQueueID }) {
+            queue = [current]; selectedQueueID = current.id
         } else {
-            playbackTask?.cancel(); player.stop(); activeStream?.close(); activeStream = nil
-            queue = []; currentQueueID = nil; selectedQueueID = nil; restorePosition = 0
-            saveQueue(); updateNowPlaying()
+            stopPlayback(clearCurrent: true)
+            queue = []; selectedQueueID = nil; updateNowPlaying()
         }
+        registerQueueEdit(before, name: "Clear Playlist"); saveQueue()
     }
     func cycleRepeat() { settings.repeatMode = settings.repeatMode.next }
 
@@ -522,7 +676,7 @@ final class AppModel {
         queueSaveRevision &+= 1
         let revision = queueSaveRevision
         let ids = queue.map(\.track.id), index = currentIndex ?? 0
-        let position = player.position > 0 ? player.position : restorePosition
+        let position = currentIsRadio ? 0 : player.position > 0 ? player.position : restorePosition
         Task { try? await backgroundWorker.saveQueue(store: store, trackIDs: ids, currentIndex: index, position: position, revision: revision) }
     }
 
@@ -530,7 +684,7 @@ final class AppModel {
         guard let store else { return }
         queueSaveRevision &+= 1
         try? await backgroundWorker.saveQueue(store: store, trackIDs: queue.map(\.track.id), currentIndex: currentIndex ?? 0,
-                                              position: player.position > 0 ? player.position : restorePosition, revision: queueSaveRevision)
+                                              position: currentIsRadio ? 0 : player.position > 0 ? player.position : restorePosition, revision: queueSaveRevision)
     }
 
     func pickFolder() {
@@ -600,8 +754,16 @@ final class AppModel {
         do {
             let feed = try await PodcastClient(transport: transport(for: pendingSource)).fetchFeed(url: url)
             try requireSourceConnection(presentationID)
+            if let existing = sources.first(where: { $0.kind == .podcasts && Self.samePodcastFeed($0.location, feed.url.absoluteString) }) {
+                transportCache.removeValue(forKey: pendingSource.id)?.invalidate()
+                CertificateTrustStore.shared.revoke(sourceID: pendingSource.id)
+                selectAddedSource(existing.id)
+                status = "Already subscribed to “\(existing.name)”."
+                return
+            }
             var source = pendingSource
             source.name = feed.title
+            source.location = feed.url.absoluteString
             let artwork = try? await cachePodcastArtwork(feed: feed, source: source)
             try requireSourceConnection(presentationID)
             let savedSource = source
@@ -622,10 +784,25 @@ final class AppModel {
         }
     }
 
+    nonisolated static func samePodcastFeed(_ first: String, _ second: String) -> Bool {
+        func canonical(_ value: String) -> String? {
+            guard var components = URLComponents(string: value) else { return nil }
+            components.fragment = nil
+            components.scheme = components.scheme?.lowercased()
+            components.host = components.host?.lowercased()
+            if (components.scheme == "https" && components.port == 443) || (components.scheme == "http" && components.port == 80) { components.port = nil }
+            if components.path.isEmpty { components.path = "/" }
+            return components.string
+        }
+        return canonical(first) == canonical(second)
+    }
+
     func removeSource(_ source: SourceRecord) {
         Task {
           do {
-            if currentTrack?.sourceID == source.id { playbackTask?.cancel(); player.stop(); activeStream?.close(); currentQueueID = nil; restorePosition = 0; updateNowPlaying() }
+            queueUndoManager.removeAllActions()
+            queueMetadataOverrides = queueMetadataOverrides.filter { $0.value.sourceID != source.id }
+            if currentTrack?.sourceID == source.id { stopPlayback(clearCurrent: true); updateNowPlaying() }
             queue.removeAll { $0.track.sourceID == source.id }
             guard let store else { throw AppFailure.missingSource }
             try await backgroundWorker.deleteSource(store: store, sourceID: source.id, incompleteKey: Self.catalogImportKey(source.id))
@@ -661,12 +838,13 @@ final class AppModel {
         refreshGeneration = generation
         refreshBatchCount = requestedSources.count
         refreshBatchPosition = 0
-        isRefreshing = true; refreshProgress = "Connecting…"; scanWarnings = []
+        isRefreshing = true; isStoppingRefresh = false; refreshProgress = "Connecting…"; scanWarnings = []
         refreshTask = Task { [weak self] in
             guard let self else { return }
             defer {
                 if self.refreshGeneration == generation {
-                    self.isRefreshing = false
+                    self.isRefreshing = false; self.isStoppingRefresh = false
+                    if Task.isCancelled { self.status = "Refresh cancelled." }
                     self.refreshSourceID = nil
                     let pending = self.sources.filter { self.pendingRescanSourceIDs.contains($0.id) && self.scopeIncludes(sourceID: $0.id) }
                     self.pendingRescanSourceIDs.removeAll()
@@ -718,13 +896,18 @@ final class AppModel {
         try await backgroundWorker.beginRefresh(store: store, sourceID: source.id, generation: generation,
                                                 incompleteKey: source.kind == .openSubsonic ? Self.catalogImportKey(source.id) : nil)
         switch source.kind {
+        case .radio:
+            let worker = backgroundWorker
+            try await radio?.refreshFavorites { station in
+                try await worker.updateRadioStation(store: store, station: station, generation: generation)
+            }
         case .local:
             let resolved = accessFolder(source)
             var scanSource = source
             if let resolved { scanSource.location = resolved.absoluteString }
             let result = try await localScan(scanSource, { [weak self] count, total in
                 Task { @MainActor in
-                    guard let self, self.refreshGeneration == generation, self.refreshSourceID == source.id else { return }
+                    guard let self, !self.isStoppingRefresh, self.refreshGeneration == generation, self.refreshSourceID == source.id else { return }
                     self.refreshProgress = self.refreshLabel("Reading file \(count) of \(total)…")
                 }
             })
@@ -744,8 +927,16 @@ final class AppModel {
         }
     }
 
+    func toggleRefresh() { if isRefreshing { cancelRefresh() } else { refresh() } }
+
     func cancelRefresh() {
+        guard isRefreshing else { return }
+        isStoppingRefresh = true; refreshProgress = "Stopping…"
+        pendingRescanSourceIDs.removeAll()
+        for task in rescanTasks.values { task.cancel() }
+        rescanTasks.removeAll()
         remoteCatalogProgress?.acceptingBatches = false
+        remoteCatalogProgress?.publicationTask?.cancel()
         refreshTask?.cancel()
     }
 
@@ -862,7 +1053,7 @@ final class AppModel {
             let watchedURL = url.hasDirectoryPath ? url : url.deletingLastPathComponent()
             directoryWatchers[source.id] = DirectoryWatcher(url: watchedURL) { [weak self] in
                 Task { @MainActor in
-                    guard let self, self.scopeIncludes(sourceID: source.id), self.sources.contains(where: { $0.id == source.id }) else { return }
+                    guard let self, !self.isStoppingRefresh, self.scopeIncludes(sourceID: source.id), self.sources.contains(where: { $0.id == source.id }) else { return }
                     self.rescanTasks[source.id]?.cancel()
                     self.rescanTasks[source.id] = Task { [weak self] in
                         try? await Task.sleep(for: .seconds(2))
@@ -877,6 +1068,7 @@ final class AppModel {
 
     func requestRescan(sourceID: String) {
         guard scopeIncludes(sourceID: sourceID), sources.contains(where: { $0.id == sourceID && $0.kind == .local }) else { return }
+        guard !isStoppingRefresh else { return }
         if isRefreshing { pendingRescanSourceIDs.insert(sourceID) }
         else { refresh(sourceID: sourceID) }
     }
@@ -1023,7 +1215,9 @@ final class AppModel {
         if let snapshot = activeStream?.snapshot, snapshot.isBuffering {
             streamingBufferFraction = min(1, Double(snapshot.bufferedBytes) / Double(max(1, snapshot.targetBytes)))
         } else { streamingBufferFraction = nil }
-        if player.state == .playing, let track = currentTrack {
+        scrobbling?.update(isPlaying: player.state == .playing, isBuffering: player.state == .buffering || streamingBufferFraction != nil,
+                           position: player.position, duration: player.duration)
+        if player.state == .playing, !currentIsRadio, let track = currentTrack {
             heardSeconds += 1
             let duration = player.duration > 0 ? player.duration : track.duration
             let threshold = min(240, max(1, duration > 0 ? duration / 2 : 240))
@@ -1045,22 +1239,33 @@ final class AppModel {
         commands.togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.togglePlayback() }; return .success }
         commands.playCommand.addTarget { [weak self] _ in Task { @MainActor in
             guard let self else { return }
-            if self.player.state == .stopped || self.player.state == .failed { self.togglePlayback() }
-            else { self.player.play() }
+            self.resumePlayback()
         }; return .success }
-        commands.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.player.pause() }; return .success }
+        commands.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.pausePlayback() }; return .success }
         commands.nextTrackCommand.addTarget { [weak self] _ in Task { @MainActor in self?.advance() }; return .success }
         commands.previousTrackCommand.addTarget { [weak self] _ in Task { @MainActor in self?.previous() }; return .success }
         commands.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
-            Task { @MainActor in self?.player.seek(to: event.positionTime) }; return .success
+            Task { @MainActor in self?.seekPlayback(to: event.positionTime) }; return .success
         }
         KeyboardShortcuts.onKeyUp(for: .playPause) { [weak self] in self?.togglePlayback() }
         KeyboardShortcuts.onKeyUp(for: .nextTrack) { [weak self] in self?.advance() }
         KeyboardShortcuts.onKeyUp(for: .previousTrack) { [weak self] in self?.previous() }
         KeyboardShortcuts.onKeyUp(for: .showMacarok) { NSApp.activate(ignoringOtherApps: true); NSApp.windows.first?.makeKeyAndOrderFront(nil) }
-        if let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
-            guard let self, !event.isARepeat else { return event }
+        if let monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp], handler: { [weak self] event in
+            guard let self else { return event }
+            if event.type == .keyUp {
+                if [123, 124].contains(event.keyCode) { self.resetArrowSeek() }
+                return event
+            }
+            if PlaybackArrowKeys.isReserved(keyCode: event.keyCode, modifiers: event.modifierFlags) {
+                guard PlaybackArrowKeys.accepts(window: event.window, mainWindow: self.mainPlayerWindow) else { self.resetArrowSeek(); return event }
+                guard self.player.isSeekable else { return event }
+                self.seekWithArrow(keyCode: event.keyCode, isRepeat: event.isARepeat)
+                return nil
+            }
+            guard !event.isARepeat, NSApp.keyWindow === self.mainPlayerWindow,
+                  NSApp.keyWindow?.attachedSheet == nil, NSApp.modalWindow == nil else { return event }
             let editing = NSApp.keyWindow?.firstResponder is NSTextView
             if !editing, let shortcut = KeyboardShortcuts.Shortcut(event: event) {
                 for name in ["playPause", "previousTrack", "nextTrack", "addToPlaylist", "search", "showCurrentTrack"] where self.localShortcut(name) == shortcut {
@@ -1074,15 +1279,23 @@ final class AppModel {
 
     private func updateNowPlaying() {
         guard let track = currentTrack else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; return }
+        if currentIsRadio {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: track.title,
+                MPMediaItemPropertyArtist: radioBroadcastTitle ?? "Internet Radio", MPNowPlayingInfoPropertyIsLiveStream: true,
+                MPNowPlayingInfoPropertyPlaybackRate: player.state == .playing ? 1.0 : 0.0]
+            MPNowPlayingInfoCenter.default().playbackState = player.state == .playing ? .playing : player.state == .paused ? .paused : .stopped
+            return
+        }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: track.title, MPMediaItemPropertyArtist: track.artist, MPMediaItemPropertyAlbumTitle: track.album, MPMediaItemPropertyPlaybackDuration: player.duration > 0 ? player.duration : track.duration, MPNowPlayingInfoPropertyElapsedPlaybackTime: player.position, MPNowPlayingInfoPropertyPlaybackRate: player.state == .playing ? 1.0 : 0.0]
         MPNowPlayingInfoCenter.default().playbackState = player.state == .playing ? .playing : player.state == .paused ? .paused : .stopped
     }
 }
 
 enum AppFailure: LocalizedError {
-    case missingSource, missingFile, invalidArtwork
+    case missingSource, missingFile, invalidArtwork, unsupportedRadio
     var errorDescription: String? {
         switch self {
+        case .unsupportedRadio: "Radio playback is being configured."
         case .missingSource: "This track's source is no longer configured."
         case .missingFile: "The audio file is unavailable. Reconnect the source and refresh its library."
         case .invalidArtwork: "The selected image could not be read."

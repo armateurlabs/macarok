@@ -15,8 +15,13 @@ struct ContextPane: View {
                 Button { if let track = headerTrack { model.editingTrack = track } } label: { Image(systemName: "square.and.pencil") }.help("Edit metadata").disabled(headerTrack == nil)
             }.accessibilityIdentifier("contextPanelHeader")
             if model.contextMode == .lyrics { LyricsPane(model: model) }
+            else if model.currentIsRadio && model.contextPage == .track { RadioNowPlayingView(model: model) }
             else if model.sources.isEmpty { WelcomeView(model: model) }
-            else if model.contextPage == .home && model.tracks.isEmpty {
+            else if model.isRadioSource && model.contextPage == .home {
+                ContentUnavailableView("Internet Radio", systemImage: "antenna.radiowaves.left.and.right", description: Text("Choose a station from your library, or browse the directory to find one."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            else if model.contextPage == .home && model.tracks.isEmpty && (!model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
                 HomeView(model: model).padding(22).background(Color(nsColor: .textBackgroundColor))
             }
             else {
@@ -39,7 +44,10 @@ struct ContextPane: View {
         }
     }
 
-    private var headerTrack: TrackRecord? { model.contextMode == .lyrics ? model.currentTrack ?? model.selectedTrack : model.selectedTrack }
+    private var headerTrack: TrackRecord? {
+        let track = model.contextMode == .lyrics ? model.currentTrack ?? model.selectedTrack : model.selectedTrack
+        return model.isRadioTrack(track) ? nil : track
+    }
 }
 
 struct WelcomeView: View {
@@ -50,7 +58,7 @@ struct WelcomeView: View {
             Text("Welcome to Macarok").font(.system(size: 27, weight: .semibold))
             Text("Your library, your listening context, your playlist.\nAll in one place.").multilineTextAlignment(.center).foregroundStyle(.secondary).font(.system(size: 13))
             Button(action: model.pickFolder) { Label("Add Music Folder…", systemImage: "folder.badge.plus") }.buttonStyle(.borderedProminent).controlSize(.large)
-            Button("Connect OpenSubsonic or Add a Podcast…") { model.presentAddSource(from: .mainWindow) }.buttonStyle(.link)
+            Button("Explore Music Sources…") { model.presentAddSource(from: .mainWindow) }.buttonStyle(.link)
             Text("MP3 · FLAC · Ogg Vorbis · Opus · CUE").font(.system(size: 11)).foregroundStyle(.tertiary).padding(.top, 14)
         }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(25)
     }
@@ -69,7 +77,7 @@ struct HomeView: View {
             }
             .frame(maxWidth: .infinity, alignment: model.tracks.isEmpty ? .center : .leading)
             .multilineTextAlignment(model.tracks.isEmpty ? .center : .leading)
-            if model.tracks.isEmpty {
+            if model.tracks.isEmpty && (!model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
                 Spacer(minLength: 0)
                 VStack(spacing: 16) {
                     Image(systemName: "music.note").font(.system(size: 42)).foregroundStyle(.tertiary)
@@ -85,6 +93,7 @@ struct HomeView: View {
                 }.frame(maxWidth: .infinity)
                 Spacer(minLength: 0)
             } else {
+                if !model.tracks.isEmpty {
                 VStack(alignment: .leading, spacing: 11) {
                     Text("Recently Added").font(.system(size: 14, weight: .semibold))
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 16) { ForEach(model.recentlyAdded, id: \.presentationID) { AlbumTile(model: model, album: $0) } }
@@ -99,6 +108,8 @@ struct HomeView: View {
                     if model.mostPlayedTracks.isEmpty { emptyHistory }
                     else { mostPlayedRows }
                 }
+                }
+                if model.isAllSources { RadioFavoritesSection(model: model) }
             }
         }.frame(maxWidth: .infinity, maxHeight: model.tracks.isEmpty ? .infinity : nil)
     }
@@ -110,10 +121,21 @@ struct HomeView: View {
             SourceBadge(model: model, sourceID: track.sourceID)
             Spacer()
             if showsCount { Text("\(track.playCount) plays").font(.system(size: 10)).foregroundStyle(.secondary) }
-            else if let date = track.lastPlayedAt { Text(date, style: .relative).font(.system(size: 10)).foregroundStyle(.secondary) }
+            else if let date = track.lastPlayedAt {
+                Text("Last Played: \(Self.historyDate.string(from: date))")
+                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+            }
         }.font(.system(size: 12)).padding(.vertical, 3).contentShape(Rectangle()).onLibraryClick(inspect: { model.inspect(track) }, add: { model.doubleClick(track) })
             .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add to Active Playlist") { [track] } }
     }
+
+    private static let historyDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "MMM d, yyyy 'at' HH:mm"
+        return formatter
+    }()
 
     private var mostPlayedRows: some View {
         VStack(alignment: .leading, spacing: 15) {
@@ -145,7 +167,7 @@ struct HomeView: View {
                             SourceGroupBadge(model: model, sourceIDs: artist.sourceIDs)
                             playCount(artist.playCount)
                         }.frame(width: 140, alignment: .topLeading).contentShape(Rectangle())
-                            .onLibraryClick(inspect: { model.inspectArtist(artist.name) }, add: { model.add(model.albumsForArtist(artist.name).flatMap(\.tracks)) })
+                            .onLibraryClick(inspect: { model.inspectArtist(artist.name) }, add: { model.doubleClickSelection(model.albumsForArtist(artist.name).flatMap(\.tracks)) })
                             .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") { model.albumsForArtist(artist.name).flatMap(\.tracks) } }
                     }
                 }
@@ -178,7 +200,7 @@ struct AlbumTile: View {
             Text(album.title).font(.system(size: 11, weight: .medium)).lineLimit(2).frame(height: 28, alignment: .topLeading)
             Text(album.artist).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).frame(height: 13, alignment: .topLeading)
             SourceBadge(model: model, sourceID: album.sourceID)
-        }.frame(maxWidth: .infinity, alignment: .topLeading).contentShape(Rectangle()).onLibraryClick(inspect: { model.inspect(album) }, add: { model.add(model.tracksForAlbum(album)) })
+        }.frame(maxWidth: .infinity, alignment: .topLeading).contentShape(Rectangle()).onLibraryClick(inspect: { model.inspect(album) }, add: { model.doubleClickSelection(model.tracksForAlbum(album)) })
             .contextMenu {
                 LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
                 Button("Shuffle Album") { model.shuffle(album.tracks) }
@@ -226,7 +248,7 @@ struct TrackContextView: View {
             HStack(alignment: .top) {
                 fact("Played", "\(track.playCount) times")
                 Spacer()
-                VStack(alignment: .leading, spacing: 4) { Text("Last played").font(.system(size: 10)).foregroundStyle(.secondary); if let date = track.lastPlayedAt { Text(date, style: .relative).font(.system(size: 12)) } else { Text("Never").font(.system(size: 12)) } }
+                VStack(alignment: .leading, spacing: 4) { Text("Last played").font(.system(size: 10)).foregroundStyle(.secondary); if let date = track.lastPlayedAt { Text(date.formatted(date: .abbreviated, time: .shortened)).font(.system(size: 12)) } else { Text("Never").font(.system(size: 12)) } }
                 Spacer()
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Rating").font(.system(size: 10)).foregroundStyle(.secondary)

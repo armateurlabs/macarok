@@ -14,6 +14,7 @@ struct MacarokApp: App {
                 .onOpenURL { model.openURL($0) }
         }
         .defaultSize(width: 1380, height: 860)
+        .windowStyle(.titleBar)
         .windowToolbarStyle(.unifiedCompact)
         .commands { MacarokCommands(model: model) }
 
@@ -36,10 +37,12 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model else { return .terminateNow }
-        model.player.pause()
+        model.pausePlayback()
+        model.scrobbling?.end()
         model.cancelRefresh()
         Task { @MainActor in
             await model.flushQueue()
+            await model.scrobbling?.flush()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

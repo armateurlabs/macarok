@@ -3,7 +3,7 @@ import KeyboardShortcuts
 import MacarokCore
 import SwiftUI
 
-enum SettingsTab: Hashable { case general, playback, shortcuts, sources }
+enum SettingsTab: Hashable { case general, playback, shortcuts, sources, scrobbling }
 
 struct SettingsView: View {
     @Bindable var model: AppModel
@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var removal: SourceRecord?
     @State private var credentialSource: SourceRecord?
     @State private var trustVersion = 0
+    @State private var rejectedShortcutKeys: Set<String> = []
 
     init(model: AppModel, initialTab: SettingsTab = .general) {
         self.model = model
@@ -23,6 +24,10 @@ struct SettingsView: View {
             playback.tag(SettingsTab.playback).tabItem { Label("Playback", systemImage: "play.circle") }
             shortcuts.tag(SettingsTab.shortcuts).tabItem { Label("Shortcuts", systemImage: "keyboard") }
             sources.tag(SettingsTab.sources).tabItem { Label("Sources", systemImage: "externaldrive.connected.to.line.below") }
+            Group {
+                if let controller = model.scrobbling { ScrobblingSettingsView(controller: controller, sources: model.sources) }
+                else { ContentUnavailableView("Scrobbling", systemImage: "waveform", description: Text("Open a library to configure Last.fm.")) }
+            }.tag(SettingsTab.scrobbling).tabItem { Label("Scrobbling", systemImage: "waveform") }
         }
         .frame(width: 650, height: 555)
         .confirmationDialog("Remove \(removal?.name ?? "Source")?", isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }), titleVisibility: .visible) {
@@ -44,12 +49,12 @@ struct SettingsView: View {
                 Text("System follows the appearance selected in macOS.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Library") {
-                Picker("Track double-click", selection: $model.settings.doubleClickPlays) {
-                    Text("Add to Active Playlist").tag(false)
-                    Text("Play Now").tag(true)
+                Picker("Track double-click", selection: $model.settings.trackDoubleClickAction) {
+                    ForEach(TrackDoubleClickAction.allCases) { Text($0.title).tag($0) }
                 }
                 Text("Double-clicking an entry in the active playlist always plays that entry.").font(.caption).foregroundStyle(.secondary)
                 Text("Double-clicking an album or artist always adds all its tracks to the active playlist.").font(.caption).foregroundStyle(.secondary)
+                Text("Double-clicking music starts playback when the active playlist is empty.").font(.caption).foregroundStyle(.secondary)
             }
             Section("About") {
                 LabeledContent("Macarok", value: "0.1.0 · Private Beta")
@@ -101,6 +106,7 @@ struct SettingsView: View {
             Section {
                 LabeledContent("Mac media keys", value: "Play / Pause · Previous · Next")
                 Text("Media keys follow macOS’s active player. In-app shortcuts apply while Macarok is focused.").font(.caption).foregroundStyle(.secondary)
+                Text("Left and Right seek by 5 seconds. Hold either key to continue seeking. Text editing keeps its usual arrow keys.").font(.caption).foregroundStyle(.secondary)
             }
             Section("In App") {
                 localRecorder("Play / Pause", key: "playPause", fallback: .init(.space))
@@ -123,12 +129,20 @@ struct SettingsView: View {
 
     private func localRecorder(_ title: String, key: String, fallback: KeyboardShortcuts.Shortcut) -> some View {
         LabeledContent(title) {
+            VStack(alignment: .trailing, spacing: 4) {
             KeyboardShortcuts.Recorder(shortcut: Binding(get: {
                 guard let data = model.settings.localShortcuts[key] else { return fallback }
                 return (try? JSONDecoder().decode(KeyboardShortcuts.Shortcut?.self, from: data)) ?? nil
             }, set: { shortcut in
+                if let shortcut, model.isReservedArrowShortcut(shortcut) { rejectedShortcutKeys.insert(key); return }
+                rejectedShortcutKeys.remove(key)
                 if let data = try? JSONEncoder().encode(shortcut) { model.settings.localShortcuts[key] = data }
             }))
+                if rejectedShortcutKeys.contains(key) || model.localShortcut(key).map({ model.isReservedArrowShortcut($0) }) == true {
+                    Text("Left and Right are reserved for seeking. Choose another shortcut.")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 
@@ -148,7 +162,7 @@ struct SettingsView: View {
                 ForEach(model.sources) { source in
                     Section {
                         HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: source.kind == .local ? "folder" : source.kind == .openSubsonic ? "server.rack" : "mic")
+                            Image(systemName: source.kind.librarySymbol)
                                 .font(.title3).foregroundStyle(Color.accentColor).frame(width: 25)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(source.name).fontWeight(.medium)

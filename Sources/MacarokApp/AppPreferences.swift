@@ -38,15 +38,54 @@ enum AddSourcePresenter: String, Identifiable {
     var id: String { rawValue }
 }
 
+enum TrackDoubleClickAction: String, Codable, CaseIterable, Identifiable {
+    case append, afterCurrent, playNow
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .append: "Add to Playlist"; case .afterCurrent: "Add After Current Track"; case .playNow: "Play Now" }
+    }
+}
+
 struct AppPreferences: Codable {
     var appearance: Appearance = .system
     var repeatMode: RepeatMode = .none
-    var doubleClickPlays = false
+    var trackDoubleClickAction: TrackDoubleClickAction = .append
+    var doubleClickPlays: Bool {
+        get { trackDoubleClickAction == .playNow }
+        set { trackDoubleClickAction = newValue ? .playNow : .append }
+    }
     var customBuffer = false
     var bufferSeconds: Double = 20
     var volume: Double = 0.75
     var localShortcuts: [String: Data] = [:]
     var buffer: Double? { customBuffer ? min(120, max(1, bufferSeconds)) : nil }
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case appearance, repeatMode, trackDoubleClickAction, doubleClickPlays, customBuffer, bufferSeconds, volume, localShortcuts
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        appearance = try values.decodeIfPresent(Appearance.self, forKey: .appearance) ?? .system
+        repeatMode = try values.decodeIfPresent(RepeatMode.self, forKey: .repeatMode) ?? .none
+        trackDoubleClickAction = try values.decodeIfPresent(TrackDoubleClickAction.self, forKey: .trackDoubleClickAction)
+            ?? ((try values.decodeIfPresent(Bool.self, forKey: .doubleClickPlays) ?? false) ? .playNow : .append)
+        customBuffer = try values.decodeIfPresent(Bool.self, forKey: .customBuffer) ?? false
+        bufferSeconds = try values.decodeIfPresent(Double.self, forKey: .bufferSeconds) ?? 20
+        volume = try values.decodeIfPresent(Double.self, forKey: .volume) ?? 0.75
+        localShortcuts = try values.decodeIfPresent([String: Data].self, forKey: .localShortcuts) ?? [:]
+    }
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(appearance, forKey: .appearance)
+        try values.encode(repeatMode, forKey: .repeatMode)
+        try values.encode(trackDoubleClickAction, forKey: .trackDoubleClickAction)
+        try values.encode(customBuffer, forKey: .customBuffer)
+        try values.encode(bufferSeconds, forKey: .bufferSeconds)
+        try values.encode(volume, forKey: .volume)
+        try values.encode(localShortcuts, forKey: .localShortcuts)
+    }
 
     static func load() -> Self {
         guard let data = UserDefaults.standard.data(forKey: "Macarok.preferences"), let value = try? JSONDecoder().decode(Self.self, from: data) else { return Self() }

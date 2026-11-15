@@ -14,6 +14,9 @@ public struct StreamBufferSnapshot: Sendable {
 public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     private let remoteURL: URL
     private let transport: SourceTransport
+    private let live: Bool
+    private let onTitle: (@Sendable (String) -> Void)?
+    private var titleUpdates: [ICYTitleUpdate] = []
     private let condition = NSCondition()
     private let requestedBufferSeconds: Double?
     private let durationHint: Double?
@@ -34,9 +37,11 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     private var seekSupported: Bool?
 
     public init(url: URL, transport: SourceTransport, bufferBytes: Int = 4 * 1024 * 1024,
-                bufferSeconds: Double? = nil, durationHint: Double? = nil) {
+                bufferSeconds: Double? = nil, durationHint: Double? = nil, live: Bool = false,
+                onTitle: (@Sendable (String) -> Void)? = nil) {
         remoteURL = url
         self.transport = transport
+        self.live = live; self.onTitle = onTitle
         requestedBufferSeconds = bufferSeconds.flatMap { $0.isFinite ? min(120, max(1, $0)) : nil }
         self.durationHint = durationHint.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         fallbackCapacity = max(256 * 1024, min(bufferBytes, 256 * 1024 * 1024))
@@ -66,7 +71,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         condition.lock()
         closed = true; generation += 1
         let task = producer; producer = nil
-        buffer.removeAll(); readCursor = 0; condition.broadcast()
+        buffer.removeAll(); titleUpdates.removeAll(); readCursor = 0; condition.broadcast()
         condition.unlock()
         task?.cancel()
     }
@@ -91,7 +96,9 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
 
     public override func read(_ destination: UnsafeMutablePointer<UInt8>, maxLength len: Int) -> Int {
         guard len > 0 else { return 0 }
-        condition.lock(); defer { condition.unlock() }
+        condition.lock()
+        var titles: [String] = []
+        defer { condition.unlock(); for title in titles { onTitle?(title) } }
         guard opened else { return -1 }
         if available == 0 && !ended && failure == nil { priming = true }
         while !closed && !ended && failure == nil && (available == 0 || (priming && available < targetBytes)) {
@@ -107,6 +114,10 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         buffer.copyBytes(to: destination, from: start..<end)
         readCursor += count
         offset += UInt64(count)
+        while let update = titleUpdates.first, update.audioOffset <= offset {
+            titleUpdates.removeFirst()
+            titles.append(update.title)
+        }
         if readCursor == buffer.count { buffer.removeAll(keepingCapacity: true); readCursor = 0 }
         else if readCursor >= 1024 * 1024 { buffer.removeFirst(readCursor); readCursor = 0 }
         condition.broadcast()
@@ -123,7 +134,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     }
 
     public override func setProperty(_ property: Any?, forKey key: Stream.PropertyKey) -> Bool {
-        guard key == .fileCurrentOffsetKey, let number = property as? NSNumber,
+        guard !live, key == .fileCurrentOffsetKey, let number = property as? NSNumber,
               number.doubleValue.isFinite, number.int64Value >= 0 else { return false }
         let newOffset = number.uint64Value
         condition.lock()
@@ -151,11 +162,20 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
             guard let self else { return }
             do {
                 var request = URLRequest(url: self.remoteURL)
-                request.setValue("bytes=\(requestedOffset)-", forHTTPHeaderField: "Range")
+                if !self.live { request.setValue("bytes=\(requestedOffset)-", forHTTPHeaderField: "Range") }
+                else {
+                    request.setValue("1", forHTTPHeaderField: "Icy-MetaData")
+                    request.setValue("Macarok/0.1 (macOS; https://github.com/armateurlabs/macarok)", forHTTPHeaderField: "User-Agent")
+                }
                 request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
                 let (bytes, response) = try await self.transport.bytes(for: request)
                 defer { bytes.task.cancel() }
                 let expectedBytes = try self.acceptResponse(response, requestedOffset: requestedOffset, generation: requestedGeneration)
+                var decoder: ICYMetadataDecoder?
+                if self.live, let raw = response.value(forHTTPHeaderField: "icy-metaint") {
+                    guard let interval = Int(raw) else { throw RadioError.invalidResponse }
+                    decoder = try ICYMetadataDecoder(interval: interval)
+                }
                 var receivedBytes: UInt64 = 0
                 var chunk = Data(); chunk.reserveCapacity(64 * 1024)
                 for try await byte in bytes {
@@ -164,12 +184,16 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
                     if let expectedBytes, receivedBytes > expectedBytes { throw StreamFailure.invalidRange }
                     chunk.append(byte)
                     if chunk.count >= 64 * 1024 {
-                        guard await self.enqueue(chunk, task: bytes.task, generation: requestedGeneration) else { return }
+                        let content = decoder?.consume(chunk) ?? (audio: chunk, updates: [])
+                        guard await self.enqueue(content.audio, updates: content.updates, task: bytes.task, generation: requestedGeneration) else { return }
                         chunk.removeAll(keepingCapacity: true)
                     }
                 }
                 if let expectedBytes, receivedBytes != expectedBytes { throw StreamFailure.truncatedResponse }
-                if !chunk.isEmpty { _ = await self.enqueue(chunk, task: bytes.task, generation: requestedGeneration) }
+                if !chunk.isEmpty {
+                    let content = decoder?.consume(chunk) ?? (audio: chunk, updates: [])
+                    _ = await self.enqueue(content.audio, updates: content.updates, task: bytes.task, generation: requestedGeneration)
+                }
                 self.finish(error: nil, generation: requestedGeneration)
             } catch is CancellationError { }
             catch { self.finish(error: error, generation: requestedGeneration) }
@@ -181,7 +205,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
 
     private enum EnqueueResult { case accepted, full, obsolete }
 
-    private func tryEnqueue(_ chunk: Data, generation expected: Int) -> EnqueueResult {
+    private func tryEnqueue(_ chunk: Data, updates: [ICYTitleUpdate], generation expected: Int) -> EnqueueResult {
         condition.lock(); defer { condition.unlock() }
         guard generation == expected && !closed else { return .obsolete }
         guard available < capacity else { return .full }
@@ -189,14 +213,17 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
             buffer.removeFirst(readCursor); readCursor = 0
         }
         buffer.append(chunk); condition.broadcast()
+        titleUpdates.append(contentsOf: updates)
+        // Bound metadata as well as audio, including broadcasts with unusually small ICY intervals.
+        if titleUpdates.count > 512 { titleUpdates.removeFirst(titleUpdates.count - 512) }
         return .accepted
     }
 
-    private func enqueue(_ chunk: Data, task: URLSessionTask, generation expected: Int) async -> Bool {
+    private func enqueue(_ chunk: Data, updates: [ICYTitleUpdate] = [], task: URLSessionTask, generation expected: Int) async -> Bool {
         var suspended = false
         defer { if suspended { task.resume() } }
         while !Task.isCancelled {
-            switch tryEnqueue(chunk, generation: expected) {
+            switch tryEnqueue(chunk, updates: updates, generation: expected) {
             case .accepted: return true
             case .obsolete: return false
             case .full:
@@ -214,6 +241,11 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     }
 
     private func acceptResponse(_ response: HTTPURLResponse, requestedOffset: UInt64, generation expected: Int) throws -> UInt64? {
+        if live {
+            guard response.statusCode == 200 else { throw RadioError.invalidResponse }
+            let type = response.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+            if type.contains("mpegurl") || response.url?.pathExtension.lowercased() == "m3u8" { throw RadioError.unsupportedHLS }
+        }
         guard response.value(forHTTPHeaderField: "Content-Encoding").map({ $0.lowercased() == "identity" }) ?? true else {
             throw StreamFailure.encodedResponse
         }
@@ -234,8 +266,8 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         }
         condition.lock(); defer { condition.unlock() }
         guard generation == expected && !closed else { return expectedBytes }
-        length = total ?? length
-        seekSupported = response.statusCode == 206 || response.value(forHTTPHeaderField: "Accept-Ranges")?.lowercased() == "bytes"
+        length = live ? nil : total ?? length
+        seekSupported = !live && (response.statusCode == 206 || response.value(forHTTPHeaderField: "Accept-Ranges")?.lowercased() == "bytes")
         let target: Double
         if let length, let durationHint {
             target = Double(length) / durationHint * (requestedBufferSeconds ?? 2)
@@ -247,7 +279,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         if let remaining = length.map({ max(0, $0 - Int64(requestedOffset)) }) { targetBytes = min(targetBytes, max(1, Int(remaining))) }
         capacity = max(fallbackCapacity, min(256 * 1024 * 1024 + 64 * 1024, targetBytes + 64 * 1024))
         condition.broadcast()
-        return expectedBytes
+        return live ? nil : expectedBytes
     }
 
     static func contentRange(_ value: String) -> (start: UInt64, end: UInt64, total: Int64?)? {

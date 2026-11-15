@@ -16,27 +16,33 @@ Provide System, Light, and Dark appearances with readable selections, secondary 
 
 Library views include Artists, Albums, Years, Folders, and Tags. Folder browsing follows the source's directory hierarchy; tag browsing uses musical metadata.
 
-Home contains Recently Added, Recently Played, and Most Played. Most Played has separate horizontal Tracks, Artists, and Albums rows, each showing up to eight entries. Every library view, search, homepage section, and library shuffle follows the selected library scope.
+Home contains Recently Added, Recently Played, and Most Played. Most Played has separate horizontal Tracks, Artists, and Albums rows, each showing up to eight entries. Recently Played displays a fixed Last Played date in English and the local time zone. Every library view, search, homepage section, and library shuffle follows the selected library scope. All Sources adds a separate Radio Favorites section; stations do not enter music rankings.
 
-The three panels share a 42-point bar header and a full-width bottom divider. Library search/navigation sits below its header. Album artwork is square; captions reserve two title lines and one artist line. The permanent Context / Lyrics selector preserves context navigation when switching modes. Sources can be added directly from Settings while the main window is closed; the presenting window owns connection and certificate dialogs.
+The three panels share a 42-point bar header and a full-width bottom divider. Library search/navigation sits below its native macOS source picker, which shows source icons and the checked selection. The title bar omits the redundant app title and left-side refresh button. Album artwork is square; captions reserve two title lines and one artist line. The permanent Context / Lyrics selector preserves context navigation when switching modes. Sources can be added directly from Settings while the main window is closed; the presenting window owns connection and certificate dialogs.
 
-A single click inspects an item. Double-clicking a library track appends it to the active playlist without interrupting playback. Double-clicking a playlist entry plays it. The library double-click action is configurable.
+A single click inspects an item. Double-clicking a library track, album, or artist starts its first available track when the active playlist is empty. With an existing playlist, individual tracks follow the Track double-click preference: Add to End, Add After Current Track, or Play Now. Double-clicking a playlist entry plays that existing entry.
 
 Double-clicking an artist or album always appends its complete selection, including when search shows only some matching tracks. The configurable double-click preference applies to individual tracks. Artist, album, and track context menus offer Add After Current Track, which inserts the selection in order immediately after the current queue entry without interrupting it. Without a current entry, the selection appends to the queue. Repeated copies receive independent queue identities.
 
 Right-click a track, album, or artist to choose Play Now. It appends the selection to the active playlist and immediately starts its first track. Album and artist actions resolve the complete selection even when search shows only some matching tracks.
 
-Clear Playlist removes every entry except the current one, preserving its playback state and position. This also keeps a paused or still-loading current track. Without a current entry, it empties the playlist.
+Clear Playlist preserves the exact current entry and position while playing, opening, or buffering. When paused, stopped, failed, or without a current entry, it empties the playlist. Shuffle, repeat, clear, and the save/export menu appear at both the top and bottom of the playlist panel.
+
+Playlist content edits support native Undo / Redo in their normal order: adding, inserting, removing, moving, shuffling, clearing, and loading a saved playlist. Undo preserves entry identities and updated metadata; it does not autoplay or seek. An existing live entry continues if it survives the restored queue, and stops if the undo removes it. Text fields and editors retain their own native undo behavior. Queue undo history is cleared when sources are removed.
 
 Search retains the selected library presentation: artist/album hierarchy, albums, years, folders, or tags. The query persists across tabs; clearing it restores the complete source catalog. Home listening history remains scoped to the complete selected source.
 
 ## Sources and connections
 
-The application supports local files, OpenSubsonic servers, and podcasts. Existing single-source selection remains the default. The optional All Sources scope combines cached indexes without starting network scans. Artists group by case/whitespace-normalized name. Albums and tracks remain distinct copies with source labels, and Folders has one root per source. Playlist entries, credentials, history, artwork, file writes, and lyrics retain their actual source references.
+The application supports local files, OpenSubsonic servers, Bandcamp through OpenSubsonic, podcasts, and Internet radio. Existing single-source selection remains the default. The optional All Sources scope combines cached indexes without starting network scans. Artists group by case/whitespace-normalized name. Albums and tracks remain distinct copies with source labels, and Folders has one root per source. Playlist entries, credentials, history, artwork, file writes, and lyrics retain their actual source references.
 
 Scope selection persists across launches and migrates the former selected-source preference. Adding/removing sources preserves All Sources. Show in Library keeps All Sources when it includes the selected track. Snapshot and search publication checks both scope and source-list revision. All Sources refresh runs source jobs serially, publishes partial progress, preserves committed caches, continues after individual failures, and summarizes errors. Each included local source has its own watcher and coalesced rescan request.
 
-Direct cloud-storage access requires a separate feasibility study. Future integrations may include Spotify, Qobuz, and Deezer. Bandcamp already works when exposed through OpenSubsonic; there is no separate Bandcamp connector. Keep source access modular, with future connector placeholders visibly unavailable. Web radio is outside the initial release.
+The source catalog includes a Bandcamp preset for `https://bandcamp.com/api/subsonic`, generated Subsonic username/password fields, and official setup links. Qobuz, Deezer, and Spotify have information cards linking to their official websites; no playback or account connection is offered for them. Direct cloud-storage access remains a separate feasibility study. See [source setup and availability](SOURCES.md).
+
+Podcast discovery offers Podcast Index by default and an Apple Podcasts selector. Search returns publisher feeds; Use Feed fills the subscription sheet, and Subscribe retrieves the chosen RSS/Atom feed. Search has cancellation, caching, rate limits, and explicit errors. Direct feed entry remains available.
+
+Internet Radio is a persistent source with Stations and Favorites views, URL entry, and Radio Browser directory filters for name, country, language, and tags. Stations remain separate from music albums, artists, and statistics. Direct streams and bounded M3U/PLS resolution are supported; HLS is explicitly unsupported. ICY broadcast metadata is stripped from audio and displayed as live information. Live playback has no seek timeline or saved resume offset. Pause closes the live connection; resume reconnects. Disconnections expose an explicit Reconnect action, without an automatic retry loop.
 
 Support HTTP and HTTPS. Self-signed certificates require explicit acceptance, remembered for the relevant server. Certificate changes require a new decision. Apply a consistent source-specific trust policy to metadata requests, artwork, and audio delivery.
 
@@ -47,6 +53,8 @@ Connecting a server retrieves its album list in pages of 500. Each page's albums
 SQLite retains the indexed titles, artists, albums, tags, durations, remote IDs, paths, and cover references. Startup and source switching display this cached catalog immediately; an explicit Refresh currently repeats the complete metadata traversal. Audio files are requested only for playback, through an in-memory streaming buffer. Cover images are fetched on demand and stored in the separate Artwork cache.
 
 Cancellation or a later request failure keeps both the previous cache and newly committed albums usable. Missing-track reconciliation runs only after a successful complete retrieval and updates only availability differences. An interrupted import remains marked incomplete across restarts; Refresh traverses the catalog again. Remote cover caches survive refresh while their cover IDs remain unchanged.
+
+The library footer starts refresh, changes to Stop Refresh while active, shows progress, and waits in Stopping while cancellation completes. Cancelling clears already queued local rescans so the same operation does not immediately restart.
 
 All library navigation reads an immutable `LibrarySnapshot` prepared off the main thread. Albums, artists, years, tags, statistics, folder trees, and folder membership are grouped once per catalog revision. View bodies consume ready arrays and lookups; collapsed groups create their children only when opened. Each track path is resolved once and its folder prefixes are assembled in one pass.
 
@@ -74,11 +82,21 @@ The playback engine samples VLC's actual clock on a main-run-loop timer register
 
 There is no crossfade or crossfade setting. Gapless playback is desirable but does not block the first release.
 
-One repeat button cycles through **None → Playlist → Track → None**. Both active modes use a selected appearance; track repeat adds a "1" indicator.
+The repeat control cycles through **None → Playlist → Track → None**. Its copies at the top and bottom of the playlist share state. Both active modes use a selected appearance; track repeat adds a "1" indicator.
 
-Shuffle mixes tracks within the selected artist, album, folder including subfolders, or the entire selected library scope.
+Library shuffle mixes tracks within the selected artist, album, folder including subfolders, or entire library scope, then appends that batch. It starts playback only when the queue was empty. Playlist shuffle reorders the existing queue while retaining the current entry and its playback position.
 
 Support Mac media keys and customizable in-app and global shortcuts. Space toggles playback inside the application when the user is not editing text.
+
+Bare Left / Right seek by five seconds per press. Holding either key continues through the operating system's repeat events, with clamping at track boundaries. Releasing the key, changing playback occurrence, or leaving the player window resets the hold. Text editing, shortcut recording, sheets, and native control navigation retain their normal arrows. Bare arrows are reserved for seeking; the default Command-Left / Command-Right shortcuts remain Previous / Next.
+
+## Optional Last.fm scrobbling
+
+Scrobbling is disabled until the user supplies personal Last.fm API credentials and completes browser authorization. The API key, shared secret, and session are stored in Keychain; preferences and the submission queue use SQLite. There is no bundled shared key or password-based login inside Macarok.
+
+Local and OpenSubsonic music sources can be individually excluded. Podcasts and radio are always excluded. Eligible plays qualify after half a track's duration or four minutes, with a minimum known duration greater than 30 seconds; unknown durations use four minutes. Listening uses monotonic time, excludes pauses/buffering/seeks, and treats repeats as separate occurrences. Existing library history is never uploaded retroactively.
+
+Now Playing is separately configurable. Qualified plays are persisted and delivered oldest first, with retry and pending/ignored/failed counts. Disconnect disables scrobbling and clears pending submissions for the account. See [Last.fm setup and privacy](SCROBBLING.md).
 
 ## Library, metadata, and artwork
 

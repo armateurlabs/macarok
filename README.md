@@ -2,7 +2,7 @@
 
 A native macOS music player inspired by Amarok 1.4: a searchable library, rich listening context, and an active playlist in three persistent panels.
 
-**Status:** native macOS application in development. The SwiftUI app includes libVLC 4 playback, a SQLite library, local/OpenSubsonic/podcast sources, CUE tracks, and metadata/artwork editors.
+**Status:** native macOS application in development. The SwiftUI app includes libVLC 4 playback, a SQLite library, local/OpenSubsonic/Bandcamp/podcast sources, Internet radio, optional Last.fm scrobbling, CUE tracks, and metadata/artwork editors.
 
 ## Download
 
@@ -29,17 +29,24 @@ To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.1.0 1`.
 - Browse one source or opt into All Sources; artist names group together while albums, tracks, folders, and credentials retain their origins.
 - System, Light, and Dark appearances; artist, album, year, folder, and tag browsing.
 - Local MP3, FLAC, Ogg Vorbis, Opus, and other TagLib/VLC formats; OpenSubsonic original streams; RSS/Atom podcasts.
+- Source catalog with Bandcamp setup, Podcast Index / Apple Podcasts discovery, and Radio Browser search or direct station URLs.
 - CUE sheets expose individual tracks without splitting the original audio.
 - Persistent playlists, queue, listening history, ratings, and scope-aware search through SQLite/FTS5.
-- Home includes Recently Added, Recently Played, and separate Tracks, Artists, and Albums rankings.
+- Home includes Recently Added, Recently Played with fixed local dates, separate Tracks, Artists, and Albums rankings, and Radio Favorites in All Sources.
 - Synchronized lyrics from local files, OpenSubsonic, and LRCLIB, with manual search/corrections, caching, highlighting, and optional file export.
-- Double-click a track, album, or artist to append it; right-click for Play Now or Add After Current Track. Contextual shuffle and a None / Playlist / Track repeat button.
-- Mac media keys, configurable local and global shortcuts, and adjustable streaming buffering.
+- Double-click a track, album, or artist to start an empty playlist; track double-click choices include Add to End, Add After Current Track, and Play Now. Album and artist actions always use their complete track lists.
+- Playlist controls at the top and bottom, contextual shuffle that appends to an existing queue, None / Playlist / Track repeat, and native Undo / Redo for playlist edits.
+- Mac media keys, configurable local and global shortcuts, held Left / Right keys for seeking, and adjustable streaming buffering.
+- Optional Last.fm scrobbling with personal API credentials, browser authorization, source exclusions, and a persistent submission queue.
 - Metadata cleanup, MusicBrainz release matching with change previews, TagLib file writes, and embedded/local/web artwork.
 - Optional recording identification through Chromaprint and AcoustID, using your own application client key stored in Keychain.
 - HTTP and HTTPS, with explicit server-specific trust for self-signed certificates shared by library, artwork, and audio requests.
 
-Single-source browsing remains the default. All Sources combines cached indexes and refreshes each source serially when requested; it does not merge stored copies. Crossfade and quality-tuning controls are outside the current scope. Gapless playback is optional. Bandcamp libraries exposed through OpenSubsonic use that connector.
+Single-source browsing remains the default. All Sources combines cached indexes and refreshes each source serially when requested; it does not merge stored copies. The library footer starts or stops refresh and shows progress. Crossfade and quality-tuning controls are outside the current scope. Gapless playback is optional. Bandcamp uses its OpenSubsonic endpoint and generated credentials. Qobuz, Deezer, and Spotify have service information links, without playback connectors. See [source setup and availability](docs/SOURCES.md).
+
+Clear Playlist keeps the current entry while it is playing or opening. When paused or stopped, it empties the playlist. Command-Z and Shift-Command-Z undo and redo playlist content edits; text fields keep their own undo history. Bare Left / Right seek by five seconds per key press and continue while held; Command-Left / Command-Right remain Previous / Next by default.
+
+Radio stations have their own Stations / Favorites views and remain outside music albums and listening rankings. Direct HTTP/HTTPS streams, M3U, and PLS wrappers are supported. The player shows live metadata when provided, with explicit reconnect after disconnection; HLS is currently unsupported. Podcast search selects a publisher feed before subscribing. Last.fm is disabled until you configure your own API key and shared secret and authorize your account. See [Last.fm setup and privacy](docs/SCROBBLING.md).
 
 AcoustID lookup sends a fingerprint and duration after an explicit Identify action. It supports whole local files; individual CUE tracks use artist/album metadata search. Remote edits are local library overlays. Each local file replacement is atomic; an album spanning several files can be partially saved if a later file fails.
 

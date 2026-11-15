@@ -7,6 +7,14 @@ import UniformTypeIdentifiers
 struct MacarokCommands: Commands {
     @Bindable var model: AppModel
     var body: some Commands {
+        CommandGroup(replacing: .undoRedo) {
+            Button(model.queueUndoPresentation.undoTitle) { model.queueUndoPresentation.undo() }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!model.queueUndoPresentation.canUndo)
+            Button(model.queueUndoPresentation.redoTitle) { model.queueUndoPresentation.redo() }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(!model.queueUndoPresentation.canRedo)
+        }
         CommandGroup(replacing: .newItem) {
             Button("Add Music Folder…", action: model.pickFolder).keyboardShortcut("o")
             Button("Connect a Source…") { model.presentAddSource(from: .mainWindow) }.keyboardShortcut("o", modifiers: [.command, .shift])
@@ -32,7 +40,8 @@ struct MacarokCommands: Commands {
         CommandMenu("Library") {
             Button("Search Library") { NotificationCenter.default.post(name: .macarokFocusSearch, object: nil) }.keyboardShortcut(model.menuShortcut("search"))
             Button("Show Current Track", action: model.showCurrentTrack).keyboardShortcut(model.menuShortcut("showCurrentTrack"))
-            Button(model.isAllSources ? "Refresh All Sources" : "Refresh Source", action: model.refresh).keyboardShortcut("r").disabled(model.sources.isEmpty || model.isRefreshing)
+            Button(model.isStoppingRefresh ? "Stopping Refresh…" : model.isRefreshing ? "Stop Refresh" : model.isAllSources ? "Refresh All Sources" : "Refresh Source", action: model.toggleRefresh)
+                .keyboardShortcut("r").disabled(model.sources.isEmpty || model.isStoppingRefresh)
             Divider()
             Button("Home") { model.libraryView = .home }.keyboardShortcut("1")
             Button("Artists") { model.libraryView = .artists }.keyboardShortcut("2")

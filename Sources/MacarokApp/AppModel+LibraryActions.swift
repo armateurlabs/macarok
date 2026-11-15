@@ -22,10 +22,34 @@ extension AppModel {
                 self.status = "Resolving playlist entries…"
                 let resolution = try await self.performLibraryWork { store in
                     let existing = try store.allTracks()
-                    let byID = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                    var byID = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                    let sources = try store.sources()
+                    let kinds = Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0.kind) })
+                    var stations = try store.radioStations()
+                    var importedRadio = false
                     var matches: [Int: [TrackRecord]] = [:]
                     var needsLocalIndex = false
                     for (index, entry) in entries.enumerated() {
+                        if entry.isLiveRadio {
+                            guard (try? RadioError.validatedURL(entry.url.absoluteString)) != nil else { continue }
+                            if let id = entry.trackID, let station = stations.first(where: { $0.id == id }),
+                               entry.sourceID == nil || station.sourceID == entry.sourceID {
+                                matches[index] = [station.track]; continue
+                            }
+                            if let station = stations.first(where: { $0.streamURL == entry.url.absoluteString }) {
+                                matches[index] = [station.track]; continue
+                            }
+                            let sourceID = entry.sourceID.flatMap { kinds[$0] == .radio ? $0 : nil } ?? RadioLibrary.sourceID
+                            let preservedID = entry.trackID.flatMap { byID[$0] == nil ? $0 : nil }
+                            var station = RadioStationRecord(id: preservedID, sourceID: sourceID,
+                                                             name: entry.title?.isEmpty == false ? entry.title! : entry.url.host ?? "Radio Station",
+                                                             streamURL: entry.url.absoluteString)
+                            if byID[station.id] != nil { station.id = UUID().uuidString }
+                            try store.saveRadioStation(station, favorite: false)
+                            stations.append(station); byID[station.id] = station.track; importedRadio = true
+                            matches[index] = [station.track]
+                            continue
+                        }
                         if let id = entry.trackID, let track = byID[id], entry.sourceID == nil || track.sourceID == entry.sourceID {
                             matches[index] = [track]
                             continue
@@ -34,9 +58,15 @@ extension AppModel {
                         if !known.isEmpty { matches[index] = known }
                         else if entry.url.isFileURL { needsLocalIndex = true }
                     }
-                    return (matches: matches, needsLocalIndex: needsLocalIndex)
+                    return (matches: matches, needsLocalIndex: needsLocalIndex, importedRadio: importedRadio, sources: try store.sources())
                 }
                 var matches = resolution.matches
+                if resolution.importedRadio {
+                    self.sources = resolution.sources
+                    if self.libraryScope == nil { self.selectAddedSource(RadioLibrary.sourceID) }
+                    await self.radio?.reload()
+                    self.reloadLibrary()
+                }
 
                 if resolution.needsLocalIndex {
                     let source = try await self.explicitLocalSource(url: url, preferredName: url.deletingPathExtension().lastPathComponent)
@@ -163,6 +193,7 @@ extension AppModel {
     }
 
     nonisolated private static func matchingTracks(for entry: PlaylistEntry, in candidates: [TrackRecord]) -> [TrackRecord] {
+        let candidates = entry.sourceID.map { origin in candidates.filter { $0.sourceID == origin } } ?? candidates
         if entry.url.isFileURL, entry.url.pathExtension.lowercased() == "cue" {
             let matching = candidates.filter { $0.cuePath == entry.url.standardizedFileURL.path }
             let sourceID = matching.first?.sourceID
@@ -190,6 +221,11 @@ extension AppModel {
         return inOneSource.prefix(1).map { $0 }
     }
 
+    func currentPlaylistEntries() -> [PlaylistEntry] {
+        let radioIDs = Set(sources.filter { $0.kind == .radio }.map(\.id))
+        return queue.map { PlaylistEntry(track: $0.track, isLiveRadio: radioIDs.contains($0.track.sourceID)) }
+    }
+
     private func writeCurrentPlaylist(saveInLibrary: Bool) {
         guard !queue.isEmpty else {
             fail("Empty playlist", "Add tracks to the active playlist before saving it.")
@@ -206,13 +242,14 @@ extension AppModel {
             : "Save the active playlist as M3U or PLS."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let tracks = queue.map(\.track)
+        let entries = currentPlaylistEntries()
         Task { [weak self] in
             guard let self else { return }
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             do {
                 try await Task.detached(priority: .userInitiated) {
-                    try PlaylistIO.write(entries: tracks.map { PlaylistEntry(track: $0) }, to: url)
+                    try PlaylistIO.write(entries: entries, to: url)
                 }.value
                 if saveInLibrary {
                     self.playlists = try await self.performLibraryWork { store in

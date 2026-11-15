@@ -1,3 +1,4 @@
+import AppKit
 import MacarokCore
 import SwiftUI
 
@@ -40,25 +41,73 @@ struct SourceMenu: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        Menu {
-            Picker("Library source", selection: $model.libraryScope) {
-                Label("All Sources", systemImage: "square.stack.3d.up").tag(Optional(LibraryScope.all))
-                ForEach(model.sources) { source in
-                    Label(source.name, systemImage: source.kind == .local ? "externaldrive" : source.kind == .openSubsonic ? "server.rack" : "podcasts")
-                        .tag(Optional(LibraryScope.source(source.id)))
-                }
-            }.pickerStyle(.inline).labelsHidden()
-        } label: {
-            Text(model.scopeTitle).fontWeight(.semibold).lineLimit(1)
+        NativeSourcePicker(selection: $model.libraryScope, sources: model.sources)
+            .frame(maxWidth: .infinity).frame(height: 26)
+            .accessibilityIdentifier("librarySourcePicker")
+    }
+}
+
+/// NSPopUpButton preserves the platform's selected-item checkmark, source icon, and keyboard navigation.
+struct NativeSourcePicker: NSViewRepresentable {
+    @Binding var selection: LibraryScope?
+    let sources: [SourceRecord]
+
+    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.controlSize = .small
+        button.font = .systemFont(ofSize: 12, weight: .semibold)
+        button.bezelStyle = .rounded
+        button.alignment = .left
+        button.autoenablesItems = false
+        (button.cell as? NSPopUpButtonCell)?.lineBreakMode = .byTruncatingTail
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.selectSource(_:))
+        button.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        button.setAccessibilityLabel("Library source")
+        return button
+    }
+
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.selection = $selection
+        let choices: [(LibraryScope, String, String)] = [(.all, "All Sources", "square.stack.3d.up")] + sources.map {
+            (.source($0.id), $0.name, $0.kind.librarySymbol)
         }
-        .menuStyle(.borderlessButton)
-        .buttonStyle(.plain)
-        .menuIndicator(.visible)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .disabled(model.sources.isEmpty)
-        .accessibilityLabel("Library source")
-        .accessibilityValue(model.scopeTitle)
+        context.coordinator.scopes = choices.map(\.0)
+        button.removeAllItems()
+        for (scope, title, symbol) in choices {
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            item.state = selection == scope ? .on : .off
+            button.menu?.addItem(item)
+        }
+        if let index = choices.firstIndex(where: { $0.0 == selection }) { button.selectItem(at: index) }
+        else { button.selectItem(at: 0) }
+        button.isEnabled = !sources.isEmpty
+        button.setAccessibilityValue(button.titleOfSelectedItem)
+    }
+
+    final class Coordinator: NSObject {
+        var selection: Binding<LibraryScope?>
+        var scopes: [LibraryScope] = []
+        init(selection: Binding<LibraryScope?>) { self.selection = selection }
+        @objc func selectSource(_ sender: NSPopUpButton) {
+            guard scopes.indices.contains(sender.indexOfSelectedItem) else { return }
+            selection.wrappedValue = scopes[sender.indexOfSelectedItem]
+        }
+    }
+}
+
+extension SourceKind {
+    var librarySymbol: String {
+        switch rawValue {
+        case "local": "externaldrive"
+        case "openSubsonic": "server.rack"
+        case "radio": "antenna.radiowaves.left.and.right"
+        default: "podcasts"
+        }
     }
 }
 

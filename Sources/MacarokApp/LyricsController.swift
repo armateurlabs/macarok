@@ -79,6 +79,10 @@ final class LyricsController {
     }
 
     var hasSynchronizedLyrics: Bool { !displayLines.isEmpty }
+    var isLiveRadio: Bool {
+        guard let track else { return false }
+        return track.sourceID == RadioLibrary.sourceID || model?.sources.contains(where: { $0.id == track.sourceID && $0.kind == .radio }) == true
+    }
     var sheetTrackTitle: String { sheetTrack?.title ?? track?.title ?? "Lyrics" }
     var canSaveToFiles: Bool {
         guard let track, let document, document.hasContent, !document.isInstrumental else { return false }
@@ -101,6 +105,9 @@ final class LyricsController {
         cancelLoad()
         self.track = track; notice = nil; document = nil; displayLines = []; plainText = ""; sourceLabel = ""; errorMessage = nil
         guard let track else { state = .idle; return }
+        if isLiveRadio {
+            state = .failed; errorTitle = "Live Radio"; errorMessage = "Lyrics are unavailable for live radio streams."; return
+        }
         guard let model, let store = model.store else { state = .failed; errorMessage = "The music library is unavailable."; return }
         let id = UUID(); requestID = id; state = .loading
         let local = localReader
@@ -152,13 +159,13 @@ final class LyricsController {
     func reload() async { await load(track: track, force: true) }
 
     func openSearch() {
-        guard let track else { return }
+        guard let track, !isLiveRadio else { return }
         sheetTrack = track; searchTitle = track.title; searchArtist = track.artist; searchAlbum = track.album
         searchResults = []; candidates = [:]; searchError = nil; isSearching = false; showsSearch = true
     }
 
     func openEditor() {
-        guard let track else { return }
+        guard let track, !isLiveRadio else { return }
         sheetTrack = track; editedText = document?.originalLRC ?? document?.lrcText ?? plainText
         editorError = nil; showsEditor = true
     }

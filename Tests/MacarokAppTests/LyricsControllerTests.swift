@@ -6,6 +6,23 @@ import MacarokMetadata
 
 @MainActor
 final class LyricsControllerTests: XCTestCase {
+    func testLiveRadioNeverRetrievesOrEditsLyrics() async throws {
+        let model = AppModel(registerSystemControls: false)
+        model.sources = [RadioLibrary.source]
+        let station = RadioStationRecord(name: "Test Radio", streamURL: "https://radio.invalid/live")
+        let controller = LyricsController(model: model, localReader: { _ in
+            XCTFail("A radio station must not trigger a lyrics lookup")
+            return nil
+        })
+        await controller.load(track: station.track)
+        XCTAssertTrue(controller.isLiveRadio)
+        XCTAssertEqual(controller.errorTitle, "Live Radio")
+        controller.openSearch(); controller.openEditor()
+        XCTAssertFalse(controller.showsSearch)
+        XCTAssertFalse(controller.showsEditor)
+        XCTAssertFalse(controller.canSaveToFiles)
+    }
+
     func testObsoleteRequestCannotReplaceNewTrackAndForegroundRemainsResponsive() async throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.directory) }

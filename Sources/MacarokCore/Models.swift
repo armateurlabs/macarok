@@ -6,12 +6,14 @@ public enum SourceKind: String, Codable, Sendable, CaseIterable, DatabaseValueCo
     case local
     case openSubsonic
     case podcasts
+    case radio
 
     public var displayName: String {
         switch self {
         case .local: "Local Files"
         case .openSubsonic: "OpenSubsonic"
         case .podcasts: "Podcasts"
+        case .radio: "Internet Radio"
         }
     }
 }

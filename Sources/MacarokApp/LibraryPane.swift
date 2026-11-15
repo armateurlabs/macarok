@@ -9,11 +9,16 @@ struct LibraryPane: View {
     @State private var expandedGenres: Set<String> = []
     @State private var expandedFormats: Set<String> = []
     @FocusState private var searchFocused: Bool
+    private var visibleRadioStations: [RadioStationRecord] { model.radioStations.filter { !model.search.isEmpty || $0.isFavorite } }
 
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader { SourceMenu(model: model) }
                 .accessibilityIdentifier("libraryPanelHeader")
+            if model.isRadioSource {
+                RadioLibraryView(model: model)
+            } else {
+            VStack(spacing: 0) {
             VStack(spacing: 11) {
                 TextField(model.isAllSources ? "Search all sources" : "Search this library", text: $model.search).textFieldStyle(.roundedBorder).focused($searchFocused)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
@@ -41,11 +46,20 @@ struct LibraryPane: View {
             } else if (model.isLoadingLibrary && model.tracks.isEmpty) || (model.isSearching && model.displayedTracks.isEmpty) {
                 ProgressView(model.isSearching ? "Searching library…" : "Loading library…")
                     .controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if model.displayedTracks.isEmpty {
+            } else if model.displayedTracks.isEmpty && visibleRadioStations.isEmpty {
                 ContentUnavailableView.search(text: model.search).font(.caption)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
+                    if model.isAllSources && !visibleRadioStations.isEmpty {
+                        Section(model.search.isEmpty ? "Radio Favorites" : "Radio Stations") {
+                            ForEach(visibleRadioStations) { station in
+                                RadioStationLabel(station: station).contentShape(Rectangle())
+                                    .onTapGesture(count: 2) { Task { await model.radio?.addToPlaylist(station, playNow: model.queue.isEmpty) } }
+                                    .contextMenu { if let controller = model.radio { RadioStationActions(controller: controller, station: station) } }
+                            }
+                        }
+                    }
                     switch model.libraryView {
                     case .home, .artists:
                         ForEach(model.artists) { artist in
@@ -61,7 +75,7 @@ struct LibraryPane: View {
                                 }
                             } label: {
                                 HStack { Text(artist.name).lineLimit(1); SourceGroupBadge(model: model, sourceIDs: artist.sourceIDs); Spacer(); Text("\(artist.albums.count)").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                                    .onLibraryClick(inspect: { model.inspectArtist(artist.name) }, add: { model.add(model.albumsForArtist(artist.name).flatMap(\.tracks)) })
+                                    .onLibraryClick(inspect: { model.inspectArtist(artist.name) }, add: { model.doubleClickSelection(model.albumsForArtist(artist.name).flatMap(\.tracks)) })
                                     .contextMenu {
                                         LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") { model.albumsForArtist(artist.name).flatMap(\.tracks) }
                                         Button("Shuffle Artist") { model.shuffle(model.albumsForArtist(artist.name).flatMap(\.tracks)) }
@@ -105,16 +119,18 @@ struct LibraryPane: View {
             Divider()
             VStack(alignment: .leading, spacing: 7) {
                 Text("\(model.albums.count) albums · \(model.tracks.count) tracks").font(.system(size: 10)).foregroundStyle(.secondary)
-                Button(action: model.refresh) {
-                    HStack {
-                        Image(systemName: model.isAllSources ? "arrow.clockwise" : model.selectedSource?.kind == .local ? "externaldrive" : "network")
-                        Text(model.isAllSources ? "Refresh All Sources" : model.selectedSource?.kind == .local ? "Scan for Changes" : "Refresh Source")
-                        Spacer()
-                    }.font(.system(size: 11)).contentShape(Rectangle())
-                }.buttonStyle(.plain).disabled(model.sources.isEmpty || model.isRefreshing)
+                LibraryRefreshControl(model: model)
             }.padding(13)
+            }
+            }
         }.background(.regularMaterial)
         .onReceive(NotificationCenter.default.publisher(for: .macarokFocusSearch)) { _ in searchFocused = true }
+        .onChange(of: model.contextPage) { _, _ in searchFocused = false }
+        .onChange(of: model.selectedTrackID) { _, _ in searchFocused = false }
+        .onChange(of: model.selectedAlbumID) { _, _ in searchFocused = false }
+        .onChange(of: model.selectedArtist) { _, _ in searchFocused = false }
+        .onChange(of: model.selectedQueueID) { _, _ in searchFocused = false }
+        .onChange(of: model.queue.count) { _, _ in searchFocused = false }
         .onChange(of: model.libraryScope) { _, _ in
             expandedArtists = []; expandedAlbums = []; expandedYears = []; expandedGenres = []; expandedFormats = []
         }
@@ -131,7 +147,7 @@ struct LibraryPane: View {
 
     private func albumLabel(_ album: AlbumRecord) -> some View {
         HStack { Text(album.title).lineLimit(1); SourceBadge(model: model, sourceID: album.sourceID); Spacer(); Text(album.year.map(String.init) ?? "").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 11)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            .onLibraryClick(inspect: { model.inspect(album) }, add: { model.add(model.tracksForAlbum(album)) })
+            .onLibraryClick(inspect: { model.inspect(album) }, add: { model.doubleClickSelection(model.tracksForAlbum(album)) })
             .contextMenu {
                 LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
                 Button("Shuffle Album") { model.shuffle(model.tracksForAlbum(album)) }
@@ -140,7 +156,7 @@ struct LibraryPane: View {
 
     private func albumRow(_ album: AlbumRecord) -> some View {
         HStack(spacing: 9) { ArtworkView(track: album.tracks.first, model: model).frame(width: 36, height: 36); VStack(alignment: .leading, spacing: 2) { Text(album.title).lineLimit(1); Text("\(album.artist) · \(album.year.map(String.init) ?? "—")").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1); SourceBadge(model: model, sourceID: album.sourceID) } }.font(.system(size: 12)).padding(.vertical, 3).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            .onLibraryClick(inspect: { model.inspect(album) }, add: { model.add(model.tracksForAlbum(album)) })
+            .onLibraryClick(inspect: { model.inspect(album) }, add: { model.doubleClickSelection(model.tracksForAlbum(album)) })
             .contextMenu {
                 LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }
                 Button("Shuffle Album") { model.shuffle(model.tracksForAlbum(album)) }
@@ -167,3 +183,24 @@ struct FolderLibrary: View {
 }
 
 extension Notification.Name { static let macarokFocusSearch = Notification.Name("Macarok.focusSearch") }
+
+struct LibraryRefreshControl: View {
+    @Bindable var model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Button(action: model.toggleRefresh) {
+                HStack(spacing: 7) {
+                    Image(systemName: model.isRefreshing ? "stop.fill" : "arrow.clockwise")
+                    Text(model.isStoppingRefresh ? "Stopping…" : model.isRefreshing ? "Stop Refresh" : model.isAllSources ? "Refresh All Sources" : "Refresh Source")
+                    Spacer(minLength: 0)
+                    if model.isRefreshing { ProgressView().controlSize(.mini) }
+                }.font(.system(size: 11)).contentShape(Rectangle())
+            }.buttonStyle(.plain).disabled(model.sources.isEmpty || model.isStoppingRefresh)
+                .accessibilityIdentifier("libraryRefreshButton")
+            if model.isRefreshing {
+                Text(model.refreshProgress).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
+                    .accessibilityIdentifier("libraryRefreshProgress")
+            }
+        }
+    }
+}
