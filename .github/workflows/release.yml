@@ -143,11 +143,11 @@ jobs:
             notes_arguments=(--notes-file "$notes")
             edit_notes_arguments=(--notes-file "$notes")
           fi
-          if gh release view "$RELEASE_TAG" --json isDraft,targetCommitish,tagName > "$RUNNER_TEMP/existing-release.json" 2>/dev/null; then
-            if ! jq --exit-status --arg tag "$RELEASE_TAG" --arg commit "$RELEASE_COMMIT" \
-              '(.isDraft == true) and (.tagName == $tag) and (.targetCommitish == $commit)' \
+          if gh release view "$RELEASE_TAG" --json isDraft,tagName > "$RUNNER_TEMP/existing-release.json" 2>/dev/null; then
+            if ! jq --exit-status --arg tag "$RELEASE_TAG" \
+              '(.isDraft == true) and (.tagName == $tag)' \
               "$RUNNER_TEMP/existing-release.json" >/dev/null; then
-              echo '::error::The existing release is published or targets a different commit; refusing to overwrite it.'
+              echo '::error::The existing release is published or uses a different tag; refusing to overwrite it.'
               exit 1
             fi
             gh release upload "$RELEASE_TAG" \
@@ -157,7 +157,7 @@ jobs:
             gh release create "$RELEASE_TAG" \
               "dist/Macarok-$RELEASE_VERSION-arm64.dmg" \
               "dist/Macarok-$RELEASE_VERSION-arm64.dmg.sha256" \
-              --verify-tag --target "$RELEASE_COMMIT" --draft \
+              --verify-tag --draft \
               --title "Macarok $RELEASE_VERSION" \
               --prerelease="$RELEASE_PRERELEASE" "${notes_arguments[@]}"
           fi

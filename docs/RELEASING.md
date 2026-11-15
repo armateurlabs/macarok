@@ -33,7 +33,7 @@ The script builds and signs the app, embeds its MIT license and dependency notic
 
 The application is ad-hoc signed, without Apple notarization. No Developer ID certificate or Apple credentials are currently configured. Signing and notarization can be added later with dedicated credentials. State this distribution status in release notes.
 
-To inspect a workflow run, use `gh run list --workflow release.yml` and `gh run view RUN_ID --log-failed`. Failed builds do not publish a release. If asset upload fails, a draft may remain; rerunning the publishing job can reuse a draft only when it targets the same tag and exact commit. Published releases are never overwritten. The workflow also checks that the tag still resolves to the built commit before publishing; never move a published tag.
+To inspect a workflow run, use `gh run list --workflow release.yml` and `gh run view RUN_ID --log-failed`. Failed builds do not publish a release. If asset upload fails, a draft may remain; rerunning the publishing job can reuse a draft only for the same tag. Published releases are never overwritten. The workflow checks that the tag still resolves to the built commit before publishing; never move a published tag.
 
 If workflow configuration needs fixing after a tag was pushed, commit the fix on `main` and use the manual retry input to rebuild that existing tag with the updated workflow:
 
@@ -42,3 +42,5 @@ gh workflow run release.yml --ref main -f tag=v0.1.0
 ```
 
 The retry checks out the requested tag for the app, tests, packaging scripts, and release notes. The tag stays unchanged, and the publishing job verifies the built commit against it. The workflow run number supplies the new bundle build number.
+
+Release creation uses `--verify-tag` without `--target`: the tag already exists and its commit was checked explicitly. Sending an older commit as `target_commitish` can require workflow-modification permissions when its workflow files differ from the default branch, even for an existing tag. Omitting this unused field lets the automatic token publish without additional credentials. See [GitHub's release API documentation](https://docs.github.com/en/rest/releases/releases#create-a-release).
