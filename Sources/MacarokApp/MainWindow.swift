@@ -11,10 +11,11 @@ struct MainWindow: View {
             TransportBar(model: model, player: model.player)
             Divider()
             HSplitView {
-                LibraryPane(model: model).frame(minWidth: 245, idealWidth: 310, maxWidth: 440)
-                ContextPane(model: model).frame(minWidth: 370, idealWidth: 590, maxWidth: .infinity)
-                QueuePane(model: model, player: model.player).frame(minWidth: 270, idealWidth: 330, maxWidth: 480)
+                LibraryPane(model: model).frame(minWidth: 245, idealWidth: 310, maxWidth: 440, maxHeight: .infinity)
+                ContextPane(model: model).frame(minWidth: 370, idealWidth: 590, maxWidth: .infinity, maxHeight: .infinity)
+                QueuePane(model: model, player: model.player).frame(minWidth: 270, idealWidth: 330, maxWidth: 480, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack(spacing: 7) {
                 if model.isRefreshing { ProgressView().controlSize(.mini); Text(model.refreshProgress) }
                 else { Image(systemName: "checkmark").foregroundStyle(.secondary); Text(model.status).lineLimit(1) }
@@ -27,6 +28,7 @@ struct MainWindow: View {
             .font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 29)
             .background(.bar)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
@@ -117,6 +119,7 @@ struct QueuePane: View {
             Divider()
             if model.queue.isEmpty {
                 ContentUnavailableView { Label("Your playlist is empty", systemImage: "music.note.list") } description: { Text("Double-click a library track to add it here.") }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(selection: $model.selectedQueueID) {
                     ForEach(Array(model.queue.enumerated()), id: \.element.id) { index, item in

@@ -29,6 +29,7 @@ struct LibraryPane: View {
                 VStack(spacing: 12) { Image(systemName: "music.note.house").font(.system(size: 28)).foregroundStyle(.tertiary); Text("Bring your music.").foregroundStyle(.secondary); Button("Add Music Folder…", action: model.pickFolder); Button("Connect a Source…") { model.showAddSource = true } }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.displayedTracks.isEmpty {
                 ContentUnavailableView.search(text: model.search).font(.caption)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
                     if !model.search.isEmpty { ForEach(model.searchResults) { TrackLine(track: $0, model: model, showsArtist: true) } }

@@ -1,6 +1,6 @@
 # Private beta verification
 
-Verified on 14 November 2026 with Xcode 27.1, Swift 6.4, and macOS 27.2.1 on Apple Silicon.
+Baseline verified on 14 November 2026 with Xcode 27.1, Swift 6.4, and macOS 27.2.1 on Apple Silicon. Native empty-window layout follow-up verified on 15 November 2026.
 
 ## Completed checks
 
@@ -18,7 +18,9 @@ Build/test logs and full-resolution renders are kept under the ignored `.build` 
 
 ## Remaining manual checks
 
-The Mac was locked during the automated run. Full desktop interaction has therefore not been verified: file pickers, double-click timing, drag/reorder, custom shortcut recording, Mac media keys, resize behavior, and accepting a certificate through the native modal still need a session with the Mac unlocked. The corresponding controller/transport paths have automated coverage.
+The Mac was locked during the initial automated run. On 15 November, the empty-window height issue was reproduced in the running app and visually verified after rebuilding and reopening the corrected Release bundle. Four new geometry regressions cover no sources, a configured empty source, a populated library with an empty queue, and unmatched search results, in both appearances at several window sizes. The original code fails the empty-window regression. All four tests and the existing native render test pass.
+
+File pickers, double-click timing, drag/reorder, custom shortcut recording, Mac media keys, and accepting a certificate through the native modal still need manual verification. The corresponding controller/transport paths have automated coverage.
 
 Live MusicBrainz/AcoustID results and personal OpenSubsonic servers have not been verified. Metadata lookup protocol tests use fixtures; AcoustID requires your own application client key. Follow `TESTING.md` and `DEMO-SERVER.md` for a reproducible manual session with synthetic data.
 
