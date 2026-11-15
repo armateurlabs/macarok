@@ -1,4 +1,4 @@
-# Private beta verification
+# Verification
 
 Baseline verified on 14 November 2026 with Xcode 27.1, Swift 6.4, and macOS 27.2.1 on Apple Silicon. Native empty-window layout follow-up verified on 15 November 2026.
 
@@ -22,6 +22,7 @@ Baseline verified on 14 November 2026 with Xcode 27.1, Swift 6.4, and macOS 27.2
 - A sample of the unresponsive app identified repeated full-catalog folder traversal on the main thread. The replacement indexes folder prefixes once in a background task; its synthetic 30,000-track/7,000-folder test measured about 0.17 seconds for index construction.
 - A second live sample while opening Years identified full album reconstruction inside each year's disclosure group. Navigation now consumes cached snapshot groups, with collapsed children deferred until expansion; artwork completion no longer loads every track on the main thread.
 - The Release app bundle was built, locally signed, and passed deep strict signature verification. Its native executable targets arm64; VLC, resource bundles, the helper, icon, and third-party notices are embedded.
+- The versioned `0.1.0` DMG was built locally and passed image checksum verification. A read-only mounted copy passed deep strict app signature verification, version/build checks, and checks for the Applications link, MIT license, and third-party notices. Bash syntax and ShellCheck validation passed for the release packaging scripts.
 
 Build/test logs and full-resolution renders are kept under the ignored `.build` directory. The checked-in native previews in `design/native` are component renders, not desktop screenshots.
 
@@ -40,4 +41,4 @@ Live MusicBrainz/AcoustID results and personal OpenSubsonic servers have not bee
 - Recording fingerprint identification supports whole local files. Individual CUE tracks and remote streams use metadata search instead.
 - Servers that compress byte-range responses or cap an open-ended range before EOF fail explicitly; automatic stitching of such ranges is not implemented.
 - Gapless playback is optional. Crossfade, commercial-service playback, merged source libraries, and direct cloud-storage integration are outside this iteration.
-- This is a locally signed private beta, without notarization or a public release package.
+- Release DMGs currently target Apple Silicon and macOS 14 or later. The application is ad-hoc signed without Apple notarization.

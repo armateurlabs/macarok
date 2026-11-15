@@ -3,7 +3,14 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
 configuration="${1:-debug}"
-case "$configuration" in debug|release) ;; *) echo "Usage: $0 [debug|release]" >&2; exit 2 ;; esac
+release_version="${2:-}"
+build_number="${3:-}"
+case "$configuration" in debug|release) ;; *) echo "Usage: $0 [debug|release] [version build-number]" >&2; exit 2 ;; esac
+if [[ "$#" -gt 3 ]]; then echo "Usage: $0 [debug|release] [version build-number]" >&2; exit 2; fi
+if [[ -n "$release_version" || -n "$build_number" ]]; then
+    source "$project_root/scripts/release-version.sh"
+    validate_release_version "$release_version" "$build_number"
+fi
 cd "$project_root"
 swift build --configuration "$configuration" --product Macarok
 binary_directory="$(swift build --configuration "$configuration" --show-bin-path)"
@@ -15,8 +22,14 @@ staged_app="$staging_directory/Macarok.app"
 mkdir -p "$staged_app/Contents/MacOS" "$staged_app/Contents/Resources" "$staged_app/Contents/Frameworks"
 cp "$binary_directory/Macarok" "$staged_app/Contents/MacOS/Macarok"
 cp Support/Info.plist "$staged_app/Contents/Info.plist"
+if [[ -n "$release_version" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${release_version%%-*}" "$staged_app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$staged_app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :CFBundleGetInfoString string Macarok $release_version" "$staged_app/Contents/Info.plist"
+fi
 if [[ ! -f Support/AppIcon.icns ]]; then swift scripts/make-icon.swift; fi
 cp Support/AppIcon.icns "$staged_app/Contents/Resources/AppIcon.icns"
+cp LICENSE "$staged_app/Contents/Resources/LICENSE.txt"
 cp Support/ThirdPartyNotices.md "$staged_app/Contents/Resources/ThirdPartyNotices.md"
 mkdir -p "$staged_app/Contents/Resources/Licenses"
 cp .build/checkouts/GRDB.swift/LICENSE "$staged_app/Contents/Resources/Licenses/GRDB-MIT.txt"

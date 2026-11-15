@@ -2,17 +2,21 @@
 
 Macarok includes or links the following open-source components. Their notices and license terms remain applicable to those components.
 
+Macarok's own source code is licensed under the MIT license in the repository's `LICENSE` file, also included in the application bundle. That license does not replace the terms of bundled dependencies.
+
 | Component | Source | License information |
 | --- | --- | --- |
 | VLCKit / libVLC 4 | https://github.com/videolan/vlckit and https://code.videolan.org/videolan/vlc | LGPL 2.1 or later for VLCKit/libVLC; upstream multimedia modules and dependencies have their own notices. |
-| GRDB.swift 7.12.0 | https://github.com/groue/GRDB.swift | MIT |
-| KeyboardShortcuts 3.1.0 | https://github.com/sindresorhus/KeyboardShortcuts | MIT |
-| TagLib through CXXTagLib | https://github.com/sbooth/CXXTagLib and https://taglib.org | MPL 1.1 / LGPL dual licensing as provided by upstream |
+| GRDB.swift 7.12.0 | https://github.com/groue/GRDB.swift/tree/v7.12.0 | MIT |
+| KeyboardShortcuts 3.1.0 | https://github.com/sindresorhus/KeyboardShortcuts/tree/v3.1.0 | MIT |
+| TagLib 2.3.2 through CXXTagLib | https://github.com/sbooth/CXXTagLib/tree/9e499ea0a69d107791ac0a2fe9d6a59cf401c6f9 | MPL 1.1 / LGPL dual licensing as provided by upstream |
 | utfcpp bundled with TagLib | https://github.com/nemtrif/utfcpp | Boost Software License 1.0 |
 | Optional Chromaprint / fpcalc 1.6.2 | https://github.com/acoustid/chromaprint/tree/v1.6.2 | LGPL 2.1 or later, including upstream notices for MIT-licensed Chromaprint code |
 | FFmpeg 8.0 in the upstream fpcalc helper | https://ffmpeg.org/releases/ffmpeg-8.0.tar.gz | LGPL 2.1 or later in this upstream build; see https://github.com/acoustid/ffmpeg-build/tree/v8.0-1 for the build configuration |
 
 Pinned revisions and the VLCKit binary checksum are recorded in `Package.swift` and `Package.resolved`. Dependency license texts available in the SwiftPM checkouts are copied into the application bundle by the build script. Upstream VLCKit source and redistribution information are available from VideoLAN.
+
+The timestamped VLCKit archive is `VLCKit-4.0-20261109-1916.zip`. Its bundled libVLC identifies as `4.0.0-dev-39728-g15e2c8be08`.
 
 The optional helper is downloaded without modification from the official Chromaprint universal macOS release. Its URL and SHA-256 digest are pinned in `scripts/fetch-fingerprint-helper.sh`. The app bundles its license texts alongside these notices. It is not installed globally.
 
