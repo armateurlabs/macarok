@@ -48,6 +48,8 @@ Enter a title or author, choose **Search**, then **Use Feed** beside the desired
 
 Search only runs on submission. Requests are rate-limited and cached; a directory error or throttling message can be retried later. You can always paste a feed URL directly.
 
+Episodes stream by default. Choose **Download Episode** to keep an explicit local copy, then **Reveal in Finder** to locate it. The timeline distinguishes playback progress from buffered/downloaded coverage. See [podcast timelines, storage, and cleanup](PODCASTS.md) for the download folder and retention policy.
+
 ## Service availability
 
 | Service | Macarok support |
@@ -56,7 +58,7 @@ Search only runs on submission. Requests are rate-limited and cached; a director
 | OpenSubsonic / Navidrome | Cached library, original-quality playback, source-specific authentication and certificate trust |
 | Bandcamp | OpenSubsonic preset with generated account credentials |
 | Internet Radio / Radio Browser | Saved stations, favorites, directory search, direct streams and M3U/PLS wrappers; HLS unsupported |
-| Podcasts / Podcast Index / Apple Podcasts | Feed subscription and episode playback; directories provide discovery |
+| Podcasts / Podcast Index / Apple Podcasts | Feed subscription, streaming and explicit episode downloads; directories provide discovery |
 | Last.fm | Optional scrobbling; see [setup and privacy](SCROBBLING.md) |
 | [Qobuz](https://www.qobuz.com) | No playback connector; approved partner integration is required |
 | [Deezer](https://www.deezer.com) | No confirmed public full-playback integration route |

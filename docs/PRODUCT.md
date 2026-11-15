@@ -20,9 +20,13 @@ Home contains Recently Added, Recently Played, and Most Played. Most Played has 
 
 The three panels share a 42-point bar header and a full-width bottom divider. Library search/navigation sits below its native macOS source picker, which shows source icons and the checked selection. The title bar omits the redundant left app title and refresh button. Album artwork is square; captions reserve two title lines and one artist line. Sources can be added directly from Settings while the main window is closed; the presenting window owns connection and certificate dialogs.
 
-The central panel has two centered segmented menu rows with stable heights. Home / Playing selects the main view. Home offers All, Recently added, Recently played, and Most played, filtering the displayed sections. Playing offers Context, Lyrics, and Edit metadata; Context retains its Overview / Tags detail choice. Track changes update the central playback context without changing these menu selections or the library's browsing scope. Home keeps its selected filter while playback advances.
+The central panel has two centered segmented menu rows with stable heights. Home / Playing selects the main view. Home offers All, Recently added, Recently played, and Most played, filtering the displayed sections. Playing offers Context, Lyrics, Wikipedia, Edit song metadata, and Edit album metadata; Context retains its Overview / Tags detail choice. Track changes update the central playback context without changing these menu selections or the library's browsing scope. Home keeps its selected filter while playback advances.
 
 An active metadata or artwork editor pins its original track and draft while playback continues. Switching to Home does not discard an unfinished metadata session. Returning to Playing restores that editor; finishing it catches up with the current track. Saving a metadata draft changes only its edited fields, retaining newer artwork, listening history, and unrelated concurrent tag corrections.
+
+Library and playlist lists use the same native alternating row style. The unused viewport below the last actual row stays plain, including after adding/removing entries, resizing, scrolling, or expanding folders. A transparent view covers only that unused canvas; native row selection, keyboard navigation, drag operations, context menus, and scrollbars remain owned by AppKit.
+
+Settings → General → Menu Bar offers **Show Macarok in the menu bar**, disabled by default and remembered across launches. The system menu bar item shows the current title and artist, Play/Pause or radio Reconnect, Previous, Next, Show Macarok, and Quit Macarok. Playback controls remain available while the main window is closed. Disabling the option removes the item without changing playback or keyboard preferences.
 
 A single click inspects an item. Double-clicking a library track, album, or artist starts its first available track when the active playlist is empty. With an existing playlist, individual tracks follow the Track double-click preference: Add to Playlist, Add After Current Track, or Play Now. Double-clicking a playlist entry plays that existing entry.
 
@@ -46,6 +50,10 @@ The source catalog includes a Bandcamp preset for `https://bandcamp.com/api/subs
 
 Podcast discovery offers Podcast Index by default and an Apple Podcasts selector. Search returns publisher feeds; Use Feed fills the subscription sheet, and Subscribe retrieves the chosen RSS/Atom feed. Search has cancellation, caching, rate limits, and explicit errors. Direct feed entry remains available.
 
+Podcast streaming retains a bounded RAM buffer; durable episode files require Download Episode. Completed downloads stay until explicitly removed, and Reveal in Finder locates the source-specific file. The timeline layers gray unavailable data, white buffered/downloaded ranges, and blue playback progress. Byte-to-time coverage is approximate for variable bitrate, and unknown lengths have no percentage. See [podcast storage and cleanup](PODCASTS.md).
+
+Wikipedia context uses artist or album metadata for an English Wikipedia page or search result, with editable search and Open in Browser. Loading is limited to the visible pane, follows the central pinned/current target, and rejects obsolete navigation. The unmodified page retains its own attribution and licenses. See [Wikipedia context](WIKIPEDIA.md).
+
 Internet Radio is a persistent source with Stations and Favorites views, URL entry, and Radio Browser directory filters for name, country, language, and tags. Stations remain separate from music albums, artists, and statistics. Direct streams and bounded M3U/PLS resolution are supported; HLS is explicitly unsupported. ICY broadcast metadata is stripped from audio and displayed as live information. Live playback has no seek timeline or saved resume offset. Pause closes the live connection; resume reconnects. Disconnections expose an explicit Reconnect action, without an automatic retry loop.
 
 Support HTTP and HTTPS. Self-signed certificates require explicit acceptance, remembered for the relevant server. Certificate changes require a new decision. Apply a consistent source-specific trust policy to metadata requests, artwork, and audio delivery.
@@ -54,7 +62,7 @@ Support HTTP and HTTPS. Self-signed certificates require explicit acceptance, re
 
 Connecting a server retrieves its album list in pages of 500. Each page's albums are imported before requesting the next page. Each completed album is committed immediately to SQLite, and the first album is published before the next request. Later UI updates are coalesced to roughly 750 ms, with catalog snapshots read off the main thread. Browsing, search, and adding tracks to the queue are available while the rest of the catalog loads. This does not request a server-side file scan.
 
-SQLite retains the indexed titles, artists, albums, tags, durations, remote IDs, paths, and cover references. Startup and source switching display this cached catalog immediately; an explicit Refresh currently repeats the complete metadata traversal. Audio files are requested only for playback, through an in-memory streaming buffer. Cover images are fetched on demand and stored in the separate Artwork cache.
+SQLite retains the indexed titles, artists, albums, tags, durations, remote IDs, paths, and cover references. Startup and source switching display this cached catalog immediately; an explicit Refresh currently repeats the complete metadata traversal. OpenSubsonic audio is requested for playback through an in-memory streaming buffer. Cover images are fetched on demand and stored in the separate Artwork cache.
 
 Cancellation or a later request failure keeps both the previous cache and newly committed albums usable. Missing-track reconciliation runs only after a successful complete retrieval and updates only availability differences. An interrupted import remains marked incomplete across restarts; Refresh traverses the catalog again. Remote cover caches survive refresh while their cover IDs remain unchanged.
 
@@ -102,7 +110,7 @@ Scrobbling is disabled until the user supplies personal Last.fm API credentials 
 
 Local and OpenSubsonic music sources can be individually excluded. Podcasts and radio are always excluded. Eligible plays qualify after half a track's duration or four minutes, with a minimum known duration greater than 30 seconds; unknown durations use four minutes. Listening uses monotonic time, excludes pauses/buffering/seeks, and treats repeats as separate occurrences. Existing library history is never uploaded retroactively.
 
-Now Playing is separately configurable. Qualified plays are persisted and delivered oldest first, with retry and pending/ignored/failed counts. Disconnect disables scrobbling and clears pending submissions for the account. See [Last.fm setup and privacy](SCROBBLING.md).
+Now Playing is separately configurable. Qualified plays are persisted and delivered oldest first, with retry and pending/ignored/failed counts. Disconnect removes the saved session and stops submission while retaining that account's pending plays. Reconnecting the same account resumes them; another account cannot submit them. See [Last.fm setup and privacy](SCROBBLING.md).
 
 ## Library, metadata, and artwork
 
@@ -115,6 +123,14 @@ Use TagLib for metadata reading and writing. Build enrichment around MusicBrainz
 Preview proposed changes, preserve unknown tags, and respect personal corrections. Find artwork in embedded metadata and local folders, then through web providers such as Cover Art Archive. Allow selected artwork to be embedded in audio files and optionally saved alongside the album.
 
 Writing tags to remote originals requires a source that provides file-write access; OpenSubsonic library edits must not imply that the server's audio file was modified.
+
+### Album metadata editing
+
+**Edit song metadata** and **Edit album metadata** have separate drafts. The album editor exposes only Album, Album artist, Artist (all tracks), Year, and Genre. It resolves every available track in the original source and album, even when a search displays only a subset. An identically named album in another source is a separate target. The source/album target and unfinished draft remain pinned when playback advances or the central view changes.
+
+Only shared fields changed in the draft are applied. Unchanged per-track artists, titles, track/disc numbers, CUE timestamps, artwork, listening history, ratings, and unrelated concurrent corrections are preserved. The protection checkbox controls whether local corrections survive future scans; remote corrections remain library overlays.
+
+**Save to Files** explicitly confirms local writes. Each physical audio file is written once through the verified TagLib writer; external CUE sheets are updated once, and textual embedded CUE changes are committed together with shared audio tags. Album-artist changes preserve inherited per-track performers unless Artist (all tracks) is explicitly changed. Unknown tags, CUE directives, audio frames, and segment boundaries remain intact. A multi-file save can partially succeed; an error reports completed destinations and retains the draft. **Save to Library** changes only Macarok's index for remote sources. Artwork uses the separate Change Artwork action.
 
 ## Development conventions
 

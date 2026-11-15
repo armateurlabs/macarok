@@ -33,13 +33,18 @@ To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.1.0 1`.
 - CUE sheets expose individual tracks without splitting the original audio.
 - Persistent playlists, queue, listening history, ratings, and scope-aware search through SQLite/FTS5.
 - Home includes Recently Added, Recently Played with fixed local dates, separate Tracks, Artists, and Albums rankings, and Radio Favorites in All Sources.
-- Centered Home / Playing navigation has a fixed second menu row: Home filters or Context / Lyrics / Edit metadata. Track changes retain the selected mode and detail tab; active metadata and artwork editors keep their original target.
+- Centered Home / Playing navigation has a fixed second menu row: Home filters or Context / Lyrics / Wikipedia / Edit song metadata / Edit album metadata. Track changes retain the selected mode and detail tab; active metadata and artwork editors keep their original target.
+- Podcast timelines show gray unavailable data, white buffered/downloaded coverage, and blue playback progress. Explicit episode downloads support offline playback, Reveal in Finder, and manual removal; see [podcast storage and cleanup](docs/PODCASTS.md).
+- Artist/album Wikipedia context with editable search, loading cancellation, and Open in Browser; see [Wikipedia behavior and content licenses](docs/WIKIPEDIA.md).
 - Synchronized lyrics from local files, OpenSubsonic, and LRCLIB, with manual search/corrections, caching, highlighting, and optional file export.
 - Double-click a track, album, or artist to start an empty playlist; track double-click choices include Add to Playlist, Add After Current Track, and Play Now. Album and artist actions always use their complete track lists.
 - Playlist controls at the top and bottom, contextual shuffle that appends to an existing queue, None / Playlist / Track repeat, and native Undo / Redo for playlist edits.
+- Matching native alternating rows in the library and playlist; unused space below the last entry stays plain.
 - Mac media keys, configurable local and global shortcuts, held Left / Right keys for seeking, and adjustable streaming buffering.
+- Optional system menu bar controls for playback and reopening the player, disabled by default.
 - Optional Last.fm scrobbling with personal API credentials, browser authorization, source exclusions, and a persistent submission queue.
 - Metadata cleanup, MusicBrainz release matching with change previews, TagLib file writes, and embedded/local/web artwork.
+- Separate song and album editors. Album edits apply changed shared fields to the complete album in its actual source while preserving individual titles, numbering, CUE boundaries, and listening history.
 - Optional recording identification through Chromaprint and AcoustID, using your own application client key stored in Keychain.
 - HTTP and HTTPS, with explicit server-specific trust for self-signed certificates shared by library, artwork, and audio requests.
 
@@ -68,6 +73,10 @@ Offscreen renders of the implemented SwiftUI views, using the synthetic demo col
 The metadata editor keeps its target and draft while the next track plays:
 
 ![Pinned metadata editor in dark mode](design/native/metadata-dark.png)
+
+The separate album editor is also rendered in [Light](design/native/album-metadata-light.png) and [Dark](design/native/album-metadata-dark.png), with compact [Light](design/native/album-metadata-narrow-light.png) and [Dark](design/native/album-metadata-narrow-dark.png) layouts at the minimum central-panel width.
+
+Additional native renders show [real alternating rows](design/native/list-rows-dark.png), [buffered podcast coverage](design/native/podcast-timeline-dark.png), and a [completed episode download](design/native/podcast-timeline-downloaded-dark.png). See [playback performance](docs/PLAYBACK-PERFORMANCE.md) for the background work and streaming architecture.
 
 ## Explore the mockups
 
