@@ -16,11 +16,11 @@ Get the DMG from [GitHub Releases](https://github.com/armateurlabs/macarok/relea
 
 Native SwiftUI views rendered from the current application with a synthetic music collection.
 
-**Home · Light** — library browsing, recently added albums, listening history, and the active playlist.
+**Home · Light** — library browsing, recently added albums, listening history, and the active playlist grouped by album.
 
 ![Macarok Home in Light appearance](design/native/home-light.png)
 
-**Playing · Dark** — album context and individual CUE tracks alongside the library and playlist.
+**Playing · Dark** — album context and individual CUE tracks, with the album selected in the library and the playlist grouped by album.
 
 ![Macarok Playing in Dark appearance](design/native/cue-album-dark.png)
 
@@ -68,7 +68,7 @@ The wolf-and-apple icon is generated from the checked-in artwork at every build.
 
 Open `Package.swift` in Xcode for development, or use `swift build` and `swift test` from the command line. The app bundle is the recommended way to run the application with its resources and macOS integration.
 
-To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.2.1 3`. Tags such as `v0.2.1` trigger the GitHub Actions release workflow. See [release procedures](docs/RELEASING.md).
+To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.3.0 3`. Tags such as `v0.3.0` trigger the GitHub Actions release workflow. See [release procedures](docs/RELEASING.md).
 
 ## Native application
 
