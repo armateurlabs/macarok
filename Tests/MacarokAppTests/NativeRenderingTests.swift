@@ -179,6 +179,10 @@ final class NativeRenderingTests: XCTestCase {
 
             try await render(SettingsView(model: model), size: NSSize(width: 650, height: 555), scheme: scheme,
                              destination: output.appendingPathComponent("settings-\(suffix).png"))
+            for (tab, name) in [(SettingsTab.playback, "playback"), (.shortcuts, "shortcuts")] {
+                try await render(SettingsView(model: model, initialTab: tab), size: NSSize(width: 650, height: 555), scheme: scheme,
+                                 destination: output.appendingPathComponent("settings-\(name)-\(suffix).png"))
+            }
             try await render(SettingsView(model: model, initialTab: .scrobbling), size: NSSize(width: 650, height: 555), scheme: scheme,
                              destination: output.appendingPathComponent("settings-scrobbling-\(suffix).png"))
             try await render(MetadataEditor(model: model, track: cueTrack), size: NSSize(width: 680, height: 720), scheme: scheme,

@@ -25,20 +25,24 @@ final class MenuBarControllerTests: XCTestCase {
         XCTAssertFalse(host.visible)
         model.settings.showMenuBar = true
         try await eventually { host.visible }
+        let player = try XCTUnwrap(host.player)
         XCTAssertEqual(host.installations, 1)
-        XCTAssertEqual(try item("menuBarTrackTitle", in: host).title, "Queued song")
+        XCTAssertEqual(player.state.title, "Queued song")
         let initialUpdates = host.updates
         model.settings.showMenuBar = true
-        model.artworkRevision += 1
         await settle()
         XCTAssertEqual(host.updates, initialUpdates)
-        XCTAssertEqual(host.installations, 1)
+        model.artworkRevision += 1
+        try await eventually { player.state.artworkRevision == model.artworkRevision }
+        XCTAssertTrue(host.player === player)
+        XCTAssertEqual(host.installations, 1, "Artwork updates must reuse the installed status item and popover presentation.")
         model.settings.showMenuBar = false
         try await eventually { !host.visible }
         controller.stop()
         model.settings.showMenuBar = true
         await settle()
         XCTAssertFalse(host.visible, "Queued Observation callbacks must not resurrect a stopped status item.")
+        XCTAssertFalse(player.state.enabled)
     }
 
     func testTrackAndRadioMetadataUpdateAndActionsResolveTheCurrentEntry() async throws {
@@ -56,36 +60,33 @@ final class MenuBarControllerTests: XCTestCase {
         let host = TestMenuBarHost()
         let controller = MenuBarController(model: model, host: host)
         defer { controller.stop() }
-        let originalMenu = try XCTUnwrap(host.menu)
-        XCTAssertEqual(try item("menuBarTrackTitle", in: host).title, "First song")
-        XCTAssertEqual(try item("menuBarTrackArtist", in: host).title, "First artist")
-        XCTAssertFalse(try item("menuBarTrackTitle", in: host).isEnabled)
-        XCTAssertFalse(try item("menuBarTrackArtist", in: host).isEnabled)
-        XCTAssertNotNil(try item("menuBarShowWindow", in: host).action)
-        XCTAssertNotNil(try item("menuBarQuit", in: host).action)
+        let player = try XCTUnwrap(host.player)
+        XCTAssertEqual(player.state.title, "First song")
+        XCTAssertEqual(player.state.artist, "First artist")
         model.currentQueueID = model.queue[1].id
-        try await eventually { host.title("menuBarTrackTitle") == "Second song" }
+        try await eventually { player.state.title == "Second song" }
         model.queue[1].track.title = "Corrected song title"
-        try await eventually { host.title("menuBarTrackTitle") == "Corrected song title" }
-        XCTAssertTrue(host.menu === originalMenu)
+        try await eventually { player.state.title == "Corrected song title" }
+        XCTAssertTrue(host.player === player)
         XCTAssertEqual(host.installations, 1)
         model.currentQueueID = model.queue[2].id
         model.player.pauseLive()
         model.radioBroadcastTitle = "Artist — Current broadcast"
-        try await eventually { host.title("menuBarTrackTitle") == "Synthetic Station" && host.title("menuBarTrackArtist") == "Artist — Current broadcast" }
-        XCTAssertEqual(try item("menuBarPlayPause", in: host).title, "Play")
+        try await eventually { player.state.title == "Synthetic Station" && player.state.artist == "Artist — Current broadcast" }
+        XCTAssertTrue(player.state.isRadio)
+        XCTAssertEqual(player.state.playPauseTitle, "Play")
         model.radioDisconnected = true
-        try await eventually { host.title("menuBarPlayPause") == "Reconnect" }
+        try await eventually { player.state.playPauseTitle == "Reconnect" }
+        XCTAssertEqual(player.state.playPauseSymbol, "arrow.clockwise")
         let current = model.currentQueueID
-        let next = try XCTUnwrap(originalMenu.items.firstIndex { $0.identifier?.rawValue == "menuBarNext" })
-        originalMenu.performActionForItem(at: next)
-        XCTAssertEqual(model.currentQueueID, current, "An already-open menu must advance from the actual final entry, not a captured older track.")
+        player.perform(.next)
+        XCTAssertEqual(model.currentQueueID, current, "An open mini player must advance from the actual final entry, not a captured older track.")
         XCTAssertEqual(model.status, "Playback finished.")
         model.settings.showMenuBar = false
         try await eventually { !host.visible }
-        model.status = "Disabled menu stayed passive"
-        originalMenu.performActionForItem(at: next)
-        XCTAssertEqual(model.status, "Disabled menu stayed passive")
+        model.status = "Disabled mini player stayed passive"
+        player.perform(.next)
+        XCTAssertEqual(model.status, "Disabled mini player stayed passive")
     }
 
     func testPlayPauseUsesExistingActionsWithoutObservingThePlaybackClock() async throws {
@@ -104,43 +105,58 @@ final class MenuBarControllerTests: XCTestCase {
         let host = TestMenuBarHost()
         let controller = MenuBarController(model: model, host: host)
         defer { controller.stop(); model.stopPlayback(clearCurrent: true) }
-        try perform("menuBarPlayPause", host: host)
-        try await eventually { model.player.state == .playing && model.player.position > 0.2 && host.title("menuBarPlayPause") == "Pause" }
+        let player = try XCTUnwrap(host.player)
+        player.perform(.playPause)
+        try await eventually { model.player.state == .playing && model.player.position > 0.2 && player.state.playPauseTitle == "Pause" }
         let initialPosition = model.player.position, initialUpdates = host.updates
         try await Task.sleep(for: .milliseconds(650))
         XCTAssertGreaterThan(model.player.position, initialPosition + 0.2)
-        XCTAssertEqual(host.updates, initialUpdates, "Five-Hz clock publications must not rebuild the status menu.")
+        XCTAssertEqual(host.updates, initialUpdates, "Five-Hz clock publications must not rebuild the status item or artwork presentation.")
         XCTAssertEqual(host.installations, 1)
-        try perform("menuBarPlayPause", host: host)
-        try await eventually { model.player.state == .paused && host.title("menuBarPlayPause") == "Play" }
+        player.perform(.playPause)
+        try await eventually { model.player.state == .paused && player.state.playPauseTitle == "Play" }
         XCTAssertEqual(model.currentQueueID, model.queue[0].id)
     }
 
-    func testDeinitializingControllerRemovesPresentationAndLeavesNoLiveObservation() async throws {
+    func testOpenMainWindowAndAppearanceUseExistingModelBehavior() async throws {
         _ = NSApplication.shared
         var preferences = AppPreferences(); preferences.showMenuBar = true
         let model = AppModel(preferences: preferences, registerSystemControls: false)
+        var openedWindows = 0
+        model.openMainWindow = { openedWindows += 1 }
         let host = TestMenuBarHost()
-        var controller: MenuBarController? = MenuBarController(model: model, host: host)
+        let controller = MenuBarController(model: model, host: host)
+        defer { controller.stop() }
+        let player = try XCTUnwrap(host.player)
+        player.perform(.showWindow)
+        XCTAssertEqual(openedWindows, 1)
+        for appearance in [Appearance.light, .dark, .system] {
+            model.settings.appearance = appearance
+            try await eventually { player.state.appearance == appearance }
+        }
+        controller.stop()
+        player.perform(.showWindow)
+        XCTAssertEqual(openedWindows, 1)
+    }
+
+    func testRetainedPresentationDoesNotRetainControllerOrAppModel() async throws {
+        _ = NSApplication.shared
+        var preferences = AppPreferences(); preferences.showMenuBar = true
+        var model: AppModel? = AppModel(preferences: preferences, registerSystemControls: false)
+        weak var weakModel = model
+        let host = TestMenuBarHost()
+        var controller: MenuBarController? = MenuBarController(model: try XCTUnwrap(model), host: host)
         weak var weakController = controller
+        let player = try XCTUnwrap(host.player)
         XCTAssertTrue(host.visible)
         controller = nil
-        try await eventually { weakController == nil && !host.visible }
-        model.settings.showMenuBar = false
-        model.settings.showMenuBar = true
-        await settle()
+        model = nil
+        try await eventually { weakController == nil && weakModel == nil && !host.visible }
+        player.perform(.playPause)
+        player.perform(.showWindow)
+        await player.prepareArtwork?()
         XCTAssertFalse(host.visible)
         XCTAssertEqual(host.installations, 1)
-    }
-
-    private func item(_ identifier: String, in host: TestMenuBarHost) throws -> NSMenuItem {
-        try XCTUnwrap(host.menu?.items.first { $0.identifier?.rawValue == identifier })
-    }
-
-    private func perform(_ identifier: String, host: TestMenuBarHost) throws {
-        let menu = try XCTUnwrap(host.menu)
-        let index = try XCTUnwrap(menu.items.firstIndex { $0.identifier?.rawValue == identifier })
-        menu.performActionForItem(at: index)
     }
 
     private func settle() async { try? await Task.sleep(for: .milliseconds(40)) }
@@ -166,14 +182,13 @@ final class MenuBarControllerTests: XCTestCase {
 
 @MainActor
 private final class TestMenuBarHost: MenuBarHosting {
-    private(set) var menu: NSMenu?
+    private(set) var player: MenuBarPlayerPresentation?
     private(set) var visible = false
     private(set) var installations = 0
     private(set) var updates = 0
-    func show(menu: NSMenu) {
+    func show(player: MenuBarPlayerPresentation) {
         if !visible { installations += 1 }
-        self.menu = menu; visible = true; updates += 1
+        self.player = player; visible = true; updates += 1
     }
     func hide() { visible = false }
-    func title(_ identifier: String) -> String? { menu?.items.first { $0.identifier?.rawValue == identifier }?.title }
 }

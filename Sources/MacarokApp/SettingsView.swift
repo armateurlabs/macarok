@@ -54,13 +54,9 @@ struct SettingsView: View {
                 Picker("Track double-click", selection: $model.settings.trackDoubleClickAction) {
                     ForEach(TrackDoubleClickAction.allCases) { Text($0.title).tag($0) }
                 }
-                Text("Double-clicking an entry in the active playlist always plays that entry.").font(.caption).foregroundStyle(.secondary)
-                Text("Double-clicking an album or artist always adds all its tracks to the active playlist.").font(.caption).foregroundStyle(.secondary)
-                Text("Double-clicking music starts playback when the active playlist is empty.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Menu Bar") {
                 Toggle("Show Macarok in the menu bar", isOn: $model.settings.showMenuBar)
-                Text("Control playback and reopen the player while its window is closed.").font(.caption).foregroundStyle(.secondary)
             }
             Section("About") {
                 LabeledContent("Macarok", value: "0.1.0 · Private Beta")
@@ -89,7 +85,6 @@ struct SettingsView: View {
                     Text("Target duration: 1–120 seconds. Changes apply to the next streamed track.").font(.caption).foregroundStyle(.secondary)
                 }
                 LabeledContent("Streaming quality", value: "Original")
-                Text("Original-quality audio is requested whenever the source provides it.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Playback") {
                 HStack {
@@ -130,8 +125,6 @@ struct SettingsView: View {
         Form {
             Section {
                 LabeledContent("Mac media keys", value: "Play / Pause · Previous · Next")
-                Text("Media keys follow macOS’s active player. In-app shortcuts apply while Macarok is focused.").font(.caption).foregroundStyle(.secondary)
-                Text("Left and Right seek by 5 seconds. Hold either key to continue seeking. Text editing keeps its usual arrow keys.").font(.caption).foregroundStyle(.secondary)
             }
             Section("In App") {
                 localRecorder("Play / Pause", key: "playPause", fallback: .init(.space))
