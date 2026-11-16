@@ -72,11 +72,11 @@ final class PlaybackTimelineBufferTests: XCTestCase {
     private func verifyColors<Content: View>(_ content: Content, scheme: ColorScheme,
                                              bufferedAt: CGFloat, unavailableAt: CGFloat?, name: String) async throws {
         _ = NSApplication.shared
-        let hosting = NSHostingView(rootView: content.frame(width: 420, height: 30)
+        let hosting = NSHostingView(rootView: content.frame(width: 420, height: 40)
             .background(Color(nsColor: .windowBackgroundColor))
             .environment(\.colorScheme, scheme).environment(\.layoutDirection, .leftToRight))
         hosting.sizingOptions = []
-        hosting.frame = NSRect(x: 0, y: 0, width: 420, height: 30)
+        hosting.frame = NSRect(x: 0, y: 0, width: 420, height: 40)
         let window = NSWindow(contentRect: hosting.bounds, styleMask: [.borderless], backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: scheme == .light ? .aqua : .darkAqua)
@@ -86,6 +86,7 @@ final class PlaybackTimelineBufferTests: XCTestCase {
         let slider = try XCTUnwrap(findSlider(in: hosting))
         XCTAssertEqual(slider.accessibilityIdentifier(), "playbackTimeline")
         XCTAssertEqual(slider.doubleValue, 25, accuracy: 0.01)
+        XCTAssertEqual(slider.bounds.height, 32, accuracy: 0.01)
         XCTAssertEqual(slider.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]),
                        scheme == .dark ? .darkAqua : .aqua,
                        "The native timeline must honor the app's selected appearance.")
@@ -130,7 +131,7 @@ final class PlaybackTimelineBufferTests: XCTestCase {
                 : background.brightnessComponent - pixel.brightnessComponent
             return contrast > 0.18
         }
-        // Read the painted shape itself: it must be one small filled circle, with the blue bar
+        // Read the painted shape itself: it must be one filled circle, with the blue bar
         // reaching its left edge. This also catches duplicate native knobs, hollow rings, and a
         // blue endpoint that uses a different width from the native slider's knob travel.
         let reach = Int(12 * scale), axis = max(0, Int(scale / 4))
@@ -145,7 +146,7 @@ final class PlaybackTimelineBufferTests: XCTestCase {
         let paintedWidth = CGFloat(right - left + 1) / scale
         let paintedHeight = CGFloat(bottom - top + 1) / scale
         XCTAssertEqual(paintedWidth, paintedHeight, accuracy: 1.5, "The thumb must be circular, including disabled timelines.")
-        XCTAssertEqual(paintedHeight, 8, accuracy: 1.5, "The thumb must remain a compact circle rather than the full tracking rectangle.")
+        XCTAssertEqual(paintedHeight, 16, accuracy: 1.5, "The selected thumb diameter must be rendered in both appearances.")
         XCTAssertEqual(CGFloat(top + bottom) / 2, CGFloat(row), accuracy: scale)
         XCTAssertTrue(isThumbPixel(x: (left + right) / 2, y: (top + bottom) / 2), "The gray thumb must have a filled center.")
         let lastBlue = try XCTUnwrap((0..<bitmap.pixelsWide).last { x in

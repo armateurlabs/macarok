@@ -4,6 +4,11 @@ import MacarokAudio
 import MacarokCore
 import SwiftUI
 
+enum PlaybackTimelineMetrics {
+    static let thumbDiameter: CGFloat = 16
+    static let interactionHeight: CGFloat = 32
+}
+
 /// Only the compact timeline observes playback position; surrounding panels observe state changes.
 struct PlaybackTimelineView: View {
     @Bindable var model: AppModel
@@ -117,7 +122,7 @@ struct BufferedTimelineSlider: NSViewRepresentable {
         slider.needsDisplay = true
     }
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: TimelineSlider, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? 200, height: 16)
+        CGSize(width: proposal.width ?? 200, height: PlaybackTimelineMetrics.interactionHeight)
     }
     static func dismantleNSView(_ slider: TimelineSlider, coordinator: Coordinator) { slider.stopPresentationUpdates() }
     final class Coordinator: NSObject {
@@ -158,6 +163,14 @@ final class TimelineSlider: NSSlider {
     var playbackThumbRect: NSRect { (cell as? TimelineSliderCell)?.playbackThumbRect ?? .zero }
 
     deinit { presentationTimer?.invalidate() }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, alphaValue > 0, let superview,
+              bounds.contains(convert(point, from: superview)) else { return nil }
+        // The whole native surface accepts clicks, including vertical breathing room around
+        // the thin painted bar. Mouse mapping itself remains constrained to the track's width.
+        return self
+    }
 
     func updatePlayback(position: Double, measuredPosition: Double? = nil, duration: Double, enabled: Bool,
                         playing: Bool, generation: UUID?, seekRevision: UInt64,
@@ -329,7 +342,9 @@ private final class TimelineSliderCell: NSSliderCell {
     var playbackTrackRect: NSRect { paintedBar(inside: barRect(flipped: controlView?.isFlipped ?? false)) }
     var playbackThumbRect: NSRect {
         let bar = playbackTrackRect
-        return NSRect(x: bar.minX + bar.width * fraction - 4, y: bar.midY - 4, width: 8, height: 8)
+        let diameter = PlaybackTimelineMetrics.thumbDiameter
+        return NSRect(x: bar.minX + bar.width * fraction - diameter / 2, y: bar.midY - diameter / 2,
+                      width: diameter, height: diameter)
     }
 
     override func drawKnob(_ knobRect: NSRect) {

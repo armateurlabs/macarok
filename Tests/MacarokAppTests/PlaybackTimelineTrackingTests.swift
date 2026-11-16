@@ -54,8 +54,10 @@ final class PlaybackTimelineTrackingTests: XCTestCase {
                     let native = cell.knobRect(flipped: fixture.slider.isFlipped)
                     let visible = fixture.slider.playbackThumbRect
                     XCTAssertEqual(visible.midX, native.midX, accuracy: 0.5)
-                    XCTAssertTrue(native.insetBy(dx: -0.5, dy: -0.5).contains(visible),
-                                  "A drawn thumb must remain inside the native accessible/input hit area.")
+                    XCTAssertEqual(visible.width, 16)
+                    XCTAssertEqual(visible.height, 16)
+                    XCTAssertTrue(fixture.slider.bounds.contains(visible),
+                                  "A drawn thumb must remain inside the expanded native input surface.")
                 }
             }
         }
@@ -149,10 +151,10 @@ final class PlaybackTimelineTrackingTests: XCTestCase {
     }
 
     private func host(_ slider: TimelineSlider, width: CGFloat) -> NSWindow {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 16),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: PlaybackTimelineMetrics.interactionHeight),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        slider.frame = NSRect(x: 0, y: 0, width: width, height: 16)
+        slider.frame = NSRect(x: 0, y: 0, width: width, height: PlaybackTimelineMetrics.interactionHeight)
         window.contentView?.addSubview(slider)
         window.contentView?.layoutSubtreeIfNeeded()
         return window
