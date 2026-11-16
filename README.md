@@ -41,6 +41,7 @@ To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.1.0 1`.
 - Playlist controls at the top and bottom, contextual shuffle that appends to an existing queue, None / Playlist / Track repeat, and native Undo / Redo for playlist edits.
 - Matching native alternating rows in the library and playlist; unused space below the last entry stays plain.
 - Mac media keys, configurable local and global shortcuts, held Left / Right keys for seeking, and adjustable streaming buffering.
+- Prepared next-track handoffs, targeted local rescans, playback stall detection, and a session-only **Help → Playback Diagnostics…** panel with explicit export.
 - Optional system menu bar controls for playback and reopening the player, disabled by default.
 - Optional Last.fm scrobbling with personal API credentials, browser authorization, source exclusions, and a persistent submission queue.
 - Metadata cleanup, MusicBrainz release matching with change previews, TagLib file writes, and embedded/local/web artwork.
@@ -77,6 +78,8 @@ The metadata editor keeps its target and draft while the next track plays:
 The separate album editor is also rendered in [Light](design/native/album-metadata-light.png) and [Dark](design/native/album-metadata-dark.png), with compact [Light](design/native/album-metadata-narrow-light.png) and [Dark](design/native/album-metadata-narrow-dark.png) layouts at the minimum central-panel width.
 
 Additional native renders show [real alternating rows](design/native/list-rows-dark.png), [buffered podcast coverage](design/native/podcast-timeline-dark.png), and a [completed episode download](design/native/podcast-timeline-downloaded-dark.png). See [playback performance](docs/PLAYBACK-PERFORMANCE.md) for the background work and streaming architecture.
+
+The playback diagnostics panel is previewed in [Light](design/native/playback-diagnostics-light.png) and [Dark](design/native/playback-diagnostics-dark.png).
 
 ## Explore the mockups
 
