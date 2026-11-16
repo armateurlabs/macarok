@@ -67,6 +67,42 @@ final class LibrarySearchPresentationTests: XCTestCase {
         XCTAssertEqual(model.queue, queue)
     }
 
+    func testLibrarySelectionFollowsInspectionAndDropsInsertCompleteItemsAtThePosition() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.removeFiles() }
+        let model = fixture.model
+        await model.start()
+        let afterlight = try XCTUnwrap(model.visibleAlbums.first { $0.id == "a-afterlight" })
+        XCTAssertNil(model.librarySelection)
+
+        model.selectLibraryItem(.album(afterlight.presentationID))
+        XCTAssertEqual(model.contextPage, .album)
+        XCTAssertEqual(model.librarySelection, .album(afterlight.presentationID))
+        model.selectLibraryItem(.artist("meridian atlas"))
+        XCTAssertEqual(model.selectedArtist, "Meridian Atlas")
+        XCTAssertEqual(model.librarySelection, .artist("meridian atlas"))
+        model.selectLibraryItem(.track("a-orbit"))
+        XCTAssertEqual(model.librarySelection, .track("a-orbit"))
+        model.contextPage = .home
+        XCTAssertNil(model.librarySelection, "Returning Home clears the highlight, so the same row can be chosen again.")
+
+        model.activateLibraryItem(.album(afterlight.presentationID))
+        XCTAssertEqual(model.queue.map(\.track.id), ["a-signal", "a-static"])
+        let current = model.currentQueueID
+        model.search = "signal"
+        try await expectEventually { !model.isSearching && model.displayedTracks.count == 2 }
+        // A search result shows only part of the album; a drop still inserts the complete album.
+        model.insertLibraryItems([.track("a-paper"), .album(afterlight.presentationID)], at: 1)
+        XCTAssertEqual(model.queue.map(\.track.id), ["a-signal", "a-paper", "a-signal", "a-static", "a-static"])
+        XCTAssertEqual(model.currentQueueID, current)
+        model.queueUndoManager.undo()
+        XCTAssertEqual(model.queue.map(\.track.id), ["a-signal", "a-static"])
+
+        let provider = LibraryItemID.itemProvider([.folder("Rock"), .artist("paper satellites")])
+        let decoded = await LibraryItemID.load(from: [provider, NSItemProvider(object: "foreign text" as NSString)])
+        XCTAssertEqual(decoded, [.folder("Rock"), .artist("paper satellites")])
+    }
+
     func testSwitchingTabsPreservesQueryAndClearingRestoresCatalogWithoutFilteringHomeHistory() async throws {
         let fixture = try makeFixture()
         defer { fixture.removeFiles() }

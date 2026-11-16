@@ -57,7 +57,7 @@ struct LibraryPane: View {
                 ContentUnavailableView.search(text: model.search).font(.caption)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
+                List(selection: Binding(get: { model.librarySelection }, set: { model.selectLibraryItem($0) })) {
                     if model.isAllSources && !visibleRadioStations.isEmpty {
                         Section(model.search.isEmpty ? "Radio Favorites" : "Radio Stations") {
                             ForEach(visibleRadioStations) { station in
@@ -75,27 +75,28 @@ struct LibraryPane: View {
                                     ForEach(artist.albums, id: \.presentationID) { album in
                                         DisclosureGroup(isExpanded: expansion(album.presentationID, in: $expandedAlbums)) {
                                             if expandedAlbums.contains(album.presentationID) {
-                                                ForEach(album.tracks) { TrackLine(track: $0, model: model) }
+                                                ForEach(album.tracks) { libraryTrack($0) }
                                             }
                                         } label: { albumLabel(album) }
+                                        .libraryItem(.album(album.presentationID))
                                     }
                                 }
                             } label: {
                                 HStack { Text(artist.name).lineLimit(1); SourceGroupBadge(model: model, sourceIDs: artist.sourceIDs); Spacer(); Text("\(artist.albums.count)").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                                    .onLibraryClick(inspect: { model.inspectArtist(artist.name) }, add: { model.doubleClickSelection(model.albumsForArtist(artist.name).flatMap(\.tracks)) })
                                     .contextMenu {
                                         LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") { model.albumsForArtist(artist.name).flatMap(\.tracks) }
                                         Button("Shuffle Artist") { model.shuffle(model.albumsForArtist(artist.name).flatMap(\.tracks)) }
                                     }
                             }
+                            .libraryItem(.artist(LibraryArtistGroup.normalizedName(artist.name)))
                         }
                     case .albums:
-                        ForEach(model.visibleAlbums, id: \.presentationID) { album in albumRow(album) }
+                        ForEach(model.visibleAlbums, id: \.presentationID) { album in albumRow(album).libraryItem(.album(album.presentationID)) }
                     case .years:
                         ForEach(model.yearGroups) { group in
                             DisclosureGroup(isExpanded: expansion(group.id, in: $expandedYears)) {
                                 if expandedYears.contains(group.id) {
-                                    ForEach(group.albums, id: \.presentationID) { albumRow($0) }
+                                    ForEach(group.albums, id: \.presentationID) { albumRow($0).libraryItem(.album($0.presentationID)) }
                                 }
                             } label: { Text(group.title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
                         }
@@ -106,7 +107,7 @@ struct LibraryPane: View {
                             ForEach(model.genreGroups) { group in
                                 DisclosureGroup(isExpanded: expansion(group.id, in: $expandedGenres)) {
                                     if expandedGenres.contains(group.id) {
-                                        ForEach(group.tracks) { TrackLine(track: $0, model: model, showsArtist: true) }
+                                        ForEach(group.tracks) { libraryTrack($0, showsArtist: true) }
                                     }
                                 } label: { Text(group.title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
                             }
@@ -115,13 +116,16 @@ struct LibraryPane: View {
                             ForEach(model.formatGroups) { group in
                                 DisclosureGroup(isExpanded: expansion(group.id, in: $expandedFormats)) {
                                     if expandedFormats.contains(group.id) {
-                                        ForEach(group.tracks) { TrackLine(track: $0, model: model, showsArtist: true) }
+                                        ForEach(group.tracks) { libraryTrack($0, showsArtist: true) }
                                     }
                                 } label: { Text(group.title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
                             }
                         }
                     }
                 }.listStyle(.inset(alternatesRowBackgrounds: true)).environment(\.defaultMinListRowHeight, 25)
+                    // Row menus stay on each row; the list owns selection, double-click/Return, and dragging.
+                    .contextMenu(forSelectionType: LibraryItemID.self, menu: { _ in EmptyView() },
+                                 primaryAction: { items in items.forEach(model.activateLibraryItem) })
                     .background(NativeListBackground(revision: rowBackgroundRevision))
             }
             LibraryPanelFooter(model: model, summary: .music(albums: model.albums.count, tracks: model.tracks.count))
@@ -164,9 +168,12 @@ struct LibraryPane: View {
         })
     }
 
+    private func libraryTrack(_ track: TrackRecord, showsArtist: Bool = false) -> some View {
+        TrackLine(track: track, model: model, showsArtist: showsArtist, usesListSelection: true).libraryItem(.track(track.id))
+    }
+
     private func albumLabel(_ album: AlbumRecord) -> some View {
         HStack { Text(album.title).lineLimit(1); SourceBadge(model: model, sourceID: album.sourceID); Spacer(); Text(album.year.map(String.init) ?? "").font(.system(size: 10)).foregroundStyle(.tertiary) }.font(.system(size: 11)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            .onLibraryClick(inspect: { model.inspect(album) }, add: { model.doubleClickSelection(model.tracksForAlbum(album)) })
             .contextMenu {
                 LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }; AlbumMetadataAction(model: model, album: album)
                 Button("Shuffle Album") { model.shuffle(model.tracksForAlbum(album)) }
@@ -175,7 +182,6 @@ struct LibraryPane: View {
 
     private func albumRow(_ album: AlbumRecord) -> some View {
         HStack(spacing: 9) { ArtworkView(track: album.tracks.first, model: model).frame(width: 36, height: 36); VStack(alignment: .leading, spacing: 2) { Text(album.title).lineLimit(1); Text("\(album.artist) · \(album.year.map(String.init) ?? "—")").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1); SourceBadge(model: model, sourceID: album.sourceID) } }.font(.system(size: 12)).padding(.vertical, 3).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            .onLibraryClick(inspect: { model.inspect(album) }, add: { model.doubleClickSelection(model.tracksForAlbum(album)) })
             .contextMenu {
                 LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }; AlbumMetadataAction(model: model, album: album)
                 Button("Shuffle Album") { model.shuffle(model.tracksForAlbum(album)) }
@@ -190,14 +196,22 @@ struct FolderLibrary: View {
         Section {
             if !model.folderNodes.isEmpty {
                 OutlineGroup(model.folderNodes, children: \.children) { node in
-                    Label(node.name, systemImage: "folder").font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { model.inspectFolder(node.id) }
+                    Label(node.name, systemImage: "folder").font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         .contextMenu { Button("Shuffle Folder") { model.shuffle(model.tracksInFolder(node.id)) }; Button("Add Folder to Playlist") { model.add(model.tracksInFolder(node.id)) } }
+                        .libraryItem(.folder(node.id))
                 }
             }
             if model.isLoadingLibrary && model.folderNodes.isEmpty {
                 ProgressView("Loading folders…").controlSize(.small).font(.caption)
             }
         }
+    }
+}
+
+extension View {
+    /// A selectable library row that can also be dragged into the active playlist.
+    func libraryItem(_ item: LibraryItemID) -> some View {
+        tag(item).itemProvider { LibraryItemID.itemProvider([item]) }
     }
 }
 

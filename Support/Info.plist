@@ -19,4 +19,9 @@
         <key>CFBundleTypeRole</key><string>Viewer</string>
         <key>LSItemContentTypes</key><array><string>public.audio</string><string>public.m3u-playlist</string><string>public.folder</string></array>
     </dict></array>
+    <key>UTExportedTypeDeclarations</key><array><dict>
+        <key>UTTypeIdentifier</key><string>com.armateurlabs.macarok.library-items</string>
+        <key>UTTypeDescription</key><string>Macarok Library Items</string>
+        <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+    </dict></array>
 </dict></plist>

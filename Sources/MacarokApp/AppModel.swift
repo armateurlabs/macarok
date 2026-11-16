@@ -668,6 +668,64 @@ final class AppModel {
     func inspectFolder(_ nodeID: String) { recordUserCenterNavigation(); selectedFolder = nodeID; contextPage = .folder }
     var folderTitle: String { selectedFolder.flatMap { catalog.folderTitles[$0] } ?? scopeTitle }
     func inspectArtist(_ name: String) { recordUserCenterNavigation(); selectedArtist = name; contextPage = .artist }
+
+    /// The inspected library item; the library list highlights it natively.
+    var librarySelection: LibraryItemID? {
+        switch contextPage {
+        case .home: nil
+        case .track: selectedTrackID.map(LibraryItemID.track)
+        case .album: selectedAlbumID.flatMap { id in (selectedAlbumSourceID ?? sourceID).map { .album(StableID.make($0, "album", id)) } }
+        case .artist: selectedArtist.map { .artist(LibraryArtistGroup.normalizedName($0)) }
+        case .folder: selectedFolder.map(LibraryItemID.folder)
+        }
+    }
+
+    func selectLibraryItem(_ item: LibraryItemID?) {
+        guard let item, item != librarySelection else { return }
+        switch item {
+        case .artist(let key): if let artist = artistSummary(named: key) { inspectArtist(artist.name) }
+        case .album(let id): if let album = libraryAlbum(presentationID: id) { inspect(album) }
+        case .track(let id): if let track = searchCatalog.tracksByID[id] ?? catalog.tracksByID[id] { inspect(track) }
+        case .folder(let id): inspectFolder(id)
+        }
+    }
+
+    /// Complete tracks, even when a search shows only part of an album or artist.
+    func libraryTracks(for item: LibraryItemID) -> [TrackRecord] {
+        switch item {
+        case .artist(let key): albumsForArtist(key).flatMap(\.tracks)
+        case .album(let id): libraryAlbum(presentationID: id).map(tracksForAlbum) ?? []
+        case .track(let id): (searchCatalog.tracksByID[id] ?? catalog.tracksByID[id]).map { [$0] } ?? []
+        case .folder(let id): tracksInFolder(id)
+        }
+    }
+
+    /// Double-click or Return on a library row, with the existing per-kind behavior.
+    func activateLibraryItem(_ item: LibraryItemID) {
+        if case .track = item, let track = libraryTracks(for: item).first { doubleClick(track) }
+        else { doubleClickSelection(libraryTracks(for: item)) }
+    }
+
+    private func libraryAlbum(presentationID: String) -> AlbumRecord? {
+        searchCatalog.albumsByID[presentationID] ?? catalog.albumsByID[presentationID]
+    }
+
+    /// Inserts dropped library items at a playlist position without starting playback.
+    func insertLibraryItems(_ items: [LibraryItemID], at index: Int) {
+        let tracks = items.flatMap(libraryTracks(for:))
+        guard !tracks.isEmpty else { return }
+        if queue.isEmpty { add(tracks, play: true); return }
+        insert(tracks, at: index)
+    }
+
+    func insert(_ values: [TrackRecord], at index: Int) {
+        let new = values.filter(\.isAvailable).map { QueueItem(track: $0) }
+        guard !new.isEmpty else { fail("Tracks unavailable", "The selected files are no longer available. Rescan the source after reconnecting it."); return }
+        let before = queueEditState()
+        queue.insert(contentsOf: new, at: min(max(0, index), queue.count))
+        status = new.count == 1 ? "Added “\(new[0].track.title)” to the active playlist." : "Added \(new.count) tracks to the active playlist."
+        registerQueueEdit(before, name: "Add to Playlist"); saveQueue()
+    }
     func showCurrentTrack() {
         guard let track = currentTrack else { return }
         if !scopeIncludes(sourceID: track.sourceID) { sourceID = track.sourceID }

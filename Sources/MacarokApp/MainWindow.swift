@@ -116,8 +116,12 @@ struct QueuePane: View {
                 PlaylistControls(model: model, location: "top")
             }.accessibilityIdentifier("playlistPanelHeader")
             if model.queue.isEmpty {
-                ContentUnavailableView { Label("Your playlist is empty", systemImage: "music.note.list") } description: { Text("Double-click a library track to add it here.") }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ContentUnavailableView { Label("Your playlist is empty", systemImage: "music.note.list") } description: { Text("Double-click or drag library items here.") }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+                    .onDrop(of: [.macarokLibraryItems], isTargeted: nil) { providers in
+                        Task { model.insertLibraryItems(await LibraryItemID.load(from: providers), at: 0) }
+                        return true
+                    }
             } else {
                 let rows = PlaylistAlbumGrouping.rows(model.queue, grouped: model.settings.playlistAlbumGroups, isFlat: model.isRadioTrack)
                 List(selection: $model.selectedQueueID) {
@@ -139,7 +143,17 @@ struct QueuePane: View {
                         let entries = PlaylistAlbumGrouping.queueOffsets(offsets, rows: rows)
                         if !entries.isEmpty { model.removeQueue(entries) }
                     }
+                    .onInsert(of: [.macarokLibraryItems]) { destination, providers in
+                        let index = PlaylistAlbumGrouping.queueDestination(destination, rows: rows)
+                        Task { model.insertLibraryItems(await LibraryItemID.load(from: providers), at: index) }
+                    }
                 }.listStyle(.inset(alternatesRowBackgrounds: true))
+                // Row gestures would intercept the native drag that reorders entries.
+                .contextMenu(forSelectionType: UUID.self) { ids in
+                    if let id = ids.first, let item = model.queue.first(where: { $0.id == id }) { QueueEntryMenu(model: model, item: item) }
+                } primaryAction: { ids in
+                    if let id = model.queue.first(where: { ids.contains($0.id) })?.id { model.playQueueItem(id) }
+                }
                 .background(NativeListBackground(revision: Self.backgroundRevision(model.queueRevision, rows: rows)) { [weak model] table in model?.activePlaylistTable = table })
                 .onDeleteCommand { if let id = model.selectedQueueID, let index = model.queue.firstIndex(where: { $0.id == id }) { model.removeQueue(IndexSet(integer: index)) } }
             }
@@ -188,8 +202,6 @@ private struct QueueEntryRow: View {
                 .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
                 .fixedSize(horizontal: true, vertical: false)
         }.font(.system(size: 12)).padding(.vertical, 4).padding(.leading, layout == .grouped ? 8 : 0).contentShape(Rectangle())
-            .onTapGesture(count: 2) { model.playQueueItem(item.id) }
-            .contextMenu { Button("Play Now") { model.playQueueItem(item.id) }; Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }; TrackFileActions(model: model, track: item.track); Divider(); Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } } }
     }
 
     private var subtitle: String {
@@ -201,6 +213,18 @@ private struct QueueEntryRow: View {
         case .grouped: details = [item.track.artist == item.track.albumArtist ? "" : item.track.artist]
         }
         return (details + [item.track.isCUETrack ? "CUE" : ""]).filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+private struct QueueEntryMenu: View {
+    @Bindable var model: AppModel
+    let item: QueueItem
+    var body: some View {
+        Button("Play Now") { model.playQueueItem(item.id) }
+        Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }
+        TrackFileActions(model: model, track: item.track)
+        Divider()
+        Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } }
     }
 }
 
@@ -305,6 +329,8 @@ struct TrackLine: View {
     let track: TrackRecord
     @Bindable var model: AppModel
     var showsArtist = false
+    /// Inside a selectable List, the list owns click, double-click, and drag behavior.
+    var usesListSelection = false
     var body: some View {
         HStack(spacing: 7) {
             Text(track.trackNumber.map { String(format: "%02d", $0) } ?? "").font(.system(size: 10)).foregroundStyle(.tertiary).frame(width: 18)
@@ -317,7 +343,7 @@ struct TrackLine: View {
             Spacer(minLength: 4)
             Text(track.formattedDuration).font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
         }.font(.system(size: 12)).padding(.vertical, 3).contentShape(Rectangle())
-            .onLibraryClick(inspect: { model.inspect(track) }, add: { model.doubleClick(track) })
+            .onLibraryClick(enabled: !usesListSelection, inspect: { model.inspect(track) }, add: { model.doubleClick(track) })
             .contextMenu {
                 LibraryPlaybackActions(model: model) { [track] }
                 Divider()
@@ -331,10 +357,11 @@ struct TrackLine: View {
 
 extension View {
     /// Resolves a double-click before a single-click can replace the inspected view.
-    func onLibraryClick(inspect: @escaping () -> Void, add: @escaping () -> Void) -> some View {
+    /// Disabled inside selectable Lists: row gestures would block native selection and dragging there.
+    func onLibraryClick(enabled: Bool = true, inspect: @escaping () -> Void, add: @escaping () -> Void) -> some View {
         gesture(TapGesture(count: 2).exclusively(before: TapGesture(count: 1)).onEnded { result in
             switch result { case .first: add(); case .second: inspect() }
-        })
+        }, including: enabled ? .all : .subviews)
         .accessibilityAction(named: Text("Inspect"), inspect)
         .accessibilityAction(named: Text("Add to Active Playlist"), add)
     }
