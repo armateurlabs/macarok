@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import KeyboardShortcuts
+import MacarokCore
 
 enum Appearance: String, Codable, CaseIterable, Identifiable {
     case system, light, dark
@@ -97,6 +98,7 @@ struct AppPreferences: Codable {
     var playlistAlbumGroups = true
     var playlistShowsSources = true
     var similarMixFollow: SimilarMixFollow = .blend
+    var archiveQuality: ArchiveAudioQuality = .high
     var buffer: Double? { customBuffer ? min(120, max(1, bufferSeconds)) : nil }
 
     init() {}
@@ -106,7 +108,7 @@ struct AppPreferences: Codable {
         // Renamed when album groups became the default, so unreleased builds' saved Off does not persist.
         case playlistAlbumGroups = "showPlaylistAlbumGroups"
         case playlistShowsSources = "showPlaylistSources"
-        case similarMixFollow
+        case similarMixFollow, archiveQuality
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -125,6 +127,7 @@ struct AppPreferences: Codable {
         playlistAlbumGroups = (try? values.decodeIfPresent(Bool.self, forKey: .playlistAlbumGroups)) ?? true
         playlistShowsSources = (try? values.decodeIfPresent(Bool.self, forKey: .playlistShowsSources)) ?? true
         similarMixFollow = (try? values.decodeIfPresent(SimilarMixFollow.self, forKey: .similarMixFollow)) ?? .blend
+        archiveQuality = (try? values.decodeIfPresent(ArchiveAudioQuality.self, forKey: .archiveQuality)) ?? .high
     }
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
@@ -141,6 +144,7 @@ struct AppPreferences: Codable {
         try values.encode(playlistAlbumGroups, forKey: .playlistAlbumGroups)
         try values.encode(playlistShowsSources, forKey: .playlistShowsSources)
         try values.encode(similarMixFollow, forKey: .similarMixFollow)
+        try values.encode(archiveQuality, forKey: .archiveQuality)
     }
 
     static func load() -> Self {

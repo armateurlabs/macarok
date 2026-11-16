@@ -17,6 +17,8 @@ struct LibraryPane: View {
                 .accessibilityIdentifier("libraryPanelHeader")
             if model.isRadioSource {
                 RadioLibraryView(model: model)
+            } else if let source = model.selectedSource, source.kind == .internetArchive, let archive = model.archive {
+                ArchiveLibraryView(model: model, controller: archive, source: source)
             } else {
             VStack(spacing: 0) {
             VStack(spacing: 11) {

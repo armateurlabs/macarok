@@ -8,10 +8,12 @@ private struct QueueResumeCheckpoint: Codable {
 
 public enum LibraryStoreError: LocalizedError {
     case trackNotFound(String)
+    case sourceNotFound(String)
 
     public var errorDescription: String? {
         switch self {
         case .trackNotFound: "The track is no longer present in the library."
+        case .sourceNotFound: "The source is no longer present in the library."
         }
     }
 }
@@ -132,6 +134,7 @@ public final class LibraryStore: @unchecked Sendable {
         LastFMStoreStorage.registerMigration(&migrator)
         LocalScanCacheStorage.registerMigration(&migrator)
         SimilarityCacheStorage.registerMigration(&migrator)
+        InternetArchiveStorage.registerMigration(&migrator)
         try migrator.migrate(database)
     }
 
@@ -432,7 +435,7 @@ public final class LibraryStore: @unchecked Sendable {
     }
 
     @discardableResult
-    private static func saveIndexedTrack(_ incoming: TrackRecord, db: Database) throws -> Bool {
+    static func saveIndexedTrack(_ incoming: TrackRecord, db: Database) throws -> Bool {
         let previous = try TrackRecord.fetchOne(db, key: incoming.id)
         let saved = try saveIndexedTrack(incoming, preserving: previous, db: db)
         return previous != saved

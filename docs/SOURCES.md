@@ -1,6 +1,6 @@
 # Music sources and discovery
 
-Open **File → Connect a Source…** or **Settings → Sources → Add Source…**. The source catalog offers Local Files, OpenSubsonic, Bandcamp, Internet Radio, and Podcasts. Settings can add a source while the main window is closed.
+Open **File → Connect a Source…** or **Settings → Sources → Add Source…**. The source catalog offers Local Files, OpenSubsonic, Bandcamp, Internet Radio, Podcasts, Live Music Archive, and LibriVox. Settings can add a source while the main window is closed.
 
 The library header uses the native macOS source picker, including an icon and a checkmark for the current selection. Choose one source or **All Sources**. All Sources combines cached music for browsing while retaining separate source identities, credentials, albums, playlists, and file-write destinations. Selecting it does not start a catalog refresh.
 
@@ -50,6 +50,31 @@ Search only runs on submission. Requests are rate-limited and cached; a director
 
 Episodes stream by default. Choose **Download Episode** to keep an explicit local copy, then **Reveal in Finder** to locate it. The timeline distinguishes playback progress from buffered/downloaded coverage. See [podcast timelines, storage, and cleanup](PODCASTS.md) for the download folder and retention policy.
 
+## Internet Archive: Live Music Archive and LibriVox
+
+Select **Live Music Archive** or **LibriVox** and choose **Add Collection**. No account is needed. Each collection is a separate source backed by the same Internet Archive connector. Adding a collection that is already present selects it.
+
+These collections are too large to import. Macarok does not download a catalog when the source is added. Its library pane browses the collection like a website: each list loads page by page as it is opened and scrolled, so expect some network latency.
+
+- **Live Music Archive** ([etree](https://archive.org/details/etree)): **Browse** lists artist collections. Search by name and sort by Popular or A–Z. Open an artist to list years with recording counts, then a year to list its recordings by date, venue, recording source, and rating. Several recordings of one show stay distinct.
+- **LibriVox** ([librivoxaudio](https://archive.org/details/librivoxaudio)): **Browse** lists books. Search titles or authors, filter by language, and sort by Popular, Recently Added, or A–Z.
+
+Opening an item shows its details, description, and tracks or chapters. **Play**, **Add**, a double-click, or a track's context menu adds the item to the active playlist. **Save** keeps it in the library. Saved items appear in the **Saved** tab and as normal albums in Home, Albums, and All Sources. **Recent** lists items you opened for playback. **Open on archive.org** shows the item's page.
+
+An item's tracks enter the library only when you play, queue, or save it. Refresh re-reads the metadata of those items. It never imports the collection. Refresh also hides unsaved items from library views unless the active playlist or a saved playlist still uses them. Their history and ratings are kept if you open them again.
+
+Browsing responses are cached in SQLite: listings for 24 hours and item details for 7 days. Cached entries older than 30 days are removed on launch. If the Internet Archive cannot be reached, an earlier cached result is shown with a notice.
+
+**Settings → Playback → Internet Archive quality** defaults to **High**. High streams FLAC (including 24-bit) when a recording makes it public, otherwise the best MP3, and LibriVox 128 kbps MP3. **Standard** uses VBR or 64 kbps MP3. Stream-only or private files fall back to the best public derivative. Changing quality refreshes Internet Archive sources. Track identities do not change, so playlists, history, and ratings are kept.
+
+LibriVox specifics:
+
+- Macarok remembers the chapter and position where you stopped in each book. **Resume** continues there; **Start Over** plays from the first chapter.
+- **Download Book**, or **Download Chapter** in a chapter's context menu, keeps local copies in the same folder and with the same retention policy as [podcast downloads](PODCASTS.md). Later plays use the local file.
+- Audiobooks are not scrobbled to Last.fm. Live Music Archive recordings are scrobbled like other music.
+
+Availability, recording rights, and descriptions are provided by the Internet Archive and the contributing tapers and volunteers.
+
 ## Service availability
 
 | Service | Macarok support |
@@ -59,6 +84,7 @@ Episodes stream by default. Choose **Download Episode** to keep an explicit loca
 | Bandcamp | OpenSubsonic preset with generated account credentials |
 | Internet Radio / Radio Browser | Saved stations, favorites, directory search, direct streams and M3U/PLS wrappers; HLS unsupported |
 | Podcasts / Podcast Index / Apple Podcasts | Feed subscription, streaming and explicit episode downloads; directories provide discovery |
+| Internet Archive: Live Music Archive / LibriVox | On-demand browsing with a local cache, saved items, FLAC or MP3 streaming, audiobook resume and chapter downloads |
 | Last.fm | Optional scrobbling; see [setup and privacy](SCROBBLING.md) |
 | [Qobuz](https://www.qobuz.com) | No playback connector; approved partner integration is required |
 | [Deezer](https://www.deezer.com) | No confirmed public full-playback integration route |

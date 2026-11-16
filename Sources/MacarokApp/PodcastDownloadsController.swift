@@ -58,7 +58,7 @@ final class PodcastDownloadsController {
     func download(_ track: TrackRecord) {
         let key = Self.key(track)
         guard tasks[key] == nil, downloads[key] == nil,
-              let model, let source = model.sources.first(where: { $0.id == track.sourceID }), source.kind == .podcasts else { return }
+              let model, let source = model.sources.first(where: { $0.id == track.sourceID }), model.supportsDownloads(track) else { return }
         let id = UUID(); requests[key] = id; taskSources[key] = source.id
         errors[key] = nil; progress[key] = EpisodeDownloadProgress(received: 0, expected: nil)
         let transport = model.transport(for: source), gate = DownloadProgressGate(), storage = storage

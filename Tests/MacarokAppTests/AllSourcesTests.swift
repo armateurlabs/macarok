@@ -107,6 +107,26 @@ final class AllSourcesModelTests: XCTestCase {
         XCTAssertTrue(calls.isEmpty, "Selecting cached All Sources must not start a remote import.")
     }
 
+    func testInternetArchivePresetsAreAddedOnceWithoutImportingTheCollection() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model
+        await model.start()
+        try await model.addArchiveSource(.librivox)
+        try await model.addArchiveSource(.liveMusic)
+        try await model.addArchiveSource(.librivox)
+        let archives = try fixture.store.sources().filter { $0.kind == .internetArchive }
+        XCTAssertEqual(archives.map(\.archiveCollection), [.librivox, .liveMusic])
+        XCTAssertEqual(model.selectedSource?.archiveCollection, .librivox, "Adding an existing collection selects it.")
+        XCTAssertTrue(model.isArchiveSource)
+        XCTAssertFalse(model.isRefreshing)
+        XCTAssertTrue(try fixture.store.tracks(sourceID: archives[0].id).isEmpty)
+        let chapter = TrackRecord(sourceID: archives[0].id, title: "Chapter 1", remoteID: "book")
+        let show = TrackRecord(sourceID: archives[1].id, title: "Song", remoteID: "show")
+        XCTAssertTrue(model.supportsDownloads(chapter))
+        XCTAssertFalse(model.supportsDownloads(show))
+    }
+
     func testCancelledSourceConnectionsDoNotStartOrChangeTheLibrary() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

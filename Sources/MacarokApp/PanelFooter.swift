@@ -24,11 +24,13 @@ struct PanelFooter<Content: View>: View {
 enum LibraryFooterSummary {
     case music(albums: Int, tracks: Int)
     case radio(stations: Int)
+    case archive(saved: Int)
 
     var title: String {
         switch self {
         case let .music(albums, tracks): "\(albums) albums · \(tracks) tracks"
         case let .radio(stations): "\(stations) stations"
+        case let .archive(saved): "\(saved) saved"
         }
     }
 }
@@ -60,6 +62,7 @@ struct LibraryPanelFooter: View {
                     Label(shortCount(tracks), systemImage: "music.note")
                 }
             case let .radio(stations): Label(shortCount(stations), systemImage: "antenna.radiowaves.left.and.right")
+            case let .archive(saved): Label(shortCount(saved), systemImage: "bookmark")
             }
         } else { Text(summary.title) }
     }

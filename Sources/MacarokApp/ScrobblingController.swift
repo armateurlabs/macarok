@@ -266,7 +266,9 @@ final class ScrobblingController {
     }
 
     private func eligible(track: TrackRecord, source: SourceRecord?) -> Bool {
-        guard let source, [.local, .openSubsonic].contains(source.kind), !preferences.excludedSourceIDs.contains(source.id) else { return false }
+        // Live recordings are music; LibriVox audiobooks are not scrobbled.
+        guard let source, [.local, .openSubsonic].contains(source.kind) || source.archiveCollection == .liveMusic,
+              !preferences.excludedSourceIDs.contains(source.id) else { return false }
         return LastFMTrackSnapshot(track: track).isEligible
     }
 

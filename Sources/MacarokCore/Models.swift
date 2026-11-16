@@ -7,6 +7,7 @@ public enum SourceKind: String, Codable, Sendable, CaseIterable, DatabaseValueCo
     case openSubsonic
     case podcasts
     case radio
+    case internetArchive
 
     public var displayName: String {
         switch self {
@@ -14,6 +15,7 @@ public enum SourceKind: String, Codable, Sendable, CaseIterable, DatabaseValueCo
         case .openSubsonic: "OpenSubsonic"
         case .podcasts: "Podcasts"
         case .radio: "Internet Radio"
+        case .internetArchive: "Internet Archive"
         }
     }
 }

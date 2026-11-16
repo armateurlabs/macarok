@@ -2,7 +2,7 @@ import MacarokCore
 import SwiftUI
 
 enum SourceCatalogKind: String, CaseIterable, Identifiable {
-    case local, openSubsonic, bandcamp, radio, podcasts
+    case local, openSubsonic, bandcamp, radio, podcasts, liveMusicArchive, librivox
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -11,7 +11,12 @@ enum SourceCatalogKind: String, CaseIterable, Identifiable {
         case .bandcamp: "Bandcamp"
         case .radio: "Internet Radio"
         case .podcasts: "Podcasts"
+        case .liveMusicArchive: "Live Music Archive"
+        case .librivox: "LibriVox"
         }
+    }
+    var archiveCollection: ArchiveCollection? {
+        switch self { case .liveMusicArchive: .liveMusic; case .librivox: .librivox; default: nil }
     }
     var symbol: String {
         switch self {
@@ -20,6 +25,8 @@ enum SourceCatalogKind: String, CaseIterable, Identifiable {
         case .bandcamp: "music.note"
         case .radio: "antenna.radiowaves.left.and.right"
         case .podcasts: "podcasts"
+        case .liveMusicArchive: "music.mic"
+        case .librivox: "book"
         }
     }
     var isServer: Bool { self == .openSubsonic || self == .bandcamp }
@@ -88,6 +95,7 @@ struct AddSourceSheet: View {
                             case .openSubsonic, .bandcamp: serverForm
                             case .radio: radioForm
                             case .podcasts: podcastForm
+                            case .liveMusicArchive, .librivox: archiveForm
                             }
                         }.disabled(isConnecting)
                     }.padding(.leading, 20).padding(.trailing, 2)
@@ -100,7 +108,7 @@ struct AddSourceSheet: View {
                     .accessibilityIdentifier("sourceConnectionError")
             }
             if isConnecting {
-                HStack(spacing: 9) { ProgressView().controlSize(.small); Text(kind == .podcasts ? "Reading the podcast feed…" : kind == .radio ? "Adding the radio station…" : "Connecting to the music server…").foregroundStyle(.secondary) }
+                HStack(spacing: 9) { ProgressView().controlSize(.small); Text(kind == .podcasts ? "Reading the podcast feed…" : kind == .radio ? "Adding the radio station…" : kind.archiveCollection != nil ? "Adding the collection…" : "Connecting to the music server…").foregroundStyle(.secondary) }
             }
 
             Spacer(minLength: 0)
@@ -108,9 +116,9 @@ struct AddSourceSheet: View {
             HStack(alignment: .center) {
                 Spacer()
                 Button("Cancel") { connectionTask?.cancel(); dismiss() }.keyboardShortcut(.cancelAction)
-                Button(kind == .local ? "Choose Folder…" : kind == .podcasts ? "Subscribe" : kind == .radio ? "Add Station" : "Connect") { connect() }
+                Button(kind == .local ? "Choose Folder…" : kind == .podcasts ? "Subscribe" : kind == .radio ? "Add Station" : kind.archiveCollection != nil ? "Add Collection" : "Connect") { connect() }
                     .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
-                    .disabled(isConnecting || (kind != .local && !validAddress) || (kind.isServer && !validCredentials) || (kind == .radio && model.radio == nil))
+                    .disabled(isConnecting || (kind != .local && kind.archiveCollection == nil && !validAddress) || (kind.isServer && !validCredentials) || (kind == .radio && model.radio == nil))
                     .accessibilityIdentifier("confirmAddSource")
             }
         }
@@ -208,6 +216,25 @@ struct AddSourceSheet: View {
         }
     }
 
+    private var archiveForm: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            if kind == .liveMusicArchive {
+                Text("Browse hundreds of thousands of concert recordings shared with artists’ permission on the Internet Archive’s Live Music Archive (etree).")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Browse artists, then years and shows. Recordings stream on demand. Save a show to keep it in your library.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Listen to public-domain audiobooks read by LibriVox volunteers, hosted by the Internet Archive.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Search by title or author and filter by language. Macarok remembers where you stopped in each book, and chapters can be downloaded for offline listening.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Text("No account is needed. Nothing is imported in advance: results load as you browse and are cached on this Mac.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Link("About the Internet Archive", destination: URL(string: kind == .librivox ? "https://archive.org/details/librivoxaudio" : "https://archive.org/details/etree")!)
+                .font(.callout)
+        }
+    }
 
     private var normalizedAddress: String {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -241,7 +268,8 @@ struct AddSourceSheet: View {
         connectionTask = Task { @MainActor in
             defer { isConnecting = false }
             do {
-                if kind == .podcasts { try await model.addPodcast(address: normalizedAddress) }
+                if let collection = kind.archiveCollection { try await model.addArchiveSource(collection) }
+                else if kind == .podcasts { try await model.addPodcast(address: normalizedAddress) }
                 else if kind == .radio {
                     guard let controller = model.radio else { return }
                     await controller.addURL(name: name.trimmingCharacters(in: .whitespacesAndNewlines), address: normalizedAddress)

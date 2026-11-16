@@ -104,6 +104,11 @@ struct SettingsView: View {
                     Text("Target duration: 1–120 seconds. Changes apply to the next streamed track.").font(.caption).foregroundStyle(.secondary)
                 }
                 LabeledContent("Streaming quality", value: "Original")
+                Picker("Internet Archive quality", selection: $model.settings.archiveQuality) {
+                    ForEach(ArchiveAudioQuality.allCases) { Text($0.title).tag($0) }
+                }
+                Text("High streams lossless FLAC when a recording shares it, otherwise the best MP3. Standard uses smaller MP3 files. Changing it refreshes Internet Archive sources.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Playback") {
                 HStack {
@@ -115,8 +120,8 @@ struct SettingsView: View {
                 }
             }
             if let controller = model.podcastDownloads {
-                Section("Podcast Downloads") {
-                    Text("Episodes download only when you choose Download Episode. Completed files stay until you remove them; removed episodes move to Trash. Unfinished transfers are cleaned up automatically.")
+                Section("Podcast and Audiobook Downloads") {
+                    Text("Episodes and LibriVox chapters download only when you choose to download them. Completed files stay until you remove them; removed episodes move to Trash. Unfinished transfers are cleaned up automatically.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text(controller.directory.path).font(.caption).textSelection(.enabled)
                     Button("Open Downloads Folder…", action: controller.openFolder)
@@ -194,7 +199,7 @@ struct SettingsView: View {
             Divider()
             Form {
                 if model.sources.isEmpty {
-                    Section { ContentUnavailableView("No Sources", systemImage: "externaldrive", description: Text("Add a folder, OpenSubsonic server, or podcast.")) }
+                    Section { ContentUnavailableView("No Sources", systemImage: "externaldrive", description: Text("Add a folder, OpenSubsonic server, podcast, or Internet Archive collection.")) }
                 }
                 ForEach(model.sources) { source in
                     Section {

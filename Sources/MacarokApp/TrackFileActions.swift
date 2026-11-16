@@ -6,7 +6,7 @@ struct TrackFileActions: View {
     @Bindable var model: AppModel
     let track: TrackRecord
     var body: some View {
-        if model.sourcesByID[track.sourceID]?.kind == .podcasts, let controller = model.podcastDownloads {
+        if model.supportsDownloads(track), let controller = model.podcastDownloads {
             let key = PodcastDownloadsController.key(track)
             Divider()
             if let download = controller.downloads[key] {
@@ -16,7 +16,7 @@ struct TrackFileActions: View {
             } else if controller.isDownloading(track) {
                 Button("Cancel Download", systemImage: "xmark.circle") { controller.cancel(track) }
             } else {
-                Button("Download Episode", systemImage: "arrow.down.circle") { controller.download(track) }
+                Button(model.downloadActionTitle(track), systemImage: "arrow.down.circle") { controller.download(track) }
             }
         } else if let url = track.url, url.isFileURL {
             Divider()
@@ -29,7 +29,7 @@ struct PodcastEpisodeActions: View {
     @Bindable var model: AppModel
     let track: TrackRecord
     var body: some View {
-        if model.sourcesByID[track.sourceID]?.kind == .podcasts, let controller = model.podcastDownloads {
+        if model.supportsDownloads(track), let controller = model.podcastDownloads {
             let key = PodcastDownloadsController.key(track)
             HStack(spacing: 10) {
                 if let download = controller.downloads[key] {
@@ -41,7 +41,7 @@ struct PodcastEpisodeActions: View {
                     Text(progress.fraction.map { "Downloading \(Int($0 * 100))%" } ?? "Downloading…").foregroundStyle(.secondary)
                     Button("Cancel") { controller.cancel(track) }
                 } else {
-                    Button("Download Episode", systemImage: "arrow.down.circle") { controller.download(track) }
+                    Button(model.downloadActionTitle(track), systemImage: "arrow.down.circle") { controller.download(track) }
                 }
                 Spacer(minLength: 0)
             }.font(.system(size: 11)).controlSize(.small).padding(.vertical, 6)

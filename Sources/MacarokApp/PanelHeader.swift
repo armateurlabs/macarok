@@ -111,6 +111,7 @@ extension SourceKind {
         case "local": "externaldrive"
         case "openSubsonic": "server.rack"
         case "radio": "antenna.radiowaves.left.and.right"
+        case "internetArchive": "building.columns"
         default: "podcasts"
         }
     }

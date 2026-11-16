@@ -55,6 +55,30 @@ final class ScrobblingControllerTests: XCTestCase {
         await controller.setEnabled(false)
     }
 
+    func testLiveMusicArchiveIsScrobbledButLibriVoxIsNot() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let clock = ScrobblingTestClock()
+        let server = ScrobblingHTTPFixture()
+        let controller = ScrobblingController(store: fixture.store, credentials: fixture.credentials,
+                                               transport: { try await server.send($0) }, monotonic: { clock.time },
+                                               now: { clock.date }, sleep: { _ in throw CancellationError() })
+        await controller.start()
+        await controller.setSharesNowPlaying(false)
+        for collection in [ArchiveCollection.librivox, .liveMusic] {
+            let source = SourceRecord(kind: .internetArchive, name: collection.title, location: collection.location)
+            var track = fixture.track; track.sourceID = source.id
+            controller.begin(track: track, source: source)
+            controller.update(isPlaying: true, isBuffering: false, position: 0, duration: 40)
+            clock.advance(30)
+            controller.update(isPlaying: true, isBuffering: false, position: 30, duration: 40)
+            controller.end()
+        }
+        await controller.flush()
+        XCTAssertEqual(try fixture.store.lastFMSummary(accountID: fixture.accountID).pending, 1)
+        await controller.setEnabled(false)
+    }
+
     func testDelayedNativeHandoffAdoptionNeverCreditsTheSuccessorsAudioToTheOutgoingTrack() async throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

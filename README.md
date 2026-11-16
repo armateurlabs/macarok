@@ -6,7 +6,7 @@
 
 A native macOS music player inspired by Amarok 1.4: a searchable library, rich listening context, and an active playlist in three persistent panels.
 
-**Status:** native macOS application in development. The SwiftUI app includes libVLC 4 playback, a SQLite library, local/OpenSubsonic/Bandcamp/podcast sources, Internet radio, optional Last.fm scrobbling, CUE tracks, and metadata/artwork editors.
+**Status:** native macOS application in development. The SwiftUI app includes libVLC 4 playback, a SQLite library, local/OpenSubsonic/Bandcamp/podcast sources, Internet radio, Internet Archive (Live Music Archive and LibriVox), optional Last.fm scrobbling, CUE tracks, and metadata/artwork editors.
 
 ## Download
 
@@ -76,7 +76,7 @@ To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.4.0 3`.
 - Browse one source or opt into All Sources; artist names group together while albums, tracks, folders, and credentials retain their origins.
 - System, Light, and Dark appearances; artist, album, year, folder, and tag browsing.
 - Local MP3, FLAC, Ogg Vorbis, Opus, and other TagLib/VLC formats; OpenSubsonic original streams; RSS/Atom podcasts.
-- Source catalog with Bandcamp setup, Podcast Index / Apple Podcasts discovery, and Radio Browser search or direct station URLs.
+- Source catalog with Bandcamp setup, Podcast Index / Apple Podcasts discovery, Radio Browser search or direct station URLs, and on-demand browsing of the Live Music Archive and LibriVox audiobooks.
 - CUE sheets expose individual tracks without splitting the original audio.
 - Persistent playlists, queue, listening history, ratings, and scope-aware search through SQLite/FTS5.
 - Home includes Recently Added, Recently Played with fixed local dates, separate Tracks, Artists, and Albums rankings, and Radio Favorites in All Sources.

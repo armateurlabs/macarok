@@ -63,6 +63,10 @@ final class AppModel {
             if registerSystemControls { settings.save() }
             player.volume = settings.volume
             if oldValue.repeatMode != settings.repeatMode || oldValue.buffer != settings.buffer { prepareNextPlayback() }
+            if oldValue.archiveQuality != settings.archiveQuality, started {
+                let archiveSources = sources.filter { $0.kind == .internetArchive }
+                if !archiveSources.isEmpty { startRefresh(sources: archiveSources) }
+            }
         }
     }
     var sources: [SourceRecord] = [] {
@@ -189,6 +193,7 @@ final class AppModel {
     var streamingBufferFraction: Double?
     var scanWarnings: [String] = []
     var radio: RadioController?
+    var archive: InternetArchiveController?
     var scrobbling: ScrobblingController?
     let similarity = SimilarityController()
     var podcastDownloads: PodcastDownloadsController?
@@ -361,6 +366,15 @@ final class AppModel {
     var currentIndex: Int? { currentQueueID.flatMap { queueIndices[$0] } }
     var currentTrack: TrackRecord? { currentIndex.flatMap { queue.indices.contains($0) ? queue[$0].track : nil } }
     var currentIsPodcast: Bool { currentTrack.map { sourcesByID[$0.sourceID]?.kind == .podcasts } == true }
+    func downloadActionTitle(_ track: TrackRecord) -> String {
+        sourcesByID[track.sourceID]?.kind == .podcasts ? "Download Episode" : "Download Chapter"
+    }
+    var isArchiveSource: Bool { selectedSource?.kind == .internetArchive }
+    /// Podcast episodes and LibriVox chapters can be kept as explicit local downloads.
+    func supportsDownloads(_ track: TrackRecord) -> Bool {
+        guard let source = sourcesByID[track.sourceID] else { return false }
+        return source.kind == .podcasts || source.archiveCollection == .librivox
+    }
     var selectedTrack: TrackRecord? { selectedTrackID.flatMap { id in catalog.tracksByID[id] ?? queue.first { $0.track.id == id }?.track } ?? currentTrack }
     var selectedAlbum: AlbumRecord? {
         if let id = selectedAlbumID, let origin = selectedAlbumSourceID ?? sourceID,
@@ -392,6 +406,8 @@ final class AppModel {
             podcastDownloads = PodcastDownloadsController(model: self, directory: dataDirectory.appendingPathComponent("PodcastDownloads", isDirectory: true))
             await podcastDownloads?.start()
             radio = RadioController(model: self)
+            archive = InternetArchiveController(model: self)
+            await archive?.start()
             if let store { scrobbling = ScrobblingController(store: store) }
             await radio?.reload()
             if registerSystemControls { await scrobbling?.start() }
@@ -939,7 +955,7 @@ final class AppModel {
             let prepared = try await playbackPreparation.prepare(source: source, track: track)
             return PreparedQueuePlayback(url: prepared.url, renewedSource: prepared.renewedSource)
         }
-        if source.kind == .podcasts, let downloaded = podcastDownloads?.localURL(for: track),
+        if source.kind == .podcasts || source.archiveCollection == .librivox, let downloaded = podcastDownloads?.localURL(for: track),
            await Task.detached(priority: .utility, operation: { FileManager.default.isReadableFile(atPath: downloaded.path) }).value {
             try Task.checkCancellation()
             return PreparedQueuePlayback(url: downloaded)
@@ -1231,6 +1247,34 @@ final class AppModel {
         }
     }
 
+    func addArchiveSource(_ collection: ArchiveCollection) async throws {
+        if let existing = sources.first(where: { $0.archiveCollection == collection }) {
+            selectAddedSource(existing.id); status = "“\(existing.name)” is already in your sources."; return
+        }
+        let source = SourceRecord(kind: .internetArchive, name: collection.title, location: collection.location)
+        let connected = try await performLibraryWork { store in
+            try store.saveSource(source)
+            return try store.sources()
+        }
+        sources = connected; selectAddedSource(source.id)
+        await archive?.reload(sourceID: source.id)
+        status = "Added “\(source.name)”. Browse the collection to find something to play."
+    }
+
+    /// Appends tracks and starts the first one at a saved position, such as an audiobook chapter.
+    func playTracks(_ values: [TrackRecord], position: Double) {
+        let new = values.filter(\.isAvailable).map { QueueItem(track: $0) }
+        guard let first = new.first else { return }
+        let before = queueEditState()
+        queue.append(contentsOf: new)
+        registerQueueEdit(before, name: "Add to Playlist")
+        stopPlayback(clearCurrent: false)
+        currentQueueID = first.id
+        restorePosition = position.isFinite ? max(0, position) : 0
+        saveQueue()
+        playQueueItem(first.id)
+    }
+
     func addPodcast(address: String) async throws {
         try Task.checkCancellation()
         guard let url = URL(string: address), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil,
@@ -1435,6 +1479,8 @@ final class AppModel {
         case .openSubsonic:
             try await importRemoteCatalog(source: source, store: store, generation: generation)
             return false // Its progressive publisher owns catalog publication.
+        case .internetArchive:
+            return try await refreshArchive(source, store: store, generation: generation)
         case .podcasts:
             guard let url = source.url else { throw SourceNetworkError.invalidURL }
             let feed = try await PodcastClient(transport: transport(for: source)).fetchFeed(url: url)
@@ -1445,6 +1491,34 @@ final class AppModel {
             if changed { unpublishedSourceChanges[source.id, default: 0] &+= 1 }
             return changed
         }
+    }
+
+    /// Re-reads only items already in the library; collections are browsed on demand, never imported.
+    private func refreshArchive(_ source: SourceRecord, store: LibraryStore, generation: UUID) async throws -> Bool {
+        guard let collection = source.archiveCollection else { throw SourceNetworkError.invalidURL }
+        let client = InternetArchiveClient(transport: transport(for: source), cache: store)
+        let state = try await performLibraryWork { store in
+            (try store.archiveItems(sourceID: source.id), Set(try store.tracks(sourceID: source.id, ordered: false).compactMap(\.remoteID)))
+        }
+        let pending = state.0.filter { $0.isSaved || state.1.contains($0.identifier) }
+        let quality = settings.archiveQuality
+        var changed = false
+        for (index, record) in pending.enumerated() {
+            try Task.checkCancellation()
+            refreshProgress = refreshLabel("Reading item \(index + 1) of \(pending.count)…")
+            do {
+                let item = try await client.item(identifier: record.identifier, maxAge: 0).value
+                let tracks = item.trackRecords(sourceID: source.id, collection: collection, quality: quality)
+                changed = try await backgroundWorker.upsert(store: store, sourceID: source.id, generation: generation, tracks: tracks) || changed
+            } catch let error as ArchiveError {
+                scanWarnings.append("\(record.title): \(error.localizedDescription)")
+            }
+        }
+        try Task.checkCancellation()
+        let pruned = try await performLibraryWork { try $0.pruneArchiveTracks(sourceID: source.id) }
+        if changed || pruned { unpublishedSourceChanges[source.id, default: 0] &+= 1 }
+        await archive?.reload(sourceID: source.id)
+        return changed || pruned
     }
 
     func toggleRefresh() { if isRefreshing { cancelRefresh() } else { refresh() } }
@@ -1800,6 +1874,7 @@ final class AppModel {
         case .openSubsonic: return .remoteMusic
         case .podcasts: return .podcast
         case .radio: return .radio
+        case .internetArchive: return .remoteMusic
         }
     }
 
@@ -1859,6 +1934,7 @@ final class AppModel {
         lastSavedTick += 1
         if lastSavedTick >= 5 {
             lastSavedTick = 0; updateNowPlaying()
+            if player.state == .playing, !currentIsRadio, let track = currentTrack { archive?.recordProgress(track: track, position: player.position) }
             if player.state == .playing, let store {
                 queueSaveRevision &+= 1
                 let revision = queueSaveRevision, index = currentIndex ?? 0, position = currentIsRadio ? 0 : player.position
