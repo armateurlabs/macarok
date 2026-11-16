@@ -27,7 +27,7 @@ if [[ -n "$release_version" ]]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$staged_app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :CFBundleGetInfoString string Macarok $release_version" "$staged_app/Contents/Info.plist"
 fi
-if [[ ! -f Support/AppIcon.icns ]]; then swift scripts/make-icon.swift; fi
+swift scripts/make-icon.swift
 cp Support/AppIcon.icns "$staged_app/Contents/Resources/AppIcon.icns"
 cp LICENSE "$staged_app/Contents/Resources/LICENSE.txt"
 cp Support/ThirdPartyNotices.md "$staged_app/Contents/Resources/ThirdPartyNotices.md"

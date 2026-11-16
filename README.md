@@ -19,6 +19,8 @@ open dist/Macarok.app
 
 The build script embeds VLCKit, resource bundles, the app icon, notices, and the optional Chromaprint helper, then signs and verifies the application locally. The pinned VLC 4 development archive includes all Apple platforms, so its first download is approximately 910 MB. Subsequent builds use SwiftPM's cache. Set `MACAROK_INCLUDE_FPCALC=0` to omit audio fingerprinting.
 
+The wolf-and-apple icon is generated from the checked-in artwork at every build. See [icon sources and regeneration](Support/ICON.md).
+
 Open `Package.swift` in Xcode for development, or use `swift build` and `swift test` from the command line. The app bundle is the recommended way to run the application with its resources and macOS integration.
 
 To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.1.0 1`. Tags such as `v0.1.0` trigger the GitHub Actions release workflow. See [release procedures](docs/RELEASING.md).
