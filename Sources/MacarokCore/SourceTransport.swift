@@ -191,12 +191,19 @@ public final class SourceTransport: NSObject, URLSessionDelegate, URLSessionTask
                         certificateStore: certificateStore, certificateApproval: approval)
     }
 
-    public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    /// Returns an HTTP response for callers that own status-code handling, such as APIs
+    /// with structured error bodies. URL, redirect, and certificate policies still apply.
+    public func response(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         guard let url = request.url, Self.isValidURL(url) else {
             throw SourceNetworkError.invalidURL
         }
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw SourceNetworkError.invalidResponse }
+        return (data, response)
+    }
+
+    public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await self.response(for: request)
         guard (200...299).contains(response.statusCode) else { throw SourceNetworkError.httpStatus(response.statusCode) }
         return (data, response)
     }

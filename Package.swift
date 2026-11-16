@@ -21,7 +21,7 @@ let package = Package(
         .target(name: "MacarokAudio", dependencies: ["VLCKit"]),
         .executableTarget(name: "MacarokApp", dependencies: ["MacarokCore", "MacarokAudio", "MacarokMetadata", .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts")], linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
         .testTarget(name: "MacarokCoreTests", dependencies: ["MacarokCore"]),
-        .testTarget(name: "MacarokMetadataTests", dependencies: ["MacarokMetadata", "MacarokCore"]),
+        .testTarget(name: "MacarokMetadataTests", dependencies: ["MacarokMetadata", "MacarokCore"], resources: [.copy("Fixtures")]),
         .testTarget(name: "MacarokAudioTests", dependencies: ["MacarokAudio", "MacarokCore"], resources: [.copy("Fixtures")]),
         .testTarget(name: "MacarokAppTests", dependencies: ["MacarokApp", "MacarokCore", "MacarokMetadata", .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts")]),
     ],

@@ -7,6 +7,10 @@ struct MetadataEditor: View {
     let track: TrackRecord
     @Environment(\.dismiss) private var dismiss
     @State private var ownedSession: MetadataEditingSession
+    @State private var isEditorVisible = false
+    @State private var identificationPreparationTask: Task<Void, Never>?
+    @State private var identificationRequestID: UUID?
+    @State private var identificationAudioURL: URL?
     private let suppliedSession: MetadataEditingSession?
     private let onFinish: (() -> Void)?
 
@@ -41,6 +45,7 @@ struct MetadataEditor: View {
     private var isLocal: Bool { model.sources.first(where: { $0.id == track.sourceID })?.kind == .local }
     private var changes: [MetadataFieldChange] { draft.changes(from: track) }
     private var saveLabel: String { isLocal ? "Save to Files" : "Save to Library" }
+    private var isPreparingIdentification: Bool { identificationPreparationTask != nil }
 
     var body: some View {
         @Bindable var session = self.session
@@ -78,11 +83,11 @@ struct MetadataEditor: View {
                         HStack {
                             lookupActions
                             Spacer(minLength: 0)
-                            if isBusy { ProgressView().controlSize(.small) }
+                            if isBusy || isPreparingIdentification { ProgressView().controlSize(.small) }
                         }
                         VStack(alignment: .leading, spacing: 10) {
                             lookupActions
-                            if isBusy { ProgressView().controlSize(.small) }
+                            if isBusy || isPreparingIdentification { ProgressView().controlSize(.small) }
                         }
                     }
                     if !releases.isEmpty {
@@ -168,17 +173,22 @@ struct MetadataEditor: View {
                 Spacer()
                 Button("Cancel", action: finish).keyboardShortcut(.cancelAction).disabled(isSaving)
                 Button(saveLabel) { confirmSave = true }.keyboardShortcut(.defaultAction)
-                    .disabled(!draft.isValid || isSaving || isBusy || (changes.isEmpty && matchedReleaseID == nil && protectValues == track.metadataLocked))
+                    .disabled(!draft.isValid || isSaving || isBusy || isPreparingIdentification || (changes.isEmpty && matchedReleaseID == nil && protectValues == track.metadataLocked))
             }.padding(16)
         }.frame(width: embedded ? nil : 680, height: embedded ? nil : 720)
         .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
         .sheet(isPresented: $session.identifyRecording) {
-            IdentifyRecordingSheet(track: track) { match in
-                let value = match.proposal(for: draft.applying(to: track))
-                proposal = value; selectedFields = Set(value.changes.map(\.field)); releases = []
-                proposedReleaseName = nil
+            if let identificationAudioURL {
+                IdentifyRecordingSheet(track: track, audioURL: identificationAudioURL) { match in
+                    let value = match.proposal(for: draft.applying(to: track))
+                    proposal = value; selectedFields = Set(value.changes.map(\.field)); releases = []
+                    proposedReleaseName = nil
+                }
             }
         }
+        .onAppear { isEditorVisible = true }
+        .onChange(of: session.id) { _, _ in cancelIdentificationPreparation() }
+        .onDisappear { isEditorVisible = false; cancelIdentificationPreparation() }
         .confirmationDialog(saveLabel + "?", isPresented: $session.confirmSave, titleVisibility: .visible) {
             Button(saveLabel) { Task { await save() } }
         } message: {
@@ -203,18 +213,55 @@ struct MetadataEditor: View {
 
     @ViewBuilder private var lookupActions: some View {
         Button("Find Metadata", systemImage: "magnifyingglass") { Task { await findMatches() } }
-        Button("Identify Recording", systemImage: "waveform") {
-            Task { @MainActor in
-                if let source = model.sources.first(where: { $0.id == track.sourceID }), source.kind == .local {
-                    _ = await model.accessFolder(source)
-                }
-                identifyRecording = true
-            }
-        }.disabled(!isLocal || isBusy)
+        Button("Identify Recording", systemImage: "waveform", action: prepareIdentification)
+            .disabled(!isLocal || isBusy || isPreparingIdentification)
         Button("Clean Up Tags", systemImage: "wand.and.stars") { prepareCleanup() }
     }
 
-    private func finish() { if let onFinish { onFinish() } else { dismiss() } }
+    private func prepareIdentification() {
+        cancelIdentificationPreparation()
+        let requestID = UUID(), sessionID = session.id
+        identificationRequestID = requestID
+        error = nil
+        identificationPreparationTask = Task { @MainActor in
+            defer {
+                if identificationRequestID == requestID {
+                    identificationPreparationTask = nil
+                    identificationRequestID = nil
+                }
+            }
+            do {
+                let url = try await model.prepareIdentificationFile(for: track)
+                try Task.checkCancellation()
+                guard identificationCanPresent(requestID: requestID, sessionID: sessionID) else { return }
+                identificationAudioURL = url
+                identifyRecording = true
+            } catch is CancellationError { }
+            catch {
+                guard !Task.isCancelled,
+                      identificationCanPresent(requestID: requestID, sessionID: sessionID) else { return }
+                self.error = "Could not prepare audio identification: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func identificationCanPresent(requestID: UUID, sessionID: UUID) -> Bool {
+        isEditorVisible && identificationRequestID == requestID && session.id == sessionID &&
+            (!embedded || model.metadataEditingSession?.id == sessionID)
+    }
+
+    private func cancelIdentificationPreparation() {
+        identificationRequestID = nil
+        identificationPreparationTask?.cancel()
+        identificationPreparationTask = nil
+        identificationAudioURL = nil
+        identifyRecording = false
+    }
+
+    private func finish() {
+        cancelIdentificationPreparation()
+        if let onFinish { onFinish() } else { dismiss() }
+    }
 
     private var destinationDescription: String {
         if !isLocal { return "This source provides no original file-write access. Changes are local library corrections." }
@@ -267,6 +314,7 @@ struct MetadataEditor: View {
 
 private struct IdentifyRecordingSheet: View {
     let track: TrackRecord
+    let audioURL: URL
     let onSelect: (AcoustIDRecordingMatch) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var clientKey = ""
@@ -274,6 +322,7 @@ private struct IdentifyRecordingSheet: View {
     @State private var hasStoredKey = false
     @State private var isBusy = false
     @State private var message: String?
+    @State private var warning: String?
     @State private var error: String?
     @State private var matches: [AcoustIDRecordingMatch] = []
     @State private var lookupTask: Task<Void, Never>?
@@ -282,7 +331,7 @@ private struct IdentifyRecordingSheet: View {
 
     private var unavailableReason: String? {
         if track.isCUETrack { return AudioIdentificationError.cueSegmentUnsupported.localizedDescription }
-        if track.url?.isFileURL != true { return AudioIdentificationError.localFileRequired.localizedDescription }
+        if !audioURL.isFileURL { return AudioIdentificationError.localFileRequired.localizedDescription }
         if !chromaprint.isAvailable { return AudioIdentificationError.helperUnavailable.localizedDescription }
         return nil
     }
@@ -298,7 +347,6 @@ private struct IdentifyRecordingSheet: View {
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     SecureField("AcoustID application client key", text: $clientKey)
-                    Text("Use an application client key, not a user submission key.").font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Toggle("Remember in Keychain", isOn: $rememberKey).toggleStyle(.checkbox)
                         Spacer()
@@ -312,6 +360,7 @@ private struct IdentifyRecordingSheet: View {
                     }
                 }.disabled(isBusy)
             }
+            if let warning { Label(warning, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary).font(.callout) }
             if let message { Text(message).foregroundStyle(.secondary).font(.callout) }
             if let error { Text(error).foregroundStyle(.red).font(.callout).textSelection(.enabled) }
             if !matches.isEmpty {
@@ -361,18 +410,19 @@ private struct IdentifyRecordingSheet: View {
 
     @MainActor
     private func identify() async {
-        guard let url = track.url else { return }
-        isBusy = true; error = nil; matches = []; message = "Creating audio fingerprint…"
+        isBusy = true; error = nil; warning = nil; matches = []; message = "Creating audio fingerprint…"
         defer { isBusy = false }
         do {
-            let fingerprint = try await chromaprint.fingerprint(url: url, isCUETrack: track.isCUETrack)
+            let fingerprint = try await chromaprint.fingerprint(url: audioURL, isCUETrack: track.isCUETrack)
             try Task.checkCancellation()
+            warning = fingerprint.warning
             message = "Looking up the fingerprint…"
-            matches = try await MetadataServices.acoustID.lookup(fingerprint, clientKey: clientKey)
+            let resolvedMatches = try await MetadataServices.acoustID.lookup(fingerprint, clientKey: clientKey)
             try Task.checkCancellation()
+            matches = resolvedMatches
             if rememberKey { try AcoustIDClientKeyStore.save(clientKey); hasStoredKey = true }
-            message = matches.isEmpty ? "No matching recordings were found." : nil
+            message = matches.isEmpty ? "Lookup completed. No recording metadata was found." : "Lookup completed. Choose a recording below."
         } catch is CancellationError { message = nil }
-        catch { message = nil; self.error = error.localizedDescription }
+        catch { message = nil; if !Task.isCancelled { self.error = error.localizedDescription } }
     }
 }

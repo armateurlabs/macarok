@@ -5,9 +5,10 @@ import MacarokCore
 public struct AudioFingerprint: Sendable, Equatable, Codable {
     public let duration: Double
     public let fingerprint: String
+    public let warning: String?
 
-    public init(duration: Double, fingerprint: String) {
-        self.duration = duration; self.fingerprint = fingerprint
+    public init(duration: Double, fingerprint: String, warning: String? = nil) {
+        self.duration = duration; self.fingerprint = fingerprint; self.warning = warning
     }
 }
 
@@ -112,12 +113,18 @@ private final class FingerprintProcess: @unchecked Sendable {
         }
         lock.lock(); let wasCancelled = cancelled; lock.unlock()
         if wasCancelled { throw CancellationError() }
-        guard task.terminationReason == .exit, task.terminationStatus == 0,
+        // The pinned helper can finish a usable fingerprint, print JSON, and then return 3
+        // after a decoder read error. Other failures and interrupted processes stay fatal.
+        guard task.terminationReason == .exit, [0, 3].contains(task.terminationStatus),
               let size = try outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 1_024 * 1_024,
               let result = try? JSONDecoder().decode(AudioFingerprint.self, from: Data(contentsOf: outputURL)),
               result.duration.isFinite, result.duration > 0, !result.fingerprint.isEmpty,
+              result.fingerprint.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
               result.fingerprint.count < 100_000 else { throw AudioIdentificationError.fingerprintFailed }
-        return result
+        return AudioFingerprint(duration: result.duration, fingerprint: result.fingerprint,
+            warning: task.terminationStatus == 3
+                ? "Some audio could not be decoded. Identification uses the readable portion of this file."
+                : nil)
     }
 }
 
@@ -175,7 +182,17 @@ public actor AcoustIDClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Macarok/0.1.0 (https://github.com/armateurlabs/macarok)", forHTTPHeaderField: "User-Agent")
         request.httpBody = Data((form.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B").utf8)
-        let (data, _) = try await transport.data(for: request)
+        let (data, response) = try await transport.response(for: request)
+        guard (200...299).contains(response.statusCode) else {
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               json["status"] as? String == "error",
+               let error = json["error"] as? [String: Any],
+               let message = error["message"] as? String,
+               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw AudioIdentificationError.service(String(message.prefix(300)))
+            }
+            throw SourceNetworkError.httpStatus(response.statusCode)
+        }
         return try Self.parseResponse(data)
     }
 

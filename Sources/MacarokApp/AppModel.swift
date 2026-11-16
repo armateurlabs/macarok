@@ -256,14 +256,16 @@ final class AppModel {
     @ObservationIgnored private var clientCache: [String: OpenSubsonicClient] = [:]
     @ObservationIgnored private var clientRequests: [String: Task<OpenSubsonicClient, Error>] = [:]
     @ObservationIgnored private var clientRevisions: [String: Int] = [:]
-    @ObservationIgnored private let playbackPreparation = PlaybackPreparationWorker()
+    @ObservationIgnored private let playbackPreparation: PlaybackPreparationWorker
     @ObservationIgnored private var nextPreparation: UpcomingPlaybackPreparation?
     @ObservationIgnored private var activePlaybackResource: PreparedQueuePlayback?
 
     init(store: LibraryStore? = nil, preferences: AppPreferences? = nil, registerSystemControls: Bool = true,
          localScan: LocalScanOperation? = nil, remoteCatalog: RemoteCatalogOperation? = nil, snapshotLoader: LibrarySnapshotLoader? = nil,
-         scopedSnapshotLoader: ScopedLibrarySnapshotLoader? = nil, selectionDefaults: UserDefaults? = nil) {
+         scopedSnapshotLoader: ScopedLibrarySnapshotLoader? = nil, selectionDefaults: UserDefaults? = nil,
+         playbackPreparation: PlaybackPreparationWorker? = nil) {
         self.store = store
+        self.playbackPreparation = playbackPreparation ?? PlaybackPreparationWorker()
         self.registerSystemControls = registerSystemControls
         self.localScan = localScan
         self.remoteCatalog = remoteCatalog
@@ -1494,6 +1496,26 @@ final class AppModel {
                 pendingRescanCoverage[sourceID] = (pendingRescanCoverage[sourceID] ?? .all).merged(with: coverage)
             } else { pendingRescanSourceIDs.insert(sourceID); pendingRescanCoverage[sourceID] = coverage }
         } else if let source = sourcesByID[sourceID] { startRefresh(sources: [source], coverages: [sourceID: coverage]) }
+    }
+
+    /// Identification needs the resolved audio file, not just access to its potentially moved root.
+    func prepareIdentificationFile(for track: TrackRecord) async throws -> URL {
+        guard !track.isCUETrack else { throw AudioIdentificationError.cueSegmentUnsupported }
+        guard let source = sourcesByID[track.sourceID], source.kind == .local else {
+            throw AudioIdentificationError.localFileRequired
+        }
+        let prepared = try await playbackPreparation.prepare(source: source, track: track)
+        try Task.checkCancellation()
+        guard sourcesByID[source.id] == source else { throw CancellationError() }
+        if let renewed = prepared.renewedSource {
+            Task {
+                try? await performLibraryWork { store in
+                    guard try store.sources().first(where: { $0.id == source.id }) == source else { return }
+                    try store.saveSource(renewed)
+                }
+            }
+        }
+        return prepared.url
     }
 
     @discardableResult func accessFolder(_ source: SourceRecord) async -> URL? {
