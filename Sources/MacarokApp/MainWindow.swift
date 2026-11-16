@@ -187,10 +187,11 @@ private struct QueueEntryRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.track.title).fontWeight(item.id == model.currentQueueID ? .semibold : .regular).lineLimit(1, reservesSpace: true)
                 // Grouped entries omit an empty detail line, so album bodies stay compact under their header.
-                if layout != .grouped || !subtitle.isEmpty || model.isAllSources {
+                // Their source is named once in the album header.
+                if layout != .grouped || !subtitle.isEmpty {
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Text(subtitle).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1, reservesSpace: true)
-                        if model.isAllSources {
+                        if layout != .grouped && model.playlistShowsSources {
                             SourceBadge(model: model, sourceID: item.track.sourceID, compact: true)
                                 .frame(maxWidth: 80, alignment: .leading).layoutPriority(1)
                         }
@@ -238,8 +239,15 @@ private struct PlaylistAlbumHeaderRow: View {
             ArtworkView(track: header.track, model: model).frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(header.album).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                Text([header.artist, header.year.map(String.init) ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
-                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text([header.artist, header.year.map(String.init) ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                    // Groups only join entries from one source.
+                    if model.playlistShowsSources {
+                        SourceBadge(model: model, sourceID: header.track.sourceID, compact: true)
+                            .frame(maxWidth: 80, alignment: .leading).layoutPriority(1)
+                    }
+                }
             }.frame(maxWidth: .infinity, alignment: .leading)
             Text("\(header.offsets.count) tracks · \(header.duration.playbackTime)")
                 .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary).fixedSize()
@@ -283,6 +291,7 @@ struct PlaylistControls: View {
                 .accessibilityIdentifier("playlistClear-\(location)").disabled(model.queue.isEmpty)
             Menu {
                 Toggle("Show Album Groups", isOn: $model.settings.playlistAlbumGroups)
+                Toggle("Show Sources", isOn: $model.settings.playlistShowsSources).disabled(!model.isAllSources)
                 Divider()
                 Button("Save Playlist…", action: model.savePlaylist).disabled(model.queue.isEmpty)
                 Button("Export Playlist…", action: model.exportPlaylist).disabled(model.queue.isEmpty)

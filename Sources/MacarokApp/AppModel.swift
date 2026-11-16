@@ -287,6 +287,8 @@ final class AppModel {
 
     var selectedSource: SourceRecord? { sourceID.flatMap { sourcesByID[$0] } }
     var isAllSources: Bool { libraryScope == .all }
+    /// Playlist source badges appear only when browsing All Sources and the user has not hidden them.
+    var playlistShowsSources: Bool { isAllSources && settings.playlistShowsSources }
     var scopeTitle: String { isAllSources ? "All Sources" : selectedSource?.name ?? "Your Library" }
     func sourceName(for sourceID: String) -> String { sourcesByID[sourceID]?.name ?? "Unavailable source" }
     func scopeIncludes(sourceID: String) -> Bool { libraryScope?.includes(sourceID: sourceID) == true }

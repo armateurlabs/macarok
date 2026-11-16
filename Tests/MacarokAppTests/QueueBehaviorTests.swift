@@ -18,12 +18,15 @@ final class QueuePreferenceTests: XCTestCase {
         XCTAssertEqual(legacy.librarySortOrder, LibrarySortOrder())
         XCTAssertTrue(legacy.librarySortOrder.isDescending(.years))
         XCTAssertTrue(legacy.playlistAlbumGroups, "Album groups are on unless the user turned them off.")
+        XCTAssertTrue(legacy.playlistShowsSources)
         var preferences = AppPreferences()
         preferences.librarySortOrder.toggle(.artists); preferences.librarySortOrder.toggle(.years)
         preferences.playlistAlbumGroups = false
+        preferences.playlistShowsSources = false
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: JSONEncoder().encode(preferences))
         XCTAssertEqual(decoded.librarySortOrder, preferences.librarySortOrder)
         XCTAssertFalse(decoded.playlistAlbumGroups)
+        XCTAssertFalse(decoded.playlistShowsSources)
         let unreleased = try JSONDecoder().decode(AppPreferences.self, from: Data(#"{"playlistAlbumGroups":false}"#.utf8))
         XCTAssertTrue(unreleased.playlistAlbumGroups)
         let future = try JSONDecoder().decode(AppPreferences.self,

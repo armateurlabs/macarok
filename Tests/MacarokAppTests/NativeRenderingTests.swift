@@ -255,6 +255,12 @@ final class NativeRenderingTests: XCTestCase {
                              destination: output.appendingPathComponent("lyrics-empty-\(suffix).png"))
             try await render(SettingsView(model: model, initialTab: .sources), size: NSSize(width: 650, height: 555), scheme: scheme,
                              destination: output.appendingPathComponent("settings-sources-\(suffix).png"))
+            try await render(QueuePane(model: model, player: model.player), size: NSSize(width: 330, height: 680), scheme: scheme,
+                             destination: output.appendingPathComponent("playlist-all-sources-\(suffix).png"))
+            model.settings.playlistShowsSources = false
+            try await render(QueuePane(model: model, player: model.player), size: NSSize(width: 330, height: 680), scheme: scheme,
+                             destination: output.appendingPathComponent("playlist-all-sources-hidden-\(suffix).png"))
+            model.settings.playlistShowsSources = true
         }
         XCTAssertEqual(model.player.state, .stopped)
     }

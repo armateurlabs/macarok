@@ -88,6 +88,42 @@ final class PlaylistAlbumGroupsTests: XCTestCase {
         XCTAssertEqual(model.selectedQueueID, model.queue[1].id)
     }
 
+    @MainActor
+    func testAllSourcesNamesTheGroupSourceInItsHeaderWithoutTallerEntries() async throws {
+        _ = NSApplication.shared
+        let model = AppModel(registerSystemControls: false)
+        model.queue = [entry("a1", album: "A"), entry("a2", album: "A"), entry("b1", album: "B")]
+        let hosting = NSHostingView(rootView: QueuePane(model: model, player: model.player).frame(width: 330, height: 400))
+        hosting.sizingOptions = []
+        hosting.frame = NSRect(x: 0, y: 0, width: 330, height: 400)
+        let window = NSWindow(contentRect: hosting.bounds, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        defer { window.contentView = nil; window.close() }
+        func heights() async throws -> [CGFloat] {
+            for _ in 0..<15 { hosting.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(10)) }
+            func find(_ view: NSView) -> NSTableView? {
+                if let table = view as? NSTableView { return table }
+                return view.subviews.lazy.compactMap(find).first
+            }
+            let table = try XCTUnwrap(find(hosting))
+            return (0..<table.numberOfRows).map { table.rect(ofRow: $0).height }
+        }
+        let singleSource = try await heights()
+        XCTAssertEqual(singleSource.count, 4)
+        model.libraryScope = .all
+        XCTAssertTrue(model.playlistShowsSources)
+        let allSources = try await heights()
+        XCTAssertEqual(allSources[1], singleSource[1], accuracy: 0.5, "Grouped entries gain no source line.")
+        XCTAssertEqual(allSources[2], singleSource[2], accuracy: 0.5)
+        XCTAssertEqual(allSources[0], singleSource[0], accuracy: 0.5, "The header badge shares the artist line.")
+        model.settings.playlistShowsSources = false
+        XCTAssertFalse(model.playlistShowsSources)
+        model.libraryScope = .source("source")
+        model.settings.playlistShowsSources = true
+        XCTAssertFalse(model.playlistShowsSources, "Badges appear only when browsing All Sources.")
+    }
+
     private func entry(_ id: String, album: String, source: String = "source") -> QueueItem {
         QueueItem(track: TrackRecord(id: id, sourceID: source, albumID: album, title: id, artist: "Artist",
                                      album: album, duration: 60))

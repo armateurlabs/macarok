@@ -95,6 +95,7 @@ struct AppPreferences: Codable {
     var localShortcuts: [String: Data] = [:]
     var librarySortOrder = LibrarySortOrder()
     var playlistAlbumGroups = true
+    var playlistShowsSources = true
     var buffer: Double? { customBuffer ? min(120, max(1, bufferSeconds)) : nil }
 
     init() {}
@@ -103,6 +104,7 @@ struct AppPreferences: Codable {
         case appearance, showMenuBar, repeatMode, trackDoubleClickAction, doubleClickPlays, playingAutoSwitchMode, customBuffer, bufferSeconds, volume, localShortcuts, librarySortOrder
         // Renamed when album groups became the default, so unreleased builds' saved Off does not persist.
         case playlistAlbumGroups = "showPlaylistAlbumGroups"
+        case playlistShowsSources = "showPlaylistSources"
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -119,6 +121,7 @@ struct AppPreferences: Codable {
         localShortcuts = try values.decodeIfPresent([String: Data].self, forKey: .localShortcuts) ?? [:]
         librarySortOrder = (try? values.decodeIfPresent(LibrarySortOrder.self, forKey: .librarySortOrder)) ?? LibrarySortOrder()
         playlistAlbumGroups = (try? values.decodeIfPresent(Bool.self, forKey: .playlistAlbumGroups)) ?? true
+        playlistShowsSources = (try? values.decodeIfPresent(Bool.self, forKey: .playlistShowsSources)) ?? true
     }
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
@@ -133,6 +136,7 @@ struct AppPreferences: Codable {
         try values.encode(localShortcuts, forKey: .localShortcuts)
         try values.encode(librarySortOrder, forKey: .librarySortOrder)
         try values.encode(playlistAlbumGroups, forKey: .playlistAlbumGroups)
+        try values.encode(playlistShowsSources, forKey: .playlistShowsSources)
     }
 
     static func load() -> Self {

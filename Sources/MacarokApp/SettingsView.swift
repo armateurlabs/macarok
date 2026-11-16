@@ -65,6 +65,8 @@ struct SettingsView: View {
             Section("Active Playlist") {
                 Toggle("Show album groups", isOn: $model.settings.playlistAlbumGroups)
                 Text("Adjacent tracks from the same album appear under one header with its artwork.").font(.caption).foregroundStyle(.secondary)
+                Toggle("Show sources", isOn: $model.settings.playlistShowsSources)
+                Text("When browsing All Sources, each entry or album header names its source.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Center Panel") {
                 LabeledContent("Show Playing automatically") {
