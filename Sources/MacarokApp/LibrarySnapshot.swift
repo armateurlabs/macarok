@@ -274,17 +274,35 @@ struct LibrarySnapshot: Sendable {
             LibraryYearGroup(id: group.id, year: group.year, title: group.title,
                 albums: group.albums.map { albumsByID[$0.presentationID] ?? $0 })
         }
-        func groups(_ values: [LibraryTrackGroup]) throws -> [LibraryTrackGroup] {
-            try values.map { LibraryTrackGroup(id: $0.id, title: $0.title, tracks: try patchedTracks($0.tracks)) }
+        // Only arrays containing changed tracks need copy-on-write. In a deep library, walking
+        // every folder's complete descendants multiplied the work by the entire tree depth.
+        let affectedGenres = Set(updates.values.map { $0.genre.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown" })
+        let affectedFormats = Set(updates.values.map { $0.format.isEmpty ? "Unknown Format" : $0.format })
+        func groups(_ values: [LibraryTrackGroup], affected: Set<String>) throws -> [LibraryTrackGroup] {
+            try values.map { group in
+                guard affected.contains(group.id) else { return group }
+                return LibraryTrackGroup(id: group.id, title: group.title, tracks: try patchedTracks(group.tracks))
+            }
+        }
+        let resolver = LibraryFolderPathResolver(sources: visibleSources.filter { $0.kind != .radio })
+        var affectedFolders: Set<String> = [""]
+        for track in updates.values {
+            var parent = scope == .all ? "source:" + StableID.make(track.sourceID) : ""
+            affectedFolders.insert(parent)
+            for component in resolver.folderPath(track).split(separator: "/") {
+                parent = parent.isEmpty ? String(component) : parent + "/" + String(component)
+                affectedFolders.insert(parent)
+            }
         }
         var folders = tracksByFolder
-        for (key, values) in tracksByFolder {
+        folders[""] = tracks
+        for key in affectedFolders where !key.isEmpty {
             try Task.checkCancellation()
-            folders[key] = try patchedTracks(values)
+            if let values = tracksByFolder[key] { folders[key] = try patchedTracks(values) }
         }
         let updated = LibrarySnapshot(scope: scope, tracks: tracks, tracksByID: tracksByID,
             albums: albums, albumsByID: albumsByID, artists: artists, artistsByName: artistsByName,
-            yearGroups: years, genreGroups: try groups(genreGroups), formatGroups: try groups(formatGroups),
+            yearGroups: years, genreGroups: try groups(genreGroups, affected: affectedGenres), formatGroups: try groups(formatGroups, affected: affectedFormats),
             recentlyAdded: recentlyAdded.map { albumsByID[$0.presentationID] ?? $0 },
             mostPlayedAlbums: try Self.topRanked(albums, eligible: { $0.playCount > 0 }, before: { $0.playCount > $1.playCount }),
             recentlyPlayed: try Self.topRanked(tracks, eligible: { $0.lastPlayedAt != nil }, before: { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }),

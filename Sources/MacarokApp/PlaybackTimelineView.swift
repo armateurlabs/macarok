@@ -11,7 +11,7 @@ struct PlaybackTimelineView: View {
     let track: TrackRecord
     @State private var interaction = PlaybackSeekInteraction()
     @State private var bufferedRanges: [Range<Double>] = []
-    private let sampling = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+    @State private var sampling = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
 
     var body: some View {
         let duration = timeline.duration > 0 ? timeline.duration : track.duration

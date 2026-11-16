@@ -101,19 +101,11 @@ private struct SynchronizedLyricsView: View {
     @Bindable var model: AppModel
     @Bindable var controller: LyricsController
     @Binding var autoScroll: Bool
-    @ObservedObject var timeline: PlaybackTimeline
-
-    private var activeLineID: Int? {
-        guard let track = controller.track,
-              let current = model.currentTrack,
-              current.id == track.id, current.sourceID == track.sourceID,
-              controller.hasSynchronizedLyrics else { return nil }
-        return controller.activeLineID(at: timeline.position)
-    }
+    let timeline: PlaybackTimeline
+    @State private var activeID: Int?
 
     var body: some View {
-        let activeID = activeLineID
-        return ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(controller.displayLines) { line in
@@ -132,11 +124,36 @@ private struct SynchronizedLyricsView: View {
             .onChange(of: autoScroll) { _, enabled in if enabled { scroll(to: activeID, with: proxy) } }
             .onAppear { scroll(to: activeID, with: proxy) }
         }
+        .background {
+            ActiveLyricsLineObserver(model: model, controller: controller, timeline: timeline, activeID: $activeID)
+                .frame(width: 0, height: 0).accessibilityHidden(true)
+        }
     }
 
     private func scroll(to id: Int?, with proxy: ScrollViewProxy) {
         guard autoScroll, let id else { return }
         withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
+    }
+}
+
+/// Only this zero-size observer samples the clock; the lyric stack changes at line boundaries.
+private struct ActiveLyricsLineObserver: View {
+    let model: AppModel
+    let controller: LyricsController
+    @ObservedObject var timeline: PlaybackTimeline
+    @Binding var activeID: Int?
+
+    private var lineID: Int? {
+        guard let track = controller.track, let current = model.currentTrack,
+              current.id == track.id, current.sourceID == track.sourceID,
+              controller.hasSynchronizedLyrics else { return nil }
+        return controller.activeLineID(at: timeline.position)
+    }
+
+    var body: some View {
+        Color.clear.onChange(of: lineID, initial: true) { _, next in
+            if activeID != next { activeID = next }
+        }
     }
 }
 
