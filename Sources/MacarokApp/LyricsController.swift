@@ -160,7 +160,8 @@ final class LyricsController {
 
     func openSearch() {
         guard let track, !isLiveRadio else { return }
-        sheetTrack = track; searchTitle = track.title; searchArtist = track.artist; searchAlbum = track.album
+        sheetTrack = track; searchTitle = track.title
+        searchArtist = LyricsLookupQuery.meaningful(track.artist) ?? ""; searchAlbum = LyricsLookupQuery.meaningful(track.album) ?? ""
         searchResults = []; candidates = [:]; searchError = nil; isSearching = false; showsSearch = true
     }
 

@@ -34,23 +34,64 @@ public actor LRCLIBClient {
         }
     }
 
+    /// Tries the exact edition first, then progressively more lenient spellings. Every accepted result
+    /// must still match the title, an artist, the performance type, and (when known) the duration.
     public func lookup(_ query: LyricsLookupQuery) async throws -> LyricsLookupResult {
-        guard Self.meaningful(query.title, placeholders: ["unknown track"]),
-              Self.meaningful(query.artist, placeholders: ["unknown artist"]) else { return .notFound }
-        var parameters = ["track_name": query.title, "artist_name": query.artist]
-        if Self.meaningful(query.album, placeholders: ["unknown album"]) { parameters["album_name"] = query.album }
-        if query.duration.isFinite, (1...3600).contains(query.duration) { parameters["duration"] = String(query.duration) }
-        guard let data = try await request(path: "api/get", parameters: parameters) else { return .notFound }
-        let record: Record
-        do { record = try JSONDecoder().decode(Record.self, from: data) }
-        catch { throw LyricsError.invalidResponse }
-        // A service result must describe the requested edition before it is accepted automatically.
-        guard Self.normalized(record.trackName) == Self.normalized(query.title),
-              Self.normalized(record.artistName) == Self.normalized(query.artist),
-              parameters["album_name"] == nil || Self.normalized(record.albumName) == Self.normalized(query.album),
-              parameters["duration"] == nil || abs(record.duration - query.duration) <= 2,
-              let candidate = record.candidate else { return .notFound }
-        return .from(candidate.document)
+        guard let title = LyricsMatching.meaningful(query.title) else { return .notFound }
+        let artist = LyricsMatching.meaningful(query.artist)
+        let album = LyricsMatching.meaningful(query.album)
+        let duration = query.duration.isFinite && (1...3600).contains(query.duration) ? query.duration : nil
+        if let artist {
+            var exact = ["track_name": title, "artist_name": artist]
+            if let duration { exact["duration"] = String(duration) }
+            for parameters in album.map({ [exact.merging(["album_name": $0]) { $1 }, exact] }) ?? [exact] {
+                guard let data = try await request(path: "api/get", parameters: parameters) else { continue }
+                let record: Record
+                do { record = try JSONDecoder().decode(Record.self, from: data) }
+                catch { throw LyricsError.invalidResponse }
+                if let candidate = record.candidate,
+                   Self.accepts(candidate, title: title, artist: artist, duration: duration, tolerance: 2) {
+                    return .from(candidate.document)
+                }
+            }
+        }
+        var searches: [[String: String]] = []
+        let primary = artist.flatMap { LyricsMatching.artistNames($0).first }
+        for (searchTitle, searchArtist) in [(title, artist), (LyricsMatching.simplifiedTitle(title), primary ?? artist)] {
+            var parameters = ["track_name": searchTitle]
+            if let searchArtist { parameters["artist_name"] = searchArtist }
+            if !searches.contains(parameters) { searches.append(parameters) }
+        }
+        // A title-only search finds entries filed under another artist spelling; artist and duration still filter them.
+        if artist != nil, duration != nil { searches.append(["track_name": LyricsMatching.simplifiedTitle(title)]) }
+        for parameters in searches {
+            guard let data = try await request(path: "api/search", parameters: parameters) else { continue }
+            let candidates: [LyricsCandidate]
+            do { candidates = try JSONDecoder().decode([Record].self, from: data).compactMap(\.candidate) }
+            catch { throw LyricsError.invalidResponse }
+            if let best = Self.best(candidates, title: title, artist: artist, duration: duration) { return .from(best.document) }
+        }
+        return .notFound
+    }
+
+    private static func accepts(_ candidate: LyricsCandidate, title: String, artist: String?, duration: Double?,
+                                tolerance: Double) -> Bool {
+        if let duration, abs(candidate.duration - duration) > tolerance { return false }
+        if let artist, !LyricsMatching.artistMatches(candidate.artist, artist) { return false }
+        // A simplified title is accepted only when the duration independently confirms the recording.
+        return LyricsMatching.titleMatches(candidate.title, title, allowSimplified: duration != nil)
+    }
+
+    private static func best(_ candidates: [LyricsCandidate], title: String, artist: String?, duration: Double?) -> LyricsCandidate? {
+        guard artist != nil || duration != nil else { return nil }
+        return candidates.filter { accepts($0, title: title, artist: artist, duration: duration, tolerance: 3) }
+            .min { lhs, rhs in
+                func rank(_ value: LyricsCandidate) -> (Int, Int, Double) {
+                    (LyricsMatching.folded(value.title) == LyricsMatching.folded(title) ? 0 : 1,
+                     value.document.lines.isEmpty ? 1 : 0, duration.map { abs(value.duration - $0) } ?? 0)
+                }
+                return rank(lhs) < rank(rhs)
+            }
     }
 
     public func search(_ query: LyricsLookupQuery, text: String? = nil) async throws -> [LyricsCandidate] {
@@ -62,8 +103,9 @@ public actor LRCLIBClient {
                 throw LyricsError.invalidQuery("Enter a track title to search for lyrics.")
             }
             parameters["track_name"] = query.title
-            if !query.artist.isEmpty { parameters["artist_name"] = query.artist }
-            if !query.album.isEmpty { parameters["album_name"] = query.album }
+            // Placeholders such as "[Unknown Album]" would exclude every real result.
+            if let artist = LyricsMatching.meaningful(query.artist) { parameters["artist_name"] = artist }
+            if let album = LyricsMatching.meaningful(query.album) { parameters["album_name"] = album }
         }
         guard let data = try await request(path: "api/search", parameters: parameters) else { return [] }
         do { return try JSONDecoder().decode([Record].self, from: data).compactMap(\.candidate) }
@@ -147,16 +189,6 @@ public actor LRCLIBClient {
     private func cancelWaiter(_ id: UUID) {
         guard let index = waiters.firstIndex(where: { $0.0 == id }) else { return }
         waiters.remove(at: index).1.resume(throwing: CancellationError())
-    }
-
-    private static func meaningful(_ value: String, placeholders: Set<String>) -> Bool {
-        let value = normalized(value)
-        return !value.isEmpty && !placeholders.contains(value)
-    }
-
-    private static func normalized(_ value: String) -> String {
-        value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
-            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     private struct Record: Decodable {

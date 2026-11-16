@@ -25,11 +25,12 @@ struct LibraryPane: View {
                     ForEach(LibraryView.allCases) { view in
                         Button { model.selectLibraryView(view) } label: {
                             Text(view.title)
-                                .font(.system(size: 11))
+                                // Same typography and color as the panel titles, such as Active Playlist.
+                                .font(.system(size: 12, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 5)
                                 .background(model.libraryView == view ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 5))
-                                .foregroundStyle(model.libraryView == view ? Color.accentColor : .secondary)
+                                .foregroundStyle(.primary)
                                 .contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }

@@ -65,6 +65,49 @@ final class LyricsTests: XCTestCase {
         XCTAssertEqual(wrongEdition, .notFound)
     }
 
+    func testLookupIgnoresPlaceholdersAndFallsBackToLenientSearchWithoutAcceptingAnotherRecording() async throws {
+        func candidate(_ id: Int, _ title: String, artist: String = "Test Artist", duration: Double = 121, synced: Bool = true) -> String {
+            let value: [String: Any] = ["id": id, "trackName": title, "artistName": artist, "albumName": "Elsewhere",
+                                        "duration": duration, "instrumental": false, "plainLyrics": "Line",
+                                        "syncedLyrics": synced ? "[00:01.000]Line" : (NSNull() as Any)]
+            return String(data: try! JSONSerialization.data(withJSONObject: value), encoding: .utf8)!
+        }
+        // A placeholder album is never sent; the exact lookup then succeeds without it.
+        let exactStub = LyricsHTTPStub(responses: [.init(body: record())])
+        let exact = LRCLIBClient(minimumRequestSpacing: 0, transport: { try await exactStub.send($0) })
+        let placeholder = LyricsLookupQuery(sourceID: "s", trackID: "t", title: "Test Song", artist: "Test Artist",
+                                            album: "[Unknown Album]", duration: 120)
+        let withoutAlbum = try await exact.lookup(placeholder)
+        XCTAssertNotNil(withoutAlbum.document)
+        let sent = await exactStub.requests.compactMap { URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)?.queryItems }
+        XCTAssertEqual(sent.count, 1)
+        XCTAssertNil(sent[0].first { $0.name == "album_name" })
+
+        // Both exact lookups miss; the search returns a live take, a wrong length, plain text, and the synced match.
+        let searchStub = LyricsHTTPStub(responses: [.init(status: 404), .init(status: 404), .init(body: "[" + [
+            candidate(1, "Test Song (Live)", duration: 120), candidate(2, "Test Song", duration: 150),
+            candidate(3, "Test Song - Remastered 2011", artist: "Test Artist & Friend", synced: false),
+            candidate(4, "Test Song (2011 Remaster)", artist: "Test Artist, Friend")
+        ].joined(separator: ",") + "]")])
+        let lenient = LRCLIBClient(minimumRequestSpacing: 0, transport: { try await searchStub.send($0) })
+        let remastered = LyricsLookupQuery(sourceID: "s", trackID: "t", title: "01 - Test Song (Remastered)",
+                                           artist: "Test Artist feat. Friend", album: "Test Album", duration: 120)
+        let found = try await lenient.lookup(remastered)
+        XCTAssertEqual(found.document?.providerID, "4", "The synced studio take within the duration is preferred.")
+
+        // Without a duration, only an exact title spelling may be accepted automatically.
+        let undatedStub = LyricsHTTPStub(responses: [.init(status: 404), .init(status: 404), .init(body: "[\(candidate(5, "Test Song (Remaster)"))]")])
+        let undated = LRCLIBClient(minimumRequestSpacing: 0, transport: { try await undatedStub.send($0) })
+        let unknownLength = LyricsLookupQuery(sourceID: "s", trackID: "t", title: "Test Song", artist: "Test Artist",
+                                              album: "Test Album", duration: 0)
+        let unconfirmed = try await undated.lookup(unknownLength)
+        XCTAssertEqual(unconfirmed, .notFound)
+
+        XCTAssertNil(LyricsLookupQuery.meaningful(" [Unknown Album] "))
+        XCTAssertNil(LyricsLookupQuery.meaningful("Unknown Artist"))
+        XCTAssertEqual(LyricsLookupQuery.meaningful(" Unknown Pleasures "), "Unknown Pleasures")
+    }
+
     func testLRCLIBSearchReturnsCandidatesWithoutAutomaticallyChoosingThem() async throws {
         let stub = LyricsHTTPStub(responses: [.init(body: "[\(record()),\(record(id: 2, title: "Test Song (Live)", duration: 160))]")])
         let client = LRCLIBClient(minimumRequestSpacing: 0, transport: { try await stub.send($0) })
@@ -77,14 +120,17 @@ final class LyricsTests: XCTestCase {
     }
 
     func testLRCLIBDistinguishesInstrumentalMissingAndInvalidResponses() async throws {
-        let stub = LyricsHTTPStub(responses: [.init(body: record(instrumental: true)), .init(status: 404), .init(body: "not json")])
-        let client = LRCLIBClient(minimumRequestSpacing: 0, transport: { try await stub.send($0) })
-        let instrumental = try await client.lookup(query())
+        func client(_ responses: [LyricsHTTPStub.Reply]) -> LRCLIBClient {
+            let stub = LyricsHTTPStub(responses: responses)
+            return LRCLIBClient(minimumRequestSpacing: 0, transport: { try await stub.send($0) })
+        }
+        let instrumental = try await client([.init(body: record(instrumental: true))]).lookup(query())
         guard case .instrumental(let document) = instrumental else { return XCTFail("Instrumental must be a successful, distinct result.") }
         XCTAssertTrue(document.isInstrumental)
-        let missing = try await client.lookup(query())
+        // Every exact and lenient attempt misses.
+        let missing = try await client([]).lookup(query())
         XCTAssertEqual(missing, .notFound)
-        do { _ = try await client.lookup(query()); XCTFail("Malformed data must be an error.") }
+        do { _ = try await client([.init(body: "not json")]).lookup(query()); XCTFail("Malformed data must be an error.") }
         catch LyricsError.invalidResponse { }
     }
 
@@ -254,7 +300,7 @@ final class LyricsTests: XCTestCase {
     }
 }
 
-private actor LyricsHTTPStub {
+actor LyricsHTTPStub {
     struct Reply: Sendable {
         var status = 200
         var body = ""

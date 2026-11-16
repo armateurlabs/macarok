@@ -72,6 +72,9 @@ public struct LyricsLookupQuery: Sendable, Equatable {
                   duration: track.endTime.map { max(0, $0 - (track.startTime ?? 0)) } ?? track.duration)
     }
 
+    /// The value with surrounding whitespace removed, or nil for missing-metadata placeholders such as "[Unknown Album]".
+    public static func meaningful(_ value: String) -> String? { LyricsMatching.meaningful(value) }
+
     public var fingerprint: String {
         let boundedDuration = duration.isFinite ? min(1_000_000_000, max(0, duration)) : 0
         return StableID.make(sourceID, trackID, title, artist, album, String(Int((boundedDuration * 1_000).rounded())))
