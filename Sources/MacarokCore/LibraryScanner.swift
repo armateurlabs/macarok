@@ -10,6 +10,7 @@ public struct LibraryScanResult: Sendable {
     public var scannedAt: Date
     public var fileCacheEntries: [LocalScanFileCacheEntry] = []
     public var filesRead: Int = 0
+    public var coverage: LocalScanCoverage = .all
 
     public var activeIDs: Set<String> { Set(tracks.map(\.id)) }
     public var trackCount: Int { tracks.count }
@@ -39,10 +40,12 @@ public struct LibraryScanner: Sendable {
 
     public func scan(source: SourceRecord,
                      cachedFiles: [String: LocalScanFileCacheEntry] = [:],
+                     coverage: LocalScanCoverage = .all,
                      metadataReader: @escaping @Sendable (URL) throws -> AudioFileMetadata,
                      progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> LibraryScanResult {
         let task = Task.detached(priority: .background) {
-            try performScan(source: source, cachedFiles: cachedFiles, metadataReader: metadataReader, progress: progress)
+            try performScan(source: source, cachedFiles: cachedFiles, coverage: coverage,
+                            metadataReader: metadataReader, progress: progress)
         }
         return try await withTaskCancellationHandler {
             try await task.value
@@ -53,6 +56,7 @@ public struct LibraryScanner: Sendable {
 
     private func performScan(source: SourceRecord,
                              cachedFiles: [String: LocalScanFileCacheEntry],
+                             coverage requestedCoverage: LocalScanCoverage,
                              metadataReader: @Sendable (URL) throws -> AudioFileMetadata,
                              progress: (@Sendable (Int, Int) -> Void)?) throws -> LibraryScanResult {
         guard source.kind == .local else { throw LibraryScannerError.unsupportedSource }
@@ -63,6 +67,8 @@ public struct LibraryScanner: Sendable {
         }
         guard FileManager.default.isReadableFile(atPath: sourceURL.path) else { throw LibraryScannerError.inaccessibleDirectory }
         let directory = isDirectory.boolValue ? sourceURL : sourceURL.deletingLastPathComponent()
+        // An explicit audio/CUE/playlist source has its own membership semantics.
+        let coverage = isDirectory.boolValue ? requestedCoverage.normalized : .all
 
         let scanDate = Date()
         var warnings: [String] = []
@@ -117,37 +123,104 @@ public struct LibraryScanner: Sendable {
                 }
             } else { throw LibraryScannerError.unsupportedSource }
         } else {
-            guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: Array(keys),
-                                                              options: [.skipsHiddenFiles, .skipsPackageDescendants],
-                                                              errorHandler: { url, error in
-            warnings.append("\(url.lastPathComponent): \(error.localizedDescription)")
-            isComplete = false
-            return true
-            }) else { throw LibraryScannerError.inaccessibleDirectory }
-            for case let file as URL in enumerator {
+            let roots: [URL]
+            switch coverage {
+            case .all: roots = [directory]
+            case let .folders(paths): roots = paths.map { directory.appendingPathComponent($0, isDirectory: true) }
+            }
+            for root in roots {
                 try Task.checkCancellation()
-                let values: URLResourceValues
-                do { values = try file.resourceValues(forKeys: keys) }
-                catch {
-                    warnings.append("\(file.lastPathComponent): file information could not be read (\(error.localizedDescription)).")
+                var link = false
+                var ancestor = root
+                while ancestor.path != directory.path {
+                    if (try? FileManager.default.attributesOfItem(atPath: ancestor.path)[.type]) as? FileAttributeType == .typeSymbolicLink {
+                        link = true
+                        break
+                    }
+                    let parent = ancestor.deletingLastPathComponent()
+                    if parent.path == ancestor.path { break }
+                    ancestor = parent
+                }
+                if link { continue }
+                let attributes: [FileAttributeKey: Any]
+                do { attributes = try FileManager.default.attributesOfItem(atPath: root.path) }
+                catch let error as NSError where error.domain == NSCocoaErrorDomain &&
+                    [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(error.code) {
+                    // A removed/renamed folder is a complete empty result for that coverage.
+                    continue
+                } catch {
+                    warnings.append("\(root.lastPathComponent): \(error.localizedDescription)")
                     isComplete = false
                     continue
                 }
-                if values.isSymbolicLink == true { continue }
-                guard values.isRegularFile == true else { continue }
-                let ext = file.pathExtension.lowercased()
-                if Self.supportedExtensions.contains(ext) { audioFiles.append(file.standardizedFileURL) }
-                if ext == "cue" { cueFiles.append(file.standardizedFileURL) }
+                guard attributes[.type] as? FileAttributeType == .typeDirectory else { continue }
+                guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: Array(keys),
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { url, error in
+                    warnings.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                    isComplete = false
+                    return true
+                }) else {
+                    warnings.append("\(root.lastPathComponent): the directory could not be read.")
+                    isComplete = false
+                    continue
+                }
+                for case let file as URL in enumerator {
+                    try Task.checkCancellation()
+                    let values: URLResourceValues
+                    do { values = try file.resourceValues(forKeys: keys) }
+                    catch {
+                        warnings.append("\(file.lastPathComponent): file information could not be read (\(error.localizedDescription)).")
+                        isComplete = false
+                        continue
+                    }
+                    if values.isSymbolicLink == true { continue }
+                    guard values.isRegularFile == true else { continue }
+                    let ext = file.pathExtension.lowercased()
+                    if Self.supportedExtensions.contains(ext) { audioFiles.append(file.standardizedFileURL) }
+                    if ext == "cue" { cueFiles.append(file.standardizedFileURL) }
+                }
             }
         }
         audioFiles = Array(Set(audioFiles))
         audioFiles.sort { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
         cueFiles = Array(Set(cueFiles))
         cueFiles.sort { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        var parsedSheets: [String: CUESheet] = [:]
+        var cueCacheEntries: [LocalScanFileCacheEntry] = []
+        for cue in cueFiles {
+            try Task.checkCancellation()
+            do {
+                let before = try? LocalScanFileFingerprint(url: cue)
+                let sheet = try CUEParser.read(url: cue)
+                parsedSheets[cue.path] = sheet
+                if let before, before == (try? LocalScanFileFingerprint(url: cue)) {
+                    // Preserve missing FILE references too, for a later watcher event in their folder.
+                    cueCacheEntries.append(LocalScanFileCacheEntry(path: cue.path, byteCount: before.byteCount,
+                        modifiedAt: before.modifiedAt, metadata: AudioFileMetadata(embeddedCueSheet: sheet.originalText)))
+                }
+                if coverage != .all {
+                    for name in sheet.fileNames {
+                        let normalized = name.replacingOccurrences(of: "\\", with: "/")
+                        let candidate = cue.deletingLastPathComponent().appendingPathComponent(normalized).standardizedFileURL
+                        let sibling = cue.deletingLastPathComponent().appendingPathComponent((normalized as NSString).lastPathComponent).standardizedFileURL
+                        if [candidate, sibling].contains(where: {
+                            FileManager.default.fileExists(atPath: $0.path) && !coverage.contains(url: $0, rootURL: directory)
+                        }) {
+                            return try performScan(source: source, cachedFiles: cachedFiles, coverage: .all,
+                                metadataReader: metadataReader, progress: progress)
+                        }
+                    }
+                }
+            } catch {
+                warnings.append("\(cue.lastPathComponent): \(error.localizedDescription)")
+                isComplete = false
+            }
+        }
         let filesByPath = Dictionary(uniqueKeysWithValues: audioFiles.map { ($0.path, $0) })
         let foldedPaths = Dictionary(grouping: audioFiles, by: { $0.path.lowercased() })
         var metadataCache: [String: AudioFileMetadata] = [:]
-        var updatedCache: [LocalScanFileCacheEntry] = []
+        var failedMetadataFiles = Set<String>()
+        var updatedCache: [LocalScanFileCacheEntry] = cueCacheEntries
         var filesRead = 0
         var lastProgressAt = -Double.infinity
         var artworkCache: [String: String?] = [:]
@@ -176,6 +249,7 @@ public struct LibraryScanner: Sendable {
             catch {
                 warnings.append("\(file.lastPathComponent): metadata could not be read (\(error.localizedDescription)).")
                 isComplete = false
+                failedMetadataFiles.insert(file.path)
                 value = AudioFileMetadata()
             }
             if let data = value.artworkData, !data.isEmpty {
@@ -188,9 +262,15 @@ public struct LibraryScanner: Sendable {
             }
             metadataCache[file.path] = value
             // Do not cache a failed read or metadata from a file replaced while TagLib was reading it.
-            if readSucceeded, let fingerprint, fingerprint == (try? LocalScanFileFingerprint(url: file)) {
-                updatedCache.append(LocalScanFileCacheEntry(path: file.path, byteCount: fingerprint.byteCount,
-                    modifiedAt: fingerprint.modifiedAt, metadata: value))
+            if readSucceeded {
+                if let fingerprint, fingerprint == (try? LocalScanFileFingerprint(url: file)) {
+                    updatedCache.append(LocalScanFileCacheEntry(path: file.path, byteCount: fingerprint.byteCount,
+                        modifiedAt: fingerprint.modifiedAt, metadata: value))
+                } else {
+                    warnings.append("\(file.lastPathComponent): the file changed while its metadata was being read.")
+                    isComplete = false
+                    failedMetadataFiles.insert(file.path)
+                }
             }
             publishProgress()
             return value
@@ -265,6 +345,7 @@ public struct LibraryScanner: Sendable {
             for (offset, pair) in resolved.enumerated() {
                 let (cueTrack, file) = pair
                 let metadata = readMetadata(for: file)
+                guard !failedMetadataFiles.contains(file.path) else { continue }
                 var track = baseTrack(file: file, metadata: metadata)
                 let start = cueTrack.index01.seconds
                 let next = resolved.dropFirst(offset + 1).first { $0.1.path == file.path }?.0.index01.seconds
@@ -299,14 +380,14 @@ public struct LibraryScanner: Sendable {
 
         for cue in cueFiles {
             try Task.checkCancellation()
-            do { appendSheet(try CUEParser.read(url: cue), cue: cue) }
-            catch { warnings.append("\(cue.lastPathComponent): \(error.localizedDescription)"); isComplete = false }
+            if let sheet = parsedSheets[cue.path] { appendSheet(sheet, cue: cue) }
         }
 
         for file in audioFiles {
             try Task.checkCancellation()
             guard !coveredFiles.contains(file.path) else { continue }
             let metadata = readMetadata(for: file)
+            guard !failedMetadataFiles.contains(file.path) else { continue }
             if let text = nonempty(metadata.embeddedCueSheet) {
                 do {
                     let hasFile = text.range(of: #"(?im)^\s*FILE\s"#, options: .regularExpression) != nil
@@ -372,7 +453,7 @@ public struct LibraryScanner: Sendable {
         return LibraryScanResult(sourceID: source.id, tracks: tracks.sorted(by: TrackRecord.libraryOrder),
                                  filesScanned: metadataCache.count, warnings: warnings,
                                  isComplete: isComplete, scannedAt: scanDate,
-                                 fileCacheEntries: updatedCache, filesRead: filesRead)
+                                 fileCacheEntries: updatedCache, filesRead: filesRead, coverage: coverage)
     }
 
     private func cacheArtwork(data: Data, mimeType: String?) throws -> String {

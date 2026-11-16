@@ -207,12 +207,16 @@ public final class LibraryStore: @unchecked Sendable {
     }
 
     /// Scans update their index fields, while user statistics and locked corrections survive.
-    public func upsertTracks(_ tracks: [TrackRecord]) throws {
+    @discardableResult
+    public func upsertTracks(_ tracks: [TrackRecord]) throws -> Bool {
         try database.write { db in
+            var changed = false
             for track in tracks {
                 try Task.checkCancellation()
-                try Self.saveIndexedTrack(track, db: db)
+                let saved = try Self.saveIndexedTrack(track, db: db)
+                changed = saved || changed
             }
+            return changed
         }
     }
 
@@ -226,24 +230,46 @@ public final class LibraryStore: @unchecked Sendable {
         }
     }
 
-    public func replaceSourceTracks(sourceID: String, with tracks: [TrackRecord]) throws {
+    @discardableResult
+    public func replaceSourceTracks(sourceID: String, with tracks: [TrackRecord],
+                                    coverage: LocalScanCoverage = .all, rootURL: URL? = nil) throws -> Bool {
         try database.write { db in
             try Task.checkCancellation()
+            let coverage = coverage.normalized
+            var predicate = "1"
+            var arguments = [sourceID]
+            if coverage != .all {
+                guard let source = try SourceRecord.fetchOne(db, key: sourceID), source.kind == .local,
+                      let root = rootURL ?? source.url else { throw LibraryScannerError.unsupportedSource }
+                let file = coverage.predicate(column: "fileURL", rootURL: root, encodedURL: true)
+                let cue = coverage.predicate(column: "cuePath", rootURL: root)
+                predicate = "((\(file.sql)) OR (\(cue.sql)))"
+                arguments += file.arguments + cue.arguments
+            }
             var previous = Dictionary(uniqueKeysWithValues: try TrackRecord.fetchAll(db,
-                sql: "SELECT * FROM tracks WHERE sourceID = ?", arguments: [sourceID]).map { ($0.id, $0) })
+                sql: "SELECT * FROM tracks WHERE sourceID = ? AND \(predicate)",
+                arguments: StatementArguments(arguments)).map { ($0.id, $0) })
             var activeIDs = Set<String>()
+            var changed = false
             for track in tracks where track.sourceID == sourceID {
                 try Task.checkCancellation()
                 var value = track
                 value.isAvailable = true
                 activeIDs.insert(value.id)
-                previous[value.id] = try Self.saveIndexedTrack(value, preserving: previous[value.id], db: db)
+                // An expanded/new CUE can introduce a record outside the original SQL coverage.
+                // Fetch its existing row before preserving statistics and locked metadata.
+                let old = try previous[value.id] ?? TrackRecord.fetchOne(db, key: value.id)
+                let saved = try Self.saveIndexedTrack(value, preserving: old, db: db)
+                changed = old != saved || changed
+                previous[value.id] = saved
             }
             for track in previous.values where track.isAvailable && !activeIDs.contains(track.id) {
                 try Task.checkCancellation()
                 try db.execute(sql: "UPDATE tracks SET isAvailable = 0 WHERE id = ? AND sourceID = ?", arguments: [track.id, sourceID])
+                changed = true
             }
             try Task.checkCancellation()
+            return changed
         }
     }
 
@@ -404,8 +430,11 @@ public final class LibraryStore: @unchecked Sendable {
         try database.read { try Data.fetchOne($0, sql: "SELECT value FROM appState WHERE key = ?", arguments: [key]) }
     }
 
-    private static func saveIndexedTrack(_ incoming: TrackRecord, db: Database) throws {
-        _ = try saveIndexedTrack(incoming, preserving: TrackRecord.fetchOne(db, key: incoming.id), db: db)
+    @discardableResult
+    private static func saveIndexedTrack(_ incoming: TrackRecord, db: Database) throws -> Bool {
+        let previous = try TrackRecord.fetchOne(db, key: incoming.id)
+        let saved = try saveIndexedTrack(incoming, preserving: previous, db: db)
+        return previous != saved
     }
 
     @discardableResult
