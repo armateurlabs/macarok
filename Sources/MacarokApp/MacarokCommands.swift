@@ -61,6 +61,9 @@ struct MacarokCommands: Commands {
             Button("Edit Album Metadata…") { model.beginAlbumMetadataEditing(model.selectedTrack) }.disabled(model.selectedTrack == nil || model.isRadioTrack(model.selectedTrack))
             Button("Choose Artwork…") { model.artworkTrack = model.selectedTrack }.keyboardShortcut("i", modifiers: [.command, .shift]).disabled(model.selectedTrack == nil)
         }
+        CommandGroup(replacing: .help) {
+            Button("Playback Diagnostics…") { model.playbackDiagnostics.showWindow(appearance: model.settings.appearance.colorScheme) }
+        }
     }
 
     private func choosePlaylist() {

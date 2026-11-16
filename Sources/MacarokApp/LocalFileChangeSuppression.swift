@@ -4,6 +4,15 @@ import Foundation
 struct DirectoryChangeBatch: Equatable, Sendable {
     let paths: [String]
     let mustRescan: Bool
+    let directoryPaths: Set<String>
+    let filePaths: Set<String>
+
+    init(paths: [String], mustRescan: Bool, directoryPaths: Set<String> = [], filePaths: Set<String> = []) {
+        self.paths = paths
+        self.mustRescan = mustRescan
+        self.directoryPaths = directoryPaths
+        self.filePaths = filePaths
+    }
 }
 
 /// Suppresses only recent, exact post-write states. Ambiguous directory events always request a scan.

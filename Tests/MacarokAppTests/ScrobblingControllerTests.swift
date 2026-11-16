@@ -55,6 +55,123 @@ final class ScrobblingControllerTests: XCTestCase {
         await controller.setEnabled(false)
     }
 
+    func testDelayedNativeHandoffAdoptionNeverCreditsTheSuccessorsAudioToTheOutgoingTrack() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let clock = ScrobblingTestClock()
+        let server = ScrobblingHTTPFixture()
+        let controller = ScrobblingController(store: fixture.store, credentials: fixture.credentials,
+            transport: { try await server.send($0) }, monotonic: { clock.time }, now: { clock.date },
+            sleep: { _ in throw CancellationError() })
+        await controller.start(); await controller.setSharesNowPlaying(false)
+        let outgoingID = UUID(), incomingID = UUID()
+        controller.begin(track: fixture.track, source: fixture.source, occurrenceID: outgoingID)
+        controller.update(isPlaying: true, isBuffering: false, position: 0, duration: 40)
+        clock.advance(15)
+        controller.update(isPlaying: true, isBuffering: false, position: 15, duration: 40)
+        // The native engine stops the outgoing track at 18 seconds. The UI is unavailable
+        // until 30 seconds, while the incoming recording has already been playing.
+        clock.advance(15)
+        controller.end(atMonotonic: 18, at: Date(timeIntervalSince1970: 1_018))
+        await controller.flush()
+        XCTAssertEqual(try fixture.store.lastFMSummary(accountID: fixture.accountID).pending, 0)
+        var incoming = fixture.track; incoming.id = "incoming"; incoming.title = "Incoming Recording"
+        let firstPlayingDate = Date(timeIntervalSince1970: 1_018.5)
+        controller.begin(track: incoming, source: fixture.source, occurrenceID: incomingID, startedAt: firstPlayingDate)
+        controller.update(isPlaying: true, isBuffering: false, position: 11.5, duration: 40)
+        clock.advance(19)
+        controller.update(isPlaying: true, isBuffering: false, position: 30.5, duration: 40)
+        await controller.flush()
+        XCTAssertEqual(try fixture.store.lastFMSummary(accountID: fixture.accountID).pending, 0, "A past timestamp must not backfill unobserved listening time.")
+        clock.advance(1)
+        controller.update(isPlaying: true, isBuffering: false, position: 31.5, duration: 40)
+        await controller.flush()
+        let entries = try fixture.store.lastFMBatch(accountID: fixture.accountID, at: .distantFuture)
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries.first?.submission.id, incomingID.uuidString)
+        XCTAssertEqual(entries.first?.submission.startedAt, firstPlayingDate)
+        XCTAssertFalse(entries.contains { $0.submission.id == outgoingID.uuidString })
+        await controller.setEnabled(false)
+    }
+
+    func testExactNativeBoundaryRetainsTheOutgoingTracksLegitimateFinalInterval() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let clock = ScrobblingTestClock()
+        let server = ScrobblingHTTPFixture()
+        let controller = ScrobblingController(store: fixture.store, credentials: fixture.credentials,
+            transport: { try await server.send($0) }, monotonic: { clock.time }, now: { clock.date },
+            sleep: { _ in throw CancellationError() })
+        await controller.start(); await controller.setSharesNowPlaying(false)
+        let occurrence = UUID(), startedAt = clock.date
+        controller.begin(track: fixture.track, source: fixture.source, occurrenceID: occurrence)
+        controller.update(isPlaying: true, isBuffering: false, position: 0, duration: 40)
+        clock.advance(19)
+        controller.update(isPlaying: true, isBuffering: false, position: 19, duration: 40)
+        clock.advance(21)
+        controller.end(discardUnsampledTime: true, atMonotonic: 20.5, at: Date(timeIntervalSince1970: 1_020.5))
+        await controller.flush()
+        let entries = try fixture.store.lastFMBatch(accountID: fixture.accountID, at: .distantFuture)
+        XCTAssertEqual(entries.count, 1, "A verified boundary takes precedence over the conservative discard fallback.")
+        XCTAssertEqual(entries.first?.submission.id, occurrence.uuidString)
+        XCTAssertEqual(entries.first?.submission.startedAt, startedAt)
+        await controller.setEnabled(false)
+    }
+
+    func testNativeTimestampWaitsForFirstActiveSampleAndPreservesNowPlayingNotification() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let clock = ScrobblingTestClock()
+        let server = ScrobblingHTTPFixture()
+        let controller = ScrobblingController(store: fixture.store, credentials: fixture.credentials,
+            transport: { try await server.send($0) }, monotonic: { clock.time }, now: { clock.date },
+            sleep: { _ in throw CancellationError() })
+        await controller.start()
+        let nativeDate = Date(timeIntervalSince1970: 990)
+        controller.begin(track: fixture.track, source: fixture.source, startedAt: nativeDate)
+        controller.update(isPlaying: false, isBuffering: true, position: 0, duration: 40)
+        clock.advance(10)
+        controller.update(isPlaying: true, isBuffering: false, position: 10, duration: 40)
+        for _ in 0..<100 {
+            let requests = await server.requests
+            if requests.contains(where: { String(data: $0.httpBody ?? Data(), encoding: .utf8)?.contains("method=track.updateNowPlaying") == true }) { break }
+            await Task.yield()
+        }
+        clock.advance(5)
+        controller.update(isPlaying: false, isBuffering: false, position: 15, duration: 40)
+        clock.advance(20)
+        controller.update(isPlaying: true, isBuffering: false, position: 15, duration: 40)
+        clock.advance(15)
+        controller.update(isPlaying: true, isBuffering: false, position: 30, duration: 40)
+        await controller.flush()
+        let entries = try fixture.store.lastFMBatch(accountID: fixture.accountID, at: .distantFuture)
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries.first?.submission.startedAt, nativeDate)
+        let requests = await server.requests
+        XCTAssertEqual(requests.filter { String(data: $0.httpBody ?? Data(), encoding: .utf8)?.contains("method=track.updateNowPlaying") == true }.count, 1)
+        await controller.setEnabled(false)
+    }
+
+    func testConservativeHandoffWithoutBoundaryStillDiscardsUnsampledSuccessorTime() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let clock = ScrobblingTestClock()
+        let server = ScrobblingHTTPFixture()
+        let controller = ScrobblingController(store: fixture.store, credentials: fixture.credentials,
+            transport: { try await server.send($0) }, monotonic: { clock.time }, now: { clock.date },
+            sleep: { _ in throw CancellationError() })
+        await controller.start(); await controller.setSharesNowPlaying(false)
+        controller.begin(track: fixture.track, source: fixture.source)
+        controller.update(isPlaying: true, isBuffering: false, position: 0, duration: 40)
+        clock.advance(15)
+        controller.update(isPlaying: true, isBuffering: false, position: 15, duration: 40)
+        clock.advance(20)
+        controller.end(discardUnsampledTime: true)
+        await controller.flush()
+        XCTAssertEqual(try fixture.store.lastFMSummary(accountID: fixture.accountID).pending, 0)
+        await controller.setEnabled(false)
+    }
+
     func testBrowserAuthorizationStoresSessionAndDisconnectRetainsEachAccountsPendingPlays() async throws {
         let fixture = try Fixture(connected: false)
         defer { fixture.cleanup() }

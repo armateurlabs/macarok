@@ -21,20 +21,24 @@ actor LibraryBackgroundWorker {
         if let incompleteKey { try store.setValue(Data([1]), forKey: incompleteKey) }
     }
 
-    func upsert(store: LibraryStore, sourceID: String, generation: UUID, tracks: [TrackRecord]) throws {
+    @discardableResult
+    func upsert(store: LibraryStore, sourceID: String, generation: UUID, tracks: [TrackRecord]) throws -> Bool {
         try requireCurrent(sourceID: sourceID, generation: generation)
-        try store.upsertTracks(tracks)
+        return try store.upsertTracks(tracks)
     }
 
-    func replace(store: LibraryStore, sourceID: String, generation: UUID, tracks: [TrackRecord]) throws {
+    @discardableResult
+    func replace(store: LibraryStore, sourceID: String, generation: UUID, tracks: [TrackRecord],
+                 coverage: LocalScanCoverage = .all, rootURL: URL? = nil) throws -> Bool {
         try requireCurrent(sourceID: sourceID, generation: generation)
-        try store.replaceSourceTracks(sourceID: sourceID, with: tracks)
+        return try store.replaceSourceTracks(sourceID: sourceID, with: tracks, coverage: coverage, rootURL: rootURL)
     }
 
     func saveScanCache(store: LibraryStore, sourceID: String, generation: UUID,
-                       entries: [LocalScanFileCacheEntry], isComplete: Bool) throws {
+                       entries: [LocalScanFileCacheEntry], isComplete: Bool,
+                       coverage: LocalScanCoverage = .all, rootURL: URL? = nil) throws {
         try requireCurrent(sourceID: sourceID, generation: generation)
-        try store.saveLocalScanCache(sourceID: sourceID, entries: entries, isComplete: isComplete)
+        try store.saveLocalScanCache(sourceID: sourceID, entries: entries, isComplete: isComplete, coverage: coverage, rootURL: rootURL)
     }
 
     func updateRadioStation(store: LibraryStore, station: RadioStationRecord, generation: UUID) throws {

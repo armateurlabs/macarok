@@ -34,7 +34,11 @@ final class DirectoryWatcher: @unchecked Sendable {
         let rescanFlags = FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagUserDropped |
             kFSEventStreamEventFlagKernelDropped | kFSEventStreamEventFlagEventIdsWrapped | kFSEventStreamEventFlagRootChanged |
             kFSEventStreamEventFlagMount | kFSEventStreamEventFlagUnmount)
-        return DirectoryChangeBatch(paths: paths, mustRescan: paths.isEmpty || paths.count != flags.count || flags.contains { $0 & rescanFlags != 0 })
+        let directories = Set(zip(paths, flags).filter { $0.1 & FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsDir) != 0 }.map(\.0))
+        let files = Set(zip(paths, flags).filter { $0.1 & FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsFile) != 0 }.map(\.0))
+        return DirectoryChangeBatch(paths: paths,
+            mustRescan: paths.isEmpty || paths.count != flags.count || flags.contains { $0 & rescanFlags != 0 },
+            directoryPaths: directories, filePaths: files)
     }
 
     func stop() {

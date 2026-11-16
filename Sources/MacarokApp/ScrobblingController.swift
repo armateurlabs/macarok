@@ -29,6 +29,7 @@ final class ScrobblingController {
     @ObservationIgnored private var currentTrack: TrackRecord?
     @ObservationIgnored private var currentSource: SourceRecord?
     @ObservationIgnored private var currentOccurrenceID = UUID().uuidString
+    @ObservationIgnored private var pendingStartedAt: Date?
     @ObservationIgnored private var authorizationToken: (value: String, created: Date)?
     @ObservationIgnored private var authorizationID = UUID()
     @ObservationIgnored private var deliveryID = UUID()
@@ -96,7 +97,7 @@ final class ScrobblingController {
             }
             if credentials?.application != application {
                 if var session = listening, let submission = session.finish(monotonic: monotonic(), date: now()) { enqueue(submission) }
-                listening = nil; stopDelivery(); authorizationID = UUID(); authorizationToken = nil; needsAuthorizationCompletion = false
+                listening = nil; pendingStartedAt = nil; stopDelivery(); authorizationID = UUID(); authorizationToken = nil; needsAuthorizationCompletion = false
                 preferences.enabled = false; isEnabled = false
                 let record = LastFMCredentialRecord(application: application)
                 try await worker.saveCredentials(record)
@@ -157,7 +158,7 @@ final class ScrobblingController {
         isWorking = true
         defer { isWorking = false }
         authorizationID = UUID(); authorizationToken = nil; needsAuthorizationCompletion = false
-        preferences.enabled = false; isEnabled = false; listening = nil
+        preferences.enabled = false; isEnabled = false; listening = nil; pendingStartedAt = nil
         stopDelivery()
         await enqueueTask?.value
         do {
@@ -176,7 +177,7 @@ final class ScrobblingController {
         guard !enabled || (credentials?.session != nil && !needsReauthentication) else { return }
         guard enabled != isEnabled else { return }
         preferences.enabled = enabled
-        if !enabled { isEnabled = false; stopDelivery(); listening = nil }
+        if !enabled { isEnabled = false; stopDelivery(); listening = nil; pendingStartedAt = nil }
         do {
             try await worker.savePreferences(preferences)
             applyPreferences(); resetListeningSession()
@@ -194,7 +195,7 @@ final class ScrobblingController {
 
     func setSource(_ sourceID: String, excluded: Bool) async {
         if excluded { preferences.excludedSourceIDs.insert(sourceID) } else { preferences.excludedSourceIDs.remove(sourceID) }
-        if excluded, currentTrack?.sourceID == sourceID { listening = nil; nowPlayingTask?.cancel() }
+        if excluded, currentTrack?.sourceID == sourceID { listening = nil; pendingStartedAt = nil; nowPlayingTask?.cancel() }
         do {
             try await worker.savePreferences(preferences); applyPreferences()
             if currentTrack?.sourceID == sourceID { resetListeningSession() }
@@ -202,20 +203,25 @@ final class ScrobblingController {
         catch { errorMessage = error.localizedDescription }
     }
 
-    func begin(track: TrackRecord, source: SourceRecord?, occurrenceID: UUID = UUID()) {
+    func begin(track: TrackRecord, source: SourceRecord?, occurrenceID: UUID = UUID(), startedAt: Date? = nil) {
         end(); nowPlayingTask?.cancel()
         currentTrack = track; currentSource = source; currentOccurrenceID = occurrenceID.uuidString
         if eligible(track: track, source: source), isEnabled {
             listening = ListeningSession(track: LastFMTrackSnapshot(track: track), occurrenceID: currentOccurrenceID)
+            pendingStartedAt = startedAt.flatMap { $0.timeIntervalSince1970.isFinite ? $0 : nil }
         }
     }
 
     func update(isPlaying: Bool, isBuffering: Bool, position: Double, duration: Double) {
         guard isEnabled, var session = listening else { return }
+        // Native playback can begin before the main actor adopts the queue entry. Preserve its
+        // wall-clock timestamp, but establish listening time only from observations made here.
+        let firstActive = isPlaying && !isBuffering && session.startedAt == nil
+        let date = firstActive ? pendingStartedAt ?? now() : now()
         let update = session.sample(isPlaying: isPlaying, isBuffering: isBuffering, position: position,
-                                    duration: duration, monotonic: monotonic(), date: now())
+                                    duration: duration, monotonic: monotonic(), date: date)
         listening = session
-        if update.beganPlaying { sendNowPlaying(session.track); retryPending() }
+        if update.beganPlaying { pendingStartedAt = nil; sendNowPlaying(session.track); retryPending() }
         if let submission = update.submission { enqueue(submission) }
     }
 
@@ -232,10 +238,15 @@ final class ScrobblingController {
         if let submission { enqueue(submission) }
     }
 
-    func end() {
+    func end(discardUnsampledTime: Bool = false, atMonotonic: TimeInterval? = nil, at date: Date? = nil) {
+        let boundary = atMonotonic.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        // An exact native handoff boundary includes the outgoing track's final observed interval.
+        // Without that boundary, discard conservatively rather than credit a successor's audio.
+        if discardUnsampledTime && boundary == nil { listening?.suspend() }
         nowPlayingTask?.cancel(); nowPlayingTask = nil
-        if isEnabled, var session = listening, let submission = session.finish(monotonic: monotonic(), date: now()) { enqueue(submission) }
-        listening = nil; currentTrack = nil; currentSource = nil
+        let finishedAt = date.flatMap { $0.timeIntervalSince1970.isFinite ? $0 : nil } ?? now()
+        if isEnabled, var session = listening, let submission = session.finish(monotonic: boundary ?? monotonic(), date: finishedAt) { enqueue(submission) }
+        listening = nil; currentTrack = nil; currentSource = nil; pendingStartedAt = nil
     }
 
     /// Makes qualified events durable; quitting does not wait for an unavailable network.
@@ -258,7 +269,7 @@ final class ScrobblingController {
     }
 
     private func resetListeningSession() {
-        listening = nil
+        listening = nil; pendingStartedAt = nil
         if let track = currentTrack, eligible(track: track, source: currentSource), isEnabled {
             listening = ListeningSession(track: LastFMTrackSnapshot(track: track), occurrenceID: currentOccurrenceID)
         }
@@ -308,7 +319,7 @@ final class ScrobblingController {
     }
 
     private func requireReconnection() async {
-        preferences.enabled = false; isEnabled = false; needsReauthentication = true; listening = nil
+        preferences.enabled = false; isEnabled = false; needsReauthentication = true; listening = nil; pendingStartedAt = nil
         stopDelivery()
         do { try await worker.savePreferences(preferences) } catch { }
         errorMessage = LastFMError.api(code: 9, message: "").localizedDescription
