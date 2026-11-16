@@ -14,7 +14,7 @@ Preserve a dense, resizable three-panel layout:
 
 Provide System, Light, and Dark appearances with readable selections, secondary text, artwork, and dialogs.
 
-Library views include Artists, Albums, Years, Folders, and Tags. Folder browsing follows the source's directory hierarchy; tag browsing uses musical metadata.
+Library views include Artists, Albums, Years, Folders, and Tags. Folder browsing follows the source's directory hierarchy; tag browsing uses musical metadata. The arrow on each library section heading reverses that list between ascending and descending natural alphanumeric order (Years: oldest or newest first; Unknown Year stays last). Home shares the artist direction. Each direction persists, applies to search results, and never changes the playlist or playback. Album track order, Home rankings, newest-first podcast episodes, and source roots keep their own order. The heading's context menu still shuffles the library or selected folder.
 
 Home contains Recently Added, Recently Played, and Most Played. Most Played has separate horizontal Tracks, Artists, and Albums rows, each showing up to eight entries. Recently Played displays a fixed Last Played date in English and the local time zone. Every library view, search, homepage section, and library shuffle follows the selected library scope. All Sources adds a separate Radio Favorites section; stations do not enter music rankings.
 
@@ -42,7 +42,7 @@ Double-clicking an artist or album always appends its complete selection, includ
 
 Right-click a track, album, or artist to choose Play Now. It appends the selection to the active playlist and immediately starts its first track. Album and artist actions resolve the complete selection even when search shows only some matching tracks.
 
-Clear Playlist preserves the exact current entry and position while playing, opening, or buffering. When paused, stopped, failed, or without a current entry, it empties the playlist. Shuffle, repeat, clear, and the save/export menu appear at both the top and bottom of the playlist panel.
+Clear Playlist preserves the exact current entry and position while playing, opening, or buffering. When paused, stopped, failed, or without a current entry, it empties the playlist. Shuffle, repeat, clear, and the save/export menu appear at both the top and bottom of the playlist panel. **Show Album Groups**, in both More (`…`) menus and in Settings › General, is one persisted preference. It places an Amarok-style header (artwork, album, album artist, year, track count, and duration) above adjacent entries from the same source-specific album. A lone album entry shows its artwork inline instead. Headers are display-only: they cannot be selected, moved, or deleted. Queue order, duplicate entries, separate source copies, selection, playback, and drag/delete offsets are unchanged. Radio entries stay flat. Disabling the option restores the compact list.
 
 Playlist content edits support native Undo / Redo in their normal order: adding, inserting, removing, moving, shuffling, clearing, and loading a saved playlist. Undo preserves entry identities and updated metadata; it does not autoplay or seek. An existing live entry continues if it survives the restored queue, and stops if the undo removes it. Text fields and editors retain their own native undo behavior. Queue undo history is cleared when sources are removed.
 

@@ -119,38 +119,122 @@ struct QueuePane: View {
                 ContentUnavailableView { Label("Your playlist is empty", systemImage: "music.note.list") } description: { Text("Double-click a library track to add it here.") }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                let rows = PlaylistAlbumGrouping.rows(model.queue, grouped: model.settings.playlistAlbumGroups, isFlat: model.isRadioTrack)
                 List(selection: $model.selectedQueueID) {
-                    ForEach(Array(model.queue.enumerated()), id: \.element.id) { index, item in
-                        HStack(spacing: 9) {
-                            Group {
-                                if item.id == model.currentQueueID { Image(systemName: player.state == .playing ? "waveform" : "pause.fill").foregroundStyle(Color.accentColor) }
-                                else { Text(String(format: "%02d", index + 1)).foregroundStyle(.tertiary) }
-                            }.font(.system(size: 10)).frame(width: 19)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.track.title).fontWeight(item.id == model.currentQueueID ? .semibold : .regular).lineLimit(1, reservesSpace: true)
-                                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                                    Text(item.track.artist + (item.track.isCUETrack ? " · CUE" : ""))
-                                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1, reservesSpace: true)
-                                    if model.isAllSources {
-                                        SourceBadge(model: model, sourceID: item.track.sourceID, compact: true)
-                                            .frame(maxWidth: 80, alignment: .leading).layoutPriority(1)
-                                    }
-                                }
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                            Spacer(minLength: 3)
-                            Text(model.isRadioTrack(item.track) ? "LIVE" : item.track.formattedDuration)
-                                .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
-                                .fixedSize(horizontal: true, vertical: false)
-                        }.font(.system(size: 12)).padding(.vertical, 4).contentShape(Rectangle()).tag(item.id)
-                            .onTapGesture(count: 2) { model.playQueueItem(item.id) }
-                            .contextMenu { Button("Play Now") { model.playQueueItem(item.id) }; Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }; TrackFileActions(model: model, track: item.track); Divider(); Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } } }
-                    }.onMove(perform: model.moveQueue).onDelete(perform: model.removeQueue)
+                    ForEach(rows) { row in
+                        switch row {
+                        case .header(let header):
+                            PlaylistAlbumHeaderRow(model: model, header: header)
+                                .moveDisabled(true).deleteDisabled(true).selectionDisabled(true)
+                                .listRowBackground(Color.clear)
+                        case .entry(let index, let item, let layout):
+                            QueueEntryRow(model: model, player: player, index: index, item: item, layout: layout).tag(item.id)
+                        }
+                    }
+                    .onMove { offsets, destination in
+                        model.moveQueue(from: PlaylistAlbumGrouping.queueOffsets(offsets, rows: rows),
+                                        to: PlaylistAlbumGrouping.queueDestination(destination, rows: rows))
+                    }
+                    .onDelete { offsets in
+                        let entries = PlaylistAlbumGrouping.queueOffsets(offsets, rows: rows)
+                        if !entries.isEmpty { model.removeQueue(entries) }
+                    }
                 }.listStyle(.inset(alternatesRowBackgrounds: true))
-                .background(NativeListBackground(revision: model.queueRevision) { [weak model] table in model?.activePlaylistTable = table })
+                .background(NativeListBackground(revision: Self.backgroundRevision(model.queueRevision, rows: rows)) { [weak model] table in model?.activePlaylistTable = table })
                 .onDeleteCommand { if let id = model.selectedQueueID, let index = model.queue.firstIndex(where: { $0.id == id }) { model.removeQueue(IndexSet(integer: index)) } }
             }
             PlaylistPanelFooter(model: model)
         }
+    }
+
+    /// Headers change row heights and counts without changing the queue revision.
+    private static func backgroundRevision(_ queueRevision: Int, rows: [PlaylistRow]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(queueRevision)
+        for row in rows { hasher.combine(row.id) }
+        return hasher.finalize()
+    }
+}
+
+private struct QueueEntryRow: View {
+    @Bindable var model: AppModel
+    @ObservedObject var player: VLCPlaybackEngine
+    let index: Int
+    let item: QueueItem
+    let layout: PlaylistEntryLayout
+
+    var body: some View {
+        HStack(spacing: 9) {
+            if layout == .single { ArtworkView(track: item.track, model: model).frame(width: 34, height: 34) }
+            Group {
+                if item.id == model.currentQueueID { Image(systemName: player.state == .playing ? "waveform" : "pause.fill").foregroundStyle(Color.accentColor) }
+                else { Text(String(format: "%02d", index + 1)).foregroundStyle(.tertiary) }
+            }.font(.system(size: 10)).frame(width: 19)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.track.title).fontWeight(item.id == model.currentQueueID ? .semibold : .regular).lineLimit(1, reservesSpace: true)
+                // Grouped entries omit an empty detail line, so album bodies stay compact under their header.
+                if layout != .grouped || !subtitle.isEmpty || model.isAllSources {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(subtitle).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1, reservesSpace: true)
+                        if model.isAllSources {
+                            SourceBadge(model: model, sourceID: item.track.sourceID, compact: true)
+                                .frame(maxWidth: 80, alignment: .leading).layoutPriority(1)
+                        }
+                    }
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 3)
+            Text(model.isRadioTrack(item.track) ? "LIVE" : item.track.formattedDuration)
+                .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+        }.font(.system(size: 12)).padding(.vertical, 4).padding(.leading, layout == .grouped ? 8 : 0).contentShape(Rectangle())
+            .onTapGesture(count: 2) { model.playQueueItem(item.id) }
+            .contextMenu { Button("Play Now") { model.playQueueItem(item.id) }; Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }; TrackFileActions(model: model, track: item.track); Divider(); Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } } }
+    }
+
+    private var subtitle: String {
+        let details: [String]
+        switch layout {
+        case .plain: details = [item.track.artist]
+        case .single: details = [[item.track.artist, item.track.album].filter { !$0.isEmpty }.joined(separator: " — ")]
+        // The header already names the album artist; repeat a track artist only when it differs.
+        case .grouped: details = [item.track.artist == item.track.albumArtist ? "" : item.track.artist]
+        }
+        return (details + [item.track.isCUETrack ? "CUE" : ""]).filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+/// Amarok-inspired album heading. It is not a queue entry: it cannot be selected, moved, or deleted.
+private struct PlaylistAlbumHeaderRow: View {
+    @Bindable var model: AppModel
+    let header: PlaylistAlbumHeader
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ArtworkView(track: header.track, model: model).frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(header.album).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                Text([header.artist, header.year.map(String.init) ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Text("\(header.offsets.count) tracks · \(header.duration.playbackTime)")
+                .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary).fixedSize()
+        }.padding(.top, 8).padding(.bottom, 3).contentShape(Rectangle())
+            .accessibilityElement(children: .combine).accessibilityIdentifier("playlistAlbumHeader")
+            .onTapGesture(count: 2) { model.playQueueItem(header.firstEntryID) }
+            .contextMenu {
+                Button("Play Album") { model.playQueueItem(header.firstEntryID) }
+                Button("Show Album in Library") { model.inspectAlbum(containing: header.track) }
+                Divider()
+                Button("Remove Album from Playlist", role: .destructive) { removeGroup() }
+            }
+    }
+
+    private func removeGroup() {
+        // Offsets are re-resolved by entry identity in case the queue changed since this row rendered.
+        guard let first = model.queue.firstIndex(where: { $0.id == header.firstEntryID }) else { return }
+        let end = min(model.queue.count, first + header.offsets.count)
+        model.removeQueue(IndexSet(integersIn: first..<end))
     }
 }
 
@@ -174,6 +258,8 @@ struct PlaylistControls: View {
                 .help("Clear playlist").accessibilityLabel("Clear playlist")
                 .accessibilityIdentifier("playlistClear-\(location)").disabled(model.queue.isEmpty)
             Menu {
+                Toggle("Show Album Groups", isOn: $model.settings.playlistAlbumGroups)
+                Divider()
                 Button("Save Playlist…", action: model.savePlaylist).disabled(model.queue.isEmpty)
                 Button("Export Playlist…", action: model.exportPlaylist).disabled(model.queue.isEmpty)
             } label: { Image(systemName: "ellipsis").frame(width: 22, height: 23) }

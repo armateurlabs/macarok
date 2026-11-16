@@ -136,6 +136,45 @@ final class LibrarySnapshotTests: XCTestCase {
         SourceRecord(id: "source", kind: .openSubsonic, name: "Test Server", location: "https://music.invalid")
     }
 
+    func testSortDirectionReordersBrowsingListsAndSurvivesPatchesAndRebuilds() throws {
+        func item(_ id: String, artist: String, album: String, year: Int?, genre: String, path: String) -> TrackRecord {
+            TrackRecord(id: id, sourceID: source.id, albumID: album, title: id, artist: artist, album: album, year: year,
+                        genre: genre, trackNumber: 1, duration: 60, remoteID: id, remotePath: path, format: "FLAC")
+        }
+        var tracks = [
+            item("a", artist: "Artist 2", album: "Album 10", year: 2001, genre: "Rock", path: "B/Album 10/a.flac"),
+            item("b", artist: "Artist 10", album: "Album 2", year: 1990, genre: "Jazz", path: "A/Album 2/b.flac"),
+            item("c", artist: "artist 1", album: "Album 1", year: nil, genre: "Ambient", path: "A/Album 1/c.flac")
+        ]
+        tracks[0].playCount = 4
+        let ascending = try LibrarySnapshot.build(sourceID: source.id, tracks: tracks, sources: [source])
+        XCTAssertEqual(ascending.presentation.artists.map(\.name), ["artist 1", "Artist 2", "Artist 10"])
+        XCTAssertEqual(ascending.presentation.yearGroups.map(\.id), [2001, 1990, 0], "Years keep newest first by default.")
+
+        var order = LibrarySortOrder()
+        for key in LibrarySortKey.allCases { order.toggle(key) }
+        let reversed = try ascending.sorted(order)
+        XCTAssertEqual(reversed.presentation.artists.map(\.name), ["Artist 10", "Artist 2", "artist 1"])
+        XCTAssertEqual(reversed.presentation.albums.map(\.title), ["Album 10", "Album 2", "Album 1"])
+        XCTAssertEqual(reversed.presentation.yearGroups.map(\.id), [1990, 2001, 0], "Unknown Year stays last.")
+        XCTAssertEqual(reversed.presentation.genreGroups.map(\.title), ["Rock", "Jazz", "Ambient"])
+        XCTAssertEqual(reversed.presentation.folderNodes.first?.children?.map(\.name), ["B", "A"])
+        XCTAssertEqual(reversed.presentation.folderNodes.first?.children?.last?.children?.map(\.name), ["Album 2", "Album 1"])
+        XCTAssertEqual(reversed.artists.map(\.name), ascending.artists.map(\.name), "Canonical order feeds rankings and patches.")
+        XCTAssertEqual(reversed.albumsByID[StableID.make(source.id, "album", "Album 1")]?.tracks.map(\.id), ["c"])
+        XCTAssertEqual(reversed.mostPlayedAlbums.map(\.id), ascending.mostPlayedAlbums.map(\.id))
+
+        var rated = tracks[1]; rated.rating = 5; rated.playCount = 9
+        let patched = try reversed.updating(updatedTracks: [rated], sources: [source])
+        XCTAssertEqual(patched.presentation.order, order)
+        XCTAssertEqual(patched.presentation.artists.map(\.name), ["Artist 10", "Artist 2", "artist 1"])
+        XCTAssertEqual(patched.presentation.albums.first { $0.id == "Album 2" }?.playCount, 9)
+        var renamed = tracks[2]; renamed.artist = "Zed"; renamed.albumArtist = "Zed"; renamed.album = "Zed Album"; renamed.albumID = "Zed Album"
+        let rebuilt = try patched.updating(updatedTracks: [renamed], sources: [source])
+        XCTAssertEqual(rebuilt.presentation.artists.map(\.name), ["Zed", "Artist 10", "Artist 2"])
+        XCTAssertEqual(try rebuilt.sorted(LibrarySortOrder()).presentation.artists.map(\.name), ["Artist 2", "Artist 10", "Zed"])
+    }
+
     private func track(_ id: String, albumID: String, title: String? = nil, year: Int? = nil,
                        number: Int = 1, path: String? = nil) -> TrackRecord {
         TrackRecord(id: id, sourceID: source.id, albumID: albumID, title: title ?? id, artist: "Artist",

@@ -13,6 +13,24 @@ final class QueuePreferenceTests: XCTestCase {
         XCTAssertFalse(AppModel.samePodcastFeed("http://feeds.example.com/show", "https://feeds.example.com/show"))
     }
 
+    func testLibrarySortAndAlbumGroupPreferencesPersistAndTolerateLegacyOrUnknownValues() throws {
+        let legacy = try JSONDecoder().decode(AppPreferences.self, from: Data(#"{"appearance":"dark","volume":0.3}"#.utf8))
+        XCTAssertEqual(legacy.librarySortOrder, LibrarySortOrder())
+        XCTAssertTrue(legacy.librarySortOrder.isDescending(.years))
+        XCTAssertFalse(legacy.playlistAlbumGroups)
+        var preferences = AppPreferences()
+        preferences.librarySortOrder.toggle(.artists); preferences.librarySortOrder.toggle(.years)
+        preferences.playlistAlbumGroups = true
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: JSONEncoder().encode(preferences))
+        XCTAssertEqual(decoded.librarySortOrder, preferences.librarySortOrder)
+        XCTAssertTrue(decoded.playlistAlbumGroups)
+        let future = try JSONDecoder().decode(AppPreferences.self,
+            from: Data(#"{"appearance":"light","librarySortOrder":["albums","composers"]}"#.utf8))
+        XCTAssertEqual(future.appearance, .light)
+        XCTAssertTrue(future.librarySortOrder.isDescending(.albums))
+        XCTAssertFalse(future.librarySortOrder.isDescending(.years))
+    }
+
     func testLegacyDoubleClickChoiceMigratesWithoutResettingOtherPreferences() throws {
         let legacy = Data(#"{"doubleClickPlays":true,"appearance":"dark","repeatMode":"track","volume":0.3,"customBuffer":true,"bufferSeconds":42}"#.utf8)
         let preferences = try JSONDecoder().decode(AppPreferences.self, from: legacy)

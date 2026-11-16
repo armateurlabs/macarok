@@ -219,6 +219,7 @@ final class AppModel {
     @ObservationIgnored private var queueSaveRevision = 0
     @ObservationIgnored private var remoteCatalogProgress: RemoteCatalogProgress?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
+    @ObservationIgnored private var librarySortTask: Task<Void, Never>?
     @ObservationIgnored var playbackTask: Task<Void, Never>?
     @ObservationIgnored var activeStream: BufferedHTTPInputStream?
     @ObservationIgnored var playbackGeneration = UUID()
@@ -303,12 +304,49 @@ final class AppModel {
     private var displayedCatalog: LibrarySnapshot { search.isEmpty ? catalog : searchCatalog }
     var displayedTracks: [TrackRecord] { displayedCatalog.tracks }
     var albums: [AlbumRecord] { catalog.albums }
-    var visibleAlbums: [AlbumRecord] { displayedCatalog.albums }
-    var artists: [LibraryArtistGroup] { displayedCatalog.artists }
-    var yearGroups: [LibraryYearGroup] { displayedCatalog.yearGroups }
-    var genreGroups: [LibraryTrackGroup] { displayedCatalog.genreGroups }
-    var formatGroups: [LibraryTrackGroup] { displayedCatalog.formatGroups }
-    var folderNodes: [FolderNode] { displayedCatalog.folderNodes }
+    var visibleAlbums: [AlbumRecord] { displayedCatalog.presentation.albums }
+    var artists: [LibraryArtistGroup] { displayedCatalog.presentation.artists }
+    var yearGroups: [LibraryYearGroup] { displayedCatalog.presentation.yearGroups }
+    var genreGroups: [LibraryTrackGroup] { displayedCatalog.presentation.genreGroups }
+    var formatGroups: [LibraryTrackGroup] { displayedCatalog.presentation.formatGroups }
+    var folderNodes: [FolderNode] { displayedCatalog.presentation.folderNodes }
+    var librarySortIsDescending: Bool { settings.librarySortOrder.isDescending(libraryView.sortKey) }
+
+    /// Reverses only the current list's presentation; the playlist and playback are untouched.
+    func toggleLibrarySort() {
+        settings.librarySortOrder.toggle(libraryView.sortKey)
+        applyLibrarySortOrder()
+        if !search.isEmpty { searchLibrary(reset: false) }
+    }
+
+    /// Published catalogs are reordered off the foreground; a newer publication restarts the pass.
+    private func applyLibrarySortOrder() {
+        guard librarySortTask == nil, catalog.presentation.order != settings.librarySortOrder else { return }
+        librarySortTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.librarySortTask = nil }
+            while !Task.isCancelled {
+                let order = self.settings.librarySortOrder, base = self.catalog, revision = self.libraryRevision
+                guard base.presentation.order != order else { return }
+                let work = Task.detached(priority: .userInitiated) { try base.sorted(order) }
+                guard let sorted = try? await work.value else { return }
+                guard self.libraryRevision == revision else { continue }
+                self.catalog = sorted
+                if self.search.isEmpty { self.searchCatalog = sorted }
+                self.libraryRevision &+= 1
+            }
+        }
+    }
+
+    private func ordered(_ snapshot: LibrarySnapshot) async throws -> LibrarySnapshot {
+        var snapshot = snapshot
+        while snapshot.presentation.order != settings.librarySortOrder {
+            let order = settings.librarySortOrder, base = snapshot
+            let work = Task.detached(priority: .userInitiated) { try base.sorted(order) }
+            snapshot = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+        }
+        return snapshot
+    }
     func tracksForAlbum(_ album: AlbumRecord) -> [TrackRecord] { catalog.albumsByID[album.presentationID]?.tracks ?? album.tracks }
     func albumsForArtist(_ name: String) -> [AlbumRecord] { catalog.artistsByName[LibraryArtistGroup.normalizedName(name)]?.albums ?? [] }
     func artistSummary(named name: String) -> LibraryArtistGroup? { catalog.artistsByName[LibraryArtistGroup.normalizedName(name)] }
@@ -446,6 +484,7 @@ final class AppModel {
                     guard self.libraryReloadState === state, self.libraryScope == scope else { break }
                     if self.sourceRevision != sourceRevision { continue }
                     snapshot = try await self.overlayPresentationPatches(on: snapshot, after: patchRevision, sources: registeredSources)
+                    snapshot = try await self.ordered(snapshot)
                     guard self.libraryReloadState === state, self.libraryScope == scope, self.sourceRevision == sourceRevision else { continue }
                     let interval = self.signposter.beginInterval("PublishSnapshot")
                     self.catalog = snapshot
@@ -517,6 +556,7 @@ final class AppModel {
                     self.catalog = result.0
                     if self.search == query { self.searchCatalog = query.isEmpty ? result.0 : result.1 }
                     self.updateQueuedMetadata(from: result.0); self.libraryRevision &+= 1
+                    self.applyLibrarySortOrder()
                     if revision == self.presentationPatchRevision { break }
                 }
             } catch is CancellationError { }
@@ -548,6 +588,7 @@ final class AppModel {
             guard let updated = try? await work.value, libraryScope == scope, self.sourceRevision == sourceRevision else { return }
             if libraryRevision != revision { continue }
             catalog = updated; if search.isEmpty { searchCatalog = updated }
+            applyLibrarySortOrder()
             updateQueuedMetadata(from: updated); libraryRevision &+= 1
             return
         }
@@ -590,12 +631,14 @@ final class AppModel {
                 do {
                     try await Task.sleep(for: .milliseconds(160))
                     let patchRevision = self.presentationPatchRevision
+                    let sortOrder = self.settings.librarySortOrder
                     let task = Task.detached(priority: .utility) {
-                        try LibrarySnapshot.build(scope: scope,
-                                                  tracks: store.tracks(scope: scope, query: query, ordered: false), sources: sources)
+                        try LibrarySnapshot.build(scope: scope, tracks: store.tracks(scope: scope, query: query, ordered: false),
+                                                  sources: sources, sortOrder: sortOrder)
                     }
                     var result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
                     result = try await self.overlayPresentationPatches(on: result, after: patchRevision, sources: sources)
+                    result = try await self.ordered(result)
                     guard !Task.isCancelled, self.libraryScope == scope, self.sourceRevision == sourceRevision, self.search == query, self.searchRequestID == requestID else { return }
                     if self.searchNeedsReload { continue }
                     self.searchCatalog = result; self.isSearching = false

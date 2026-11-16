@@ -196,6 +196,11 @@ final class NativeRenderingTests: XCTestCase {
                 try await render(QueuePane(model: model, player: model.player), size: NSSize(width: 270, height: 680), scheme: scheme,
                                  destination: output.appendingPathComponent("playlist-\(repeatMode.rawValue)-\(suffix).png"))
             }
+            model.settings.repeatMode = .none
+            model.settings.playlistAlbumGroups = true
+            try await render(QueuePane(model: model, player: model.player), size: NSSize(width: 330, height: 680), scheme: scheme,
+                             destination: output.appendingPathComponent("playlist-album-groups-\(suffix).png"))
+            model.settings.playlistAlbumGroups = false
             model.libraryScope = .source(RadioLibrary.sourceID)
             await model.waitForLibraryLoad()
             model.contextPage = .home

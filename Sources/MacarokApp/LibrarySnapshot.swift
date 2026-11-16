@@ -73,17 +73,42 @@ struct LibrarySnapshot: Sendable {
     let tracksByFolder: [String: [TrackRecord]]
     let folderTitles: [String: String]
     let stations: [TrackRecord]
+    /// Browsing lists in the user's chosen direction; the fields above keep canonical order.
+    let presentation: LibraryPresentation
 
     static let empty = LibrarySnapshot(scope: nil, tracks: [], tracksByID: [:], albums: [], albumsByID: [:],
                                        artists: [], artistsByName: [:], yearGroups: [], genreGroups: [], formatGroups: [],
                                        recentlyAdded: [], mostPlayedAlbums: [], recentlyPlayed: [], mostPlayedTracks: [],
-                                       mostPlayedArtists: [], folderNodes: [], tracksByFolder: [:], folderTitles: [:], stations: [])
+                                       mostPlayedArtists: [], folderNodes: [], tracksByFolder: [:], folderTitles: [:], stations: [],
+                                       presentation: .empty)
 
     static func build(sourceID: String, tracks: [TrackRecord], sources: [SourceRecord]) throws -> LibrarySnapshot {
         try build(scope: .source(sourceID), tracks: tracks, sources: sources)
     }
 
-    static func build(scope: LibraryScope, tracks input: [TrackRecord], sources: [SourceRecord]) throws -> LibrarySnapshot {
+    /// Reorders only the browsing presentation; canonical data, rankings, and lookups are reused.
+    func sorted(_ order: LibrarySortOrder) throws -> LibrarySnapshot {
+        try Task.checkCancellation()
+        guard order != presentation.order else { return self }
+        return replacing(presentation: presentation(order))
+    }
+
+    private func presentation(_ order: LibrarySortOrder) -> LibraryPresentation {
+        LibraryPresentation(order: order, artists: artists, albums: albums, yearGroups: yearGroups,
+                            genreGroups: genreGroups, formatGroups: formatGroups, folderNodes: folderNodes)
+    }
+
+    private func replacing(presentation: LibraryPresentation) -> LibrarySnapshot {
+        LibrarySnapshot(scope: scope, tracks: tracks, tracksByID: tracksByID, albums: albums, albumsByID: albumsByID,
+            artists: artists, artistsByName: artistsByName, yearGroups: yearGroups, genreGroups: genreGroups,
+            formatGroups: formatGroups, recentlyAdded: recentlyAdded, mostPlayedAlbums: mostPlayedAlbums,
+            recentlyPlayed: recentlyPlayed, mostPlayedTracks: mostPlayedTracks, mostPlayedArtists: mostPlayedArtists,
+            folderNodes: folderNodes, tracksByFolder: tracksByFolder, folderTitles: folderTitles, stations: stations,
+            presentation: presentation)
+    }
+
+    static func build(scope: LibraryScope, tracks input: [TrackRecord], sources: [SourceRecord],
+                      sortOrder: LibrarySortOrder = LibrarySortOrder()) throws -> LibrarySnapshot {
         try Task.checkCancellation()
         let visibleSources = sources.filter { scope.includes(sourceID: $0.id) }
         let registeredIDs = Set(visibleSources.map(\.id))
@@ -201,12 +226,17 @@ struct LibrarySnapshot: Sendable {
         let mostPlayedArtists = Array(artists.filter { $0.playCount > 0 }.sorted {
             $0.playCount == $1.playCount ? stringOrder($0.name, $1.name) : $0.playCount > $1.playCount
         }.prefix(8))
+        let genreGroups = trackGroups(genres), formatGroups = trackGroups(formats)
+        try Task.checkCancellation()
+        let presentation = LibraryPresentation(order: sortOrder, artists: artists, albums: albums, yearGroups: yearGroups,
+                                               genreGroups: genreGroups, formatGroups: formatGroups, folderNodes: folderNodes)
         return LibrarySnapshot(scope: scope, tracks: tracks, tracksByID: tracksByID, albums: albums, albumsByID: albumsByID,
                                artists: artists, artistsByName: artistsByName, yearGroups: yearGroups,
-                               genreGroups: trackGroups(genres), formatGroups: trackGroups(formats), recentlyAdded: recentlyAdded,
+                               genreGroups: genreGroups, formatGroups: formatGroups, recentlyAdded: recentlyAdded,
                                mostPlayedAlbums: mostPlayedAlbums, recentlyPlayed: recentlyPlayed, mostPlayedTracks: mostPlayedTracks,
                                mostPlayedArtists: mostPlayedArtists, folderNodes: folderNodes, tracksByFolder: tracksByFolder,
-                               folderTitles: folderNames, stations: stations.sorted { stringOrder($0.title, $1.title) })
+                               folderTitles: folderNames, stations: stations.sorted { stringOrder($0.title, $1.title) },
+                               presentation: presentation)
     }
 
     /// Patch frequently changing values without SQL reads, regrouping, or localized sorting.
@@ -240,7 +270,7 @@ struct LibrarySnapshot: Sendable {
             var merged = tracksByID
             for (id, track) in updates { merged[id] = track }
             for track in radioUpdates { merged[track.id] = track }
-            return try Self.build(scope: scope, tracks: Array(merged.values), sources: sources)
+            return try Self.build(scope: scope, tracks: Array(merged.values), sources: sources, sortOrder: presentation.order)
         }
         guard !updates.isEmpty else { return try updatingStations(radioUpdates, sources: sources) }
 
@@ -302,15 +332,21 @@ struct LibrarySnapshot: Sendable {
             try Task.checkCancellation()
             if let values = tracksByFolder[key] { folders[key] = try patchedTracks(values) }
         }
+        let genres = try groups(genreGroups, affected: affectedGenres)
+        let formats = try groups(formatGroups, affected: affectedFormats)
+        // Patched values keep their canonical positions, so the same direction is re-derived in linear time.
+        let presentation = LibraryPresentation(order: presentation.order, artists: artists, albums: albums, yearGroups: years,
+                                               genreGroups: genres, formatGroups: formats, folderNodes: folderNodes)
         let updated = LibrarySnapshot(scope: scope, tracks: tracks, tracksByID: tracksByID,
             albums: albums, albumsByID: albumsByID, artists: artists, artistsByName: artistsByName,
-            yearGroups: years, genreGroups: try groups(genreGroups, affected: affectedGenres), formatGroups: try groups(formatGroups, affected: affectedFormats),
+            yearGroups: years, genreGroups: genres, formatGroups: formats,
             recentlyAdded: recentlyAdded.map { albumsByID[$0.presentationID] ?? $0 },
             mostPlayedAlbums: try Self.topRanked(albums, eligible: { $0.playCount > 0 }, before: { $0.playCount > $1.playCount }),
             recentlyPlayed: try Self.topRanked(tracks, eligible: { $0.lastPlayedAt != nil }, before: { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }),
             mostPlayedTracks: try Self.topRanked(tracks, eligible: { $0.playCount > 0 }, before: { $0.playCount > $1.playCount }),
             mostPlayedArtists: try Self.topRanked(artists, eligible: { $0.playCount > 0 }, before: { $0.playCount > $1.playCount }),
-            folderNodes: folderNodes, tracksByFolder: folders, folderTitles: folderTitles, stations: stations)
+            folderNodes: folderNodes, tracksByFolder: folders, folderTitles: folderTitles, stations: stations,
+            presentation: presentation)
         return try updated.updatingStations(radioUpdates, sources: sources)
     }
 
@@ -340,7 +376,8 @@ struct LibrarySnapshot: Sendable {
             yearGroups: yearGroups, genreGroups: genreGroups, formatGroups: formatGroups,
             recentlyAdded: recentlyAdded, mostPlayedAlbums: mostPlayedAlbums, recentlyPlayed: recentlyPlayed,
             mostPlayedTracks: mostPlayedTracks, mostPlayedArtists: mostPlayedArtists,
-            folderNodes: folderNodes, tracksByFolder: tracksByFolder, folderTitles: folderTitles, stations: stations)
+            folderNodes: folderNodes, tracksByFolder: tracksByFolder, folderTitles: folderTitles, stations: stations,
+            presentation: presentation)
     }
 
     /// Input is already in the library's deterministic display order, which supplies every tie break.

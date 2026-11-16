@@ -39,8 +39,15 @@ struct LibraryPane: View {
                 Text(model.search.isEmpty ? model.libraryView == .home ? "YOUR LIBRARY" : model.libraryView.title.uppercased() : "SEARCH RESULTS").font(.system(size: 10, weight: .medium)).tracking(0.7).foregroundStyle(.secondary)
                 if model.isSearching { ProgressView().controlSize(.mini) }
                 Spacer()
-                Button { model.shuffle(shuffleScope) } label: { Image(systemName: "shuffle") }.buttonStyle(.borderless).help(model.libraryView == .folders ? "Shuffle selected folder" : "Shuffle this library").disabled(model.tracks.isEmpty)
-            }.padding(.horizontal, 15).padding(.bottom, 5)
+                Button(action: model.toggleLibrarySort) {
+                    Image(systemName: model.librarySortIsDescending ? "arrow.down" : "arrow.up").frame(width: 18, height: 16).contentShape(Rectangle())
+                }.buttonStyle(.borderless).help(sortHelp).accessibilityLabel(sortHelp)
+                    .accessibilityIdentifier("librarySortDirection").disabled(model.tracks.isEmpty)
+            }.padding(.horizontal, 15).padding(.bottom, 5).contentShape(Rectangle())
+            .contextMenu {
+                Button(model.libraryView == .folders ? "Shuffle Selected Folder" : "Shuffle Library") { model.shuffle(shuffleScope) }
+                    .disabled(shuffleScope.isEmpty)
+            }
             if model.sources.isEmpty {
                 VStack(spacing: 12) { Image(systemName: "music.note.house").font(.system(size: 28)).foregroundStyle(.tertiary); Text("Bring your music.").foregroundStyle(.secondary); Button("Add Music Folder…", action: model.pickFolder); Button("Connect a Source…") { model.presentAddSource(from: .mainWindow) } }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if (model.isLoadingLibrary && model.tracks.isEmpty) || (model.isSearching && model.displayedTracks.isEmpty) {
@@ -131,6 +138,12 @@ struct LibraryPane: View {
         .onChange(of: model.libraryScope) { _, _ in
             expandedArtists = []; expandedAlbums = []; expandedYears = []; expandedGenres = []; expandedFormats = []
         }
+    }
+
+    private var sortHelp: String {
+        let descending = model.librarySortIsDescending
+        let order = model.libraryView == .years ? (descending ? "newest first" : "oldest first") : (descending ? "Z to A" : "A to Z")
+        return "Sorted \(order). Click to reverse."
     }
 
     private var shuffleScope: [TrackRecord] { model.libraryView == .folders ? model.folderTracks : model.displayedTracks }

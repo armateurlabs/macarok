@@ -93,12 +93,14 @@ struct AppPreferences: Codable {
     var bufferSeconds: Double = 20
     var volume: Double = 0.75
     var localShortcuts: [String: Data] = [:]
+    var librarySortOrder = LibrarySortOrder()
+    var playlistAlbumGroups = false
     var buffer: Double? { customBuffer ? min(120, max(1, bufferSeconds)) : nil }
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case appearance, showMenuBar, repeatMode, trackDoubleClickAction, doubleClickPlays, playingAutoSwitchMode, customBuffer, bufferSeconds, volume, localShortcuts
+        case appearance, showMenuBar, repeatMode, trackDoubleClickAction, doubleClickPlays, playingAutoSwitchMode, customBuffer, bufferSeconds, volume, localShortcuts, librarySortOrder, playlistAlbumGroups
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -113,6 +115,8 @@ struct AppPreferences: Codable {
         bufferSeconds = try values.decodeIfPresent(Double.self, forKey: .bufferSeconds) ?? 20
         volume = try values.decodeIfPresent(Double.self, forKey: .volume) ?? 0.75
         localShortcuts = try values.decodeIfPresent([String: Data].self, forKey: .localShortcuts) ?? [:]
+        librarySortOrder = (try? values.decodeIfPresent(LibrarySortOrder.self, forKey: .librarySortOrder)) ?? LibrarySortOrder()
+        playlistAlbumGroups = (try? values.decodeIfPresent(Bool.self, forKey: .playlistAlbumGroups)) ?? false
     }
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
@@ -125,6 +129,8 @@ struct AppPreferences: Codable {
         try values.encode(bufferSeconds, forKey: .bufferSeconds)
         try values.encode(volume, forKey: .volume)
         try values.encode(localShortcuts, forKey: .localShortcuts)
+        try values.encode(librarySortOrder, forKey: .librarySortOrder)
+        try values.encode(playlistAlbumGroups, forKey: .playlistAlbumGroups)
     }
 
     static func load() -> Self {

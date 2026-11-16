@@ -36,6 +36,37 @@ final class LibrarySearchPresentationTests: XCTestCase {
         XCTAssertEqual(Set(model.cachedTracksInFolder("").map(\.id)), ["a-signal", "a-orbit"])
     }
 
+    func testSortArrowReversesTheCurrentListAndSearchWithoutChangingThePlaylist() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.removeFiles() }
+        let model = fixture.model
+        await model.start()
+        model.add(model.tracks)
+        let queue = model.queue
+        model.selectLibraryView(.albums)
+        let ascending = model.visibleAlbums.map(\.id)
+        let artists = model.artists.map(\.id)
+        XCTAssertFalse(model.librarySortIsDescending)
+
+        model.toggleLibrarySort()
+        try await expectEventually { model.visibleAlbums.map(\.id) == ascending.reversed() }
+        XCTAssertTrue(model.librarySortIsDescending)
+        XCTAssertEqual(model.artists.map(\.id), artists, "Each list keeps its own direction.")
+        XCTAssertEqual(model.queue, queue)
+        XCTAssertTrue(model.settings.librarySortOrder.isDescending(.albums))
+
+        model.search = "signal"
+        try await expectEventually { !model.isSearching && model.displayedTracks.count == 2 }
+        XCTAssertEqual(model.visibleAlbums.map(\.title), ["Orbit", "Afterlight"])
+        model.toggleLibrarySort()
+        try await expectEventually { !model.isSearching && model.visibleAlbums.map(\.title) == ["Afterlight", "Orbit"] }
+        model.search = ""
+        try await expectEventually { model.visibleAlbums.map(\.id) == ascending }
+        model.reloadLibrary(); await model.waitForLibraryLoad()
+        XCTAssertEqual(model.visibleAlbums.map(\.id), ascending)
+        XCTAssertEqual(model.queue, queue)
+    }
+
     func testSwitchingTabsPreservesQueryAndClearingRestoresCatalogWithoutFilteringHomeHistory() async throws {
         let fixture = try makeFixture()
         defer { fixture.removeFiles() }

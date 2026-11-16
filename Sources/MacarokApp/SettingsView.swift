@@ -62,6 +62,10 @@ struct SettingsView: View {
                     ForEach(TrackDoubleClickAction.allCases) { Text($0.title).tag($0) }
                 }
             }
+            Section("Active Playlist") {
+                Toggle("Show album groups", isOn: $model.settings.playlistAlbumGroups)
+                Text("Adjacent tracks from the same album appear under one header with its artwork.").font(.caption).foregroundStyle(.secondary)
+            }
             Section("Center Panel") {
                 LabeledContent("Show Playing automatically") {
                     PlayingAutoSwitchModePicker(selection: $model.settings.playingAutoSwitchMode)
