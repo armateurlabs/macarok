@@ -118,38 +118,42 @@ final class PlaybackTimelineBufferTests: XCTestCase {
         }
         let knob = slider.convert(cell.knobRect(flipped: slider.isFlipped), to: hosting)
         let centerX = Int(knob.midX * scale)
-        let diameter = min(cell.knobThickness, min(knob.width, knob.height))
-        let radius = diameter * scale / 2
         let outsideX = min(bitmap.pixelsWide - 1, Int((knob.maxX + 4) * scale))
-        let outsideY = min(bitmap.pixelsHigh - 1, row + Int(radius + 3 * scale))
+        let outsideY = min(bitmap.pixelsHigh - 1, row + Int(10 * scale))
         let background = try XCTUnwrap(bitmap.colorAt(x: outsideX, y: outsideY)?.usingColorSpace(.sRGB))
-        func isOutlinedPixel(x: Int, y: Int) -> Bool {
-            guard let edge = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
-                  abs(edge.redComponent - edge.greenComponent) < 0.08,
-                  abs(edge.greenComponent - edge.blueComponent) < 0.08,
-                  edge.brightnessComponent < 0.94 else { return false }
-            let contrast = scheme == .dark ? edge.brightnessComponent - background.brightnessComponent
-                : background.brightnessComponent - edge.brightnessComponent
+        func isThumbPixel(x: Int, y: Int) -> Bool {
+            guard let pixel = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                  abs(pixel.redComponent - pixel.greenComponent) < 0.08,
+                  abs(pixel.greenComponent - pixel.blueComponent) < 0.08,
+                  pixel.brightnessComponent < 0.94 else { return false }
+            let contrast = scheme == .dark ? pixel.brightnessComponent - background.brightnessComponent
+                : background.brightnessComponent - pixel.brightnessComponent
             return contrast > 0.18
         }
-        // Measure the rendered contour through the thumb center. White buffered audio and the
-        // blue played bar are excluded, so a misplaced tracking-rectangle outline cannot pass
-        // just because it paints a contrasting edge somewhere below the actual circular knob.
-        let reach = Int(radius + 3 * scale), axis = max(0, Int(scale / 4))
-        let outlinedX = (max(0, centerX - reach)...min(bitmap.pixelsWide - 1, centerX + reach)).filter { x in
-            (max(0, row - axis)...min(bitmap.pixelsHigh - 1, row + axis)).contains { isOutlinedPixel(x: x, y: $0) }
+        // Read the painted shape itself: it must be one small filled circle, with the blue bar
+        // reaching its left edge. This also catches duplicate native knobs, hollow rings, and a
+        // blue endpoint that uses a different width from the native slider's knob travel.
+        let reach = Int(12 * scale), axis = max(0, Int(scale / 4))
+        let thumbX = (max(0, centerX - reach)...min(bitmap.pixelsWide - 1, centerX + reach)).filter { x in
+            (max(0, row - axis)...min(bitmap.pixelsHigh - 1, row + axis)).contains { isThumbPixel(x: x, y: $0) }
         }
-        let outlinedY = (max(0, row - reach)...min(bitmap.pixelsHigh - 1, row + reach)).filter { y in
-            (max(0, centerX - axis)...min(bitmap.pixelsWide - 1, centerX + axis)).contains { isOutlinedPixel(x: $0, y: y) }
+        let thumbY = (max(0, row - reach)...min(bitmap.pixelsHigh - 1, row + reach)).filter { y in
+            (max(0, centerX - axis)...min(bitmap.pixelsWide - 1, centerX + axis)).contains { isThumbPixel(x: $0, y: y) }
         }
-        let left = try XCTUnwrap(outlinedX.first), right = try XCTUnwrap(outlinedX.last)
-        let top = try XCTUnwrap(outlinedY.first), bottom = try XCTUnwrap(outlinedY.last)
+        let left = try XCTUnwrap(thumbX.first), right = try XCTUnwrap(thumbX.last)
+        let top = try XCTUnwrap(thumbY.first), bottom = try XCTUnwrap(thumbY.last)
         let paintedWidth = CGFloat(right - left + 1) / scale
         let paintedHeight = CGFloat(bottom - top + 1) / scale
-        XCTAssertEqual(paintedWidth, paintedHeight, accuracy: 1.5, "The knob outline must be circular, including disabled timelines.")
-        XCTAssertEqual(paintedHeight, diameter, accuracy: 1.5)
-        XCTAssertEqual(CGFloat(top + bottom) / 2, CGFloat(row), accuracy: scale,
-                       "The circular outline must be centered on the painted bar, without tracking/shadow padding below it.")
+        XCTAssertEqual(paintedWidth, paintedHeight, accuracy: 1.5, "The thumb must be circular, including disabled timelines.")
+        XCTAssertEqual(paintedHeight, 8, accuracy: 1.5, "The thumb must remain a compact circle rather than the full tracking rectangle.")
+        XCTAssertEqual(CGFloat(top + bottom) / 2, CGFloat(row), accuracy: scale)
+        XCTAssertTrue(isThumbPixel(x: (left + right) / 2, y: (top + bottom) / 2), "The gray thumb must have a filled center.")
+        let lastBlue = try XCTUnwrap((0..<bitmap.pixelsWide).last { x in
+            guard let color = bitmap.colorAt(x: x, y: row)?.usingColorSpace(.sRGB) else { return false }
+            return color.blueComponent > color.redComponent + 0.25 && color.blueComponent > color.greenComponent + 0.15
+        })
+        XCTAssertLessThanOrEqual(CGFloat(left - lastBlue), scale + 1,
+                                 "The blue progress bar must meet the filled thumb without a visible gap.")
         XCTAssertFalse(window.isVisible)
 
     }

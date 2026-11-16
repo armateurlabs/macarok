@@ -14,6 +14,7 @@ public final class PlaybackTimeline: ObservableObject {
     @Published public fileprivate(set) var duration: Double = 0
     @Published public fileprivate(set) var bufferingProgress: Double = 1
     @Published public fileprivate(set) var isSeekable = false
+    @Published public fileprivate(set) var seekRevision: UInt64 = 0
 }
 
 public struct PlaybackDiagnostics: Equatable, Sendable {
@@ -294,6 +295,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             return
         }
         let target = boundedSeekTarget(seconds)
+        timeline.seekRevision &+= 1
         guard player.isSeekable else {
             pendingSeek = target
             inFlightSeek = nil

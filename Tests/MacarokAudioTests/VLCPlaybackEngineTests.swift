@@ -185,7 +185,10 @@ final class VLCPlaybackEngineTests: XCTestCase {
         let player = VLCPlaybackEngine()
         player.volume = 0
         player.load(url: url, durationHint: 8)
+        let seekRevision = player.timeline.seekRevision
         player.seek(to: 4)
+        XCTAssertEqual(player.timeline.seekRevision, seekRevision + 1,
+                       "Rendering must be able to cancel interpolation even before a pending seek is acknowledged.")
         try await eventually(player: player) { player.isSeekable && player.position >= 4 }
         try await Task.sleep(for: .milliseconds(350))
         XCTAssertGreaterThanOrEqual(player.position, 4)
