@@ -3,6 +3,23 @@ import Foundation
 @testable import MacarokCore
 
 final class BufferedHTTPInputStreamTests: XCTestCase {
+    func testFullUpcomingBufferCannotBlockTheCurrentSourcesPlaybackQueue() async throws {
+        let fixture = ProgressiveFixture(size: 2 * 1024 * 1024, delay: 0)
+        let upcomingTransport = fixture.transport.isolatedPlaybackTransport()
+        let upcoming = BufferedHTTPInputStream(url: fixture.url, transport: upcomingTransport, bufferBytes: 256 * 1024, bufferSeconds: 1)
+        let current = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport, bufferBytes: 256 * 1024, bufferSeconds: 1)
+        defer { upcoming.close(); current.close(); upcomingTransport.invalidate(); fixture.transport.invalidate() }
+        upcoming.open()
+        for _ in 0..<200 where upcoming.snapshot.bufferedBytes < upcoming.snapshot.capacityBytes {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertGreaterThanOrEqual(upcoming.snapshot.bufferedBytes, upcoming.snapshot.capacityBytes)
+        current.open()
+        let result = try await read(current, count: 4096)
+        XCTAssertEqual(result.data, fixture.data.prefix(4096))
+        XCTAssertGreaterThan(upcoming.snapshot.bufferedBytes, 0, "The next stream remains full while the current stream receives audio.")
+    }
+
     func testCustomBufferPrimesBeforeReturningAndStartsBeforeTheWholeFileDownloads() async throws {
         let fixture = ProgressiveFixture(size: 1024 * 1024, delay: 0.08)
         let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport, bufferSeconds: 3, durationHint: 8)

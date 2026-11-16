@@ -184,6 +184,13 @@ public final class SourceTransport: NSObject, URLSessionDelegate, URLSessionTask
         downloadSession = URLSession(configuration: configuration, delegate: downloadDelegate, delegateQueue: downloadQueue)
     }
 
+    /// Upcoming audio must not share a serial callback queue with a full current stream.
+    /// The caller owns this independent transport and invalidates it after playback/cancellation.
+    public func isolatedPlaybackTransport() -> SourceTransport {
+        SourceTransport(sourceID: sourceID, configuration: configuration.copy() as! URLSessionConfiguration,
+                        certificateStore: certificateStore, certificateApproval: approval)
+    }
+
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         guard let url = request.url, Self.isValidURL(url) else {
             throw SourceNetworkError.invalidURL
