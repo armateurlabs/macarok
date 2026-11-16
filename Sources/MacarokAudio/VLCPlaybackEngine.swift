@@ -108,7 +108,15 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     private var timelineTimer: Timer?
     private var live = false
     private nonisolated let handoff = NativePlaybackHandoff()
-    private static let playbackLibrary = VLCLibrary(options: ["--no-video", "--no-osd", "--quiet", "--no-metadata-network-access"])
+    private static let eventConfiguration: PlaybackEventsConfiguration = {
+        let configuration = PlaybackEventsConfiguration()
+        VLCLibrary.sharedEventsConfiguration = configuration
+        return configuration
+    }()
+    private static let playbackLibrary: VLCLibrary = {
+        _ = eventConfiguration
+        return VLCLibrary(options: ["--no-video", "--no-osd", "--quiet", "--no-metadata-network-access"])
+    }()
     private static let signposter = OSSignposter(subsystem: "com.armateurlabs.Macarok", category: "Playback")
     private var transitionInterval: OSSignpostIntervalState?
     private var transitionStartedAt: TimeInterval?
@@ -121,7 +129,13 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         return current.backend.media.statistics.playedAudioBuffers
     }
 
-    public override init() { super.init() }
+    public override init() {
+        // Install once before load() can create even its VLCMedia/shared library. The framework's
+        // default inline callbacks can release a notification's last player reference while
+        // libVLC still holds its timer lock; dealloc then re-enters that lock to unwatch time.
+        _ = VLCPlaybackEngine.eventConfiguration
+        super.init()
+    }
     deinit {
         timelineTimer?.invalidate()
         handoff.stopAll()
@@ -602,9 +616,19 @@ private struct NativePlaybackSnapshot: Sendable {
     var firstPlayingUptime: TimeInterval?
 }
 
-/// The pinned VLCKit default event configuration delivers delegate state changes on the native
-/// callback thread. Its public play() enqueues decoder work. This bridge deliberately avoids
-/// undocumented native handles and does not promise sample-accurate/gapless transitions.
+/// Keep VLCKit's notification creation and autorelease pools outside libVLC's locked callbacks.
+/// The public process-wide configuration is owned by MacarokAudio and retained for its lifetime.
+/// A serial queue preserves event order and remains independent of a busy main actor.
+private final class PlaybackEventsConfiguration: NSObject, VLCEventsConfiguring {
+    private let queue = DispatchQueue(label: "com.armateurlabs.Macarok.playback-events", qos: .userInitiated,
+                                      autoreleaseFrequency: .workItem)
+
+    func dispatchQueue() -> DispatchQueue? { queue }
+    func isAsync() -> Bool { true }
+}
+
+/// State changes arrive on the dedicated playback event queue; public play() enqueues decoder
+/// work. This bridge avoids undocumented native handles and does not promise gapless transitions.
 private final class NativePlaybackHandoff: @unchecked Sendable {
     private let lock = NSLock()
     private var active: NativePlaybackSnapshot?

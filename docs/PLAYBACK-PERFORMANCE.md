@@ -14,6 +14,8 @@ Retained byte ranges describe reusable RAM, not a cumulative download. Evicted b
 
 A shared `VLCLibrary` avoids constructing a libVLC context for every track. Each item retains its own lightweight player/delegate identity, so callbacks cannot complete a replacement item. Local files and mounted shares receive file caching as well as network caching for streams.
 
+Before creating media or players, MacarokAudio installs and retains a public `VLCEventsConfiguring` policy. Configurable VLCKit events dispatch asynchronously on a dedicated serial queue with an autorelease pool per work item. This keeps notification-driven player deallocation off libVLC's native callback stack, avoiding timer-lock reentry when an inline notification releases the last player reference. UI callbacks still move to MainActor; native completion handoff remains independent of it.
+
 `PlaybackTimeline` owns position, duration, seekability, and buffering publications. Equality guards suppress duplicate values.
 
 The seek control draws a 16-point filled thumb inside a full-width, 32-point-high native input surface. Visual thumb size does not limit click targets. The native seek cell interpolates only toward received positions for at most 200 milliseconds, sharing one geometry for its filled thumb and played bar. It never predicts future playback time or publishes animation frames through the model. Pausing, buffering, seeking, dragging, changing occurrences, and Reduce Motion cancel that presentation interpolation. During a native mouse drag, the control owns its value and range so queued clock/view updates cannot reset the gesture. Release commits the captured native endpoint once; an external seek, replacement, or loss of seekability cancels the old draft.
