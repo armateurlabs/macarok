@@ -104,6 +104,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     private var didComplete = false
     private var explicitlyStopped = false
     private var pendingSeek: Double?
+    private var playingSince: TimeInterval?
     private var inFlightSeek: (target: Double, startedAt: TimeInterval)?
     private var timelineTimer: Timer?
     private var live = false
@@ -425,6 +426,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         position = 0
         duration = segmentEnd.map { $0 - segmentStart } ?? durationHint ?? 0
         hasStarted = snapshot.hasStarted
+        playingSince = hasStarted ? snapshot.firstPlayingUptime ?? ProcessInfo.processInfo.systemUptime : nil
         didComplete = false
         explicitlyStopped = false
         pendingSeek = nil
@@ -472,6 +474,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         case .playing:
             endTransition(startedPlaying: true, at: handoff.current()?.firstPlayingUptime)
             hasStarted = true
+            if playingSince == nil { playingSince = ProcessInfo.processInfo.systemUptime }
             bufferingProgress = 1
             setState(.playing)
             startTimelineUpdates()
@@ -522,8 +525,12 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             if isSeekable {
                 pendingSeek = nil
                 seek(to: target)
+                return
             }
-            return
+            // Media that is still unseekable after playback began never applies the target.
+            // Report the audio actually heard instead of holding the timeline on it.
+            guard hasStarted, let playingSince, ProcessInfo.processInfo.systemUptime - playingSince >= 2 else { return }
+            pendingSeek = nil
         }
         let reportedPosition = max(0, absolute - segmentStart)
         if let request = inFlightSeek {

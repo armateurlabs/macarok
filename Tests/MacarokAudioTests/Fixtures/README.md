@@ -18,3 +18,14 @@ ffmpeg -hide_banner -loglevel error \
 
 FFmpeg is only needed to regenerate this fixture; test execution uses the
 committed MP3 and the pinned VLCKit runtime.
+
+`seekable-silence.flac` and `seekable-silence.ogg` are 40 seconds of digital
+silence. They are long enough to verify HTTP seeking in libVLC's FLAC and Ogg
+demuxers, which need the media's byte length:
+
+```sh
+ffmpeg -hide_banner -loglevel error -f lavfi -i 'anullsrc=r=22050:cl=mono' \
+  -t 40 -c:a flac -y seekable-silence.flac
+ffmpeg -hide_banner -loglevel error -f lavfi -i 'anullsrc=r=22050:cl=stereo' \
+  -t 40 -c:a vorbis -strict -2 -y seekable-silence.ogg
+```

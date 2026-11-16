@@ -94,7 +94,7 @@ Support MP3, FLAC, Ogg Vorbis, and Ogg Opus for local and remote playback. Reque
 
 Streaming Buffer has Automatic and Custom modes. Custom buffering specifies a target duration in seconds.
 
-Podcast RSS durations are provisional display hints. Decoded media duration controls seeking and resume bounds, while HTTP buffering uses a bounded fallback instead of estimating bitrate from an unverified RSS duration. Nearby seeks reuse retained bytes. Timeline gestures retain their requested timestamp until VLC acknowledges it; stale gestures cannot seek a replacement queue entry. Servers without HTTP byte-range support disable seeking and discard unsupported resume requests while playback continues normally.
+Podcast RSS durations are provisional display hints. Decoded media duration controls seeking and resume bounds, while HTTP buffering uses a bounded fallback instead of estimating bitrate from an unverified RSS duration. Nearby seeks reuse retained bytes. Timeline gestures retain their requested timestamp until VLC acknowledges it; stale gestures cannot seek a replacement queue entry. Servers without HTTP byte-range support disable seeking and discard unsupported resume requests while playback continues normally. A stopped, restored, finished, or still-preparing entry behaves like Apple Music: the timeline and Left / Right move only its start point, and Play begins there. A disabled timeline uses a lighter thumb and explains why seeking is unavailable.
 
 The playback engine samples VLC's actual clock on a main-run-loop timer registered in common modes, keeping the timeline updated while an AppKit menu is open. It does not extrapolate elapsed time. This avoids depending on VLCKit's notification timer, which the pinned version registers only in the default mode (see [the upstream implementation](https://github.com/videolan/vlckit/blob/master/Sources/Playback/VLCMediaPlayer.m)). Polling stops on pause, stop, completion, error, media replacement, and engine destruction.
 
@@ -110,7 +110,7 @@ Library shuffle mixes tracks within the selected artist, album, folder including
 
 Support Mac media keys and customizable in-app and global shortcuts. Space toggles playback inside the application when the user is not editing text.
 
-Bare Left / Right seek by five seconds per press. Holding either key continues through the operating system's repeat events, with clamping at track boundaries. Releasing the key, changing playback occurrence, or leaving the player window resets the hold. Text editing, shortcut recording, sheets, and native control navigation retain their normal arrows. Bare arrows are reserved for seeking; the default Command-Left / Command-Right shortcuts remain Previous / Next.
+Bare Left / Right seek by five seconds per press. Holding either key continues through the operating system's repeat events, with clamping at track boundaries. Releasing the key, changing playback occurrence, or leaving the player window resets the hold. The keys also seek while the timeline or the active playlist has focus. Text editing, shortcut recording, sheets, library outlines, and other native controls retain their normal arrows. Bare arrows are reserved for seeking; the default Command-Left / Command-Right shortcuts remain Previous / Next.
 
 ## Optional Last.fm scrobbling
 

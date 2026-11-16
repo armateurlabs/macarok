@@ -48,6 +48,34 @@ final class ClearPlaylistTests: XCTestCase {
         XCTAssertNil(model.message)
     }
 
+    /// Like Apple Music, an entry VLC has not loaded seeks only its start point; Play begins there.
+    func testStoppedAndPreparingEntriesSeekTheirResumePoint() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.removeFiles() }
+        let model = fixture.model
+        await model.start()
+        model.add([fixture.track, fixture.other])
+        model.currentQueueID = model.queue[0].id
+        XCTAssertEqual(model.player.state, .stopped)
+        XCTAssertTrue(model.canSeekCurrent)
+
+        model.seekPlayback(to: 6)
+        model.seekWithArrow(keyCode: 124, isRepeat: false)
+        XCTAssertEqual(model.restorePosition, 11, accuracy: 0.001)
+        XCTAssertEqual(model.displayedPlaybackPosition, 11, accuracy: 0.001)
+        XCTAssertEqual(model.player.state, .stopped)
+        await model.flushQueue()
+        XCTAssertEqual(try XCTUnwrap(fixture.store.loadQueue()).position, 11, accuracy: 0.001)
+
+        model.playQueueItem(model.queue[0].id)
+        // The playback task has not opened VLC yet; the new target replaces the parked one.
+        model.seekPlayback(to: 14)
+        try await eventually(model) { model.player.state == .playing && model.player.position >= 14 }
+        XCTAssertLessThan(model.player.position, 17)
+        XCTAssertEqual(model.restorePosition, 0)
+        XCTAssertNil(model.message)
+    }
+
     func testClearEmptiesPausedQueueAndUndoParksItsResumePosition() async throws {
         let fixture = try makeFixture()
         defer { fixture.removeFiles() }

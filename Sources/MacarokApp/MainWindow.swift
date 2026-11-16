@@ -86,7 +86,8 @@ struct TransportBar: View {
                             if model.radioDisconnected { Button("Reconnect", action: model.reconnectRadio).buttonStyle(.link) }
                         }.font(.system(size: 10))
                     } else {
-                    PlaybackTimelineView(model: model, timeline: player.timeline, track: track)
+                    PlaybackTimelineView(model: model, timeline: player.timeline, track: track,
+                                         resumePoint: model.seeksResumePoint ? model.restorePosition : nil)
                     }
                 }
             } else {
@@ -145,7 +146,7 @@ struct QueuePane: View {
                             .contextMenu { Button("Play Now") { model.playQueueItem(item.id) }; Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }; TrackFileActions(model: model, track: item.track); Divider(); Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } } }
                     }.onMove(perform: model.moveQueue).onDelete(perform: model.removeQueue)
                 }.listStyle(.inset(alternatesRowBackgrounds: true))
-                .background(NativeListBackground(revision: model.queueRevision))
+                .background(NativeListBackground(revision: model.queueRevision) { [weak model] table in model?.activePlaylistTable = table })
                 .onDeleteCommand { if let id = model.selectedQueueID, let index = model.queue.firstIndex(where: { $0.id == id }) { model.removeQueue(IndexSet(integer: index)) } }
             }
             PlaylistPanelFooter(model: model)

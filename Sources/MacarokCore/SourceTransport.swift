@@ -284,6 +284,17 @@ public final class SourceTransport: NSObject, URLSessionDelegate, URLSessionTask
         downloadSession.invalidateAndCancel()
     }
 
+    /// libVLC may open this URL with its own HTTP client only when no source-specific trust decision
+    /// applies: plain HTTP, or HTTPS without a certificate fingerprint pinned for this source.
+    public func allowsDirectPlayback(of url: URL) -> Bool {
+        guard Self.isValidURL(url), let host = url.host?.lowercased() else { return false }
+        switch url.scheme?.lowercased() {
+        case "http": return true
+        case "https": return certificateStore.trustedFingerprint(sourceID: sourceID, host: host, port: url.port ?? 443) == nil
+        default: return false
+        }
+    }
+
     private static func isValidURL(_ url: URL) -> Bool {
         ["http", "https"].contains(url.scheme?.lowercased() ?? "") && url.host != nil && url.user == nil && url.password == nil
     }

@@ -183,6 +183,28 @@ final class CertificatePolicyTests: XCTestCase {
         XCTAssertEqual(probe.count, 0)
     }
 
+    func testOnlyUnpinnedSourcesHandSizeDependentFormatsDirectlyToVLC() {
+        let suite = "MacarokDirect.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CertificateTrustStore(defaults: defaults)
+        let transport = SourceTransport(sourceID: "direct", certificateStore: store)
+        let other = SourceTransport(sourceID: "other", certificateStore: store)
+        defer { transport.invalidate(); other.invalidate() }
+        let stream = URL(string: "https://music.example:8443/rest/stream.view?id=1&format=raw")!
+        XCTAssertTrue(transport.allowsDirectPlayback(of: URL(string: "http://192.168.1.57:4533/rest/stream.view?id=1")!))
+        XCTAssertTrue(transport.allowsDirectPlayback(of: stream))
+        store.trust("AA:BB", sourceID: "direct", host: "music.example", port: 8443)
+        XCTAssertFalse(transport.allowsDirectPlayback(of: stream), "VLC cannot apply a source's pinned certificate.")
+        XCTAssertTrue(other.allowsDirectPlayback(of: stream))
+        XCTAssertFalse(transport.allowsDirectPlayback(of: URL(string: "http://user:secret@music.example/a.flac")!))
+        XCTAssertFalse(transport.allowsDirectPlayback(of: URL(fileURLWithPath: "/tmp/a.flac")))
+
+        XCTAssertTrue(BufferedHTTPInputStream.requiresKnownByteLength(format: "FLAC", url: stream))
+        XCTAssertTrue(BufferedHTTPInputStream.requiresKnownByteLength(format: "audio", url: URL(string: "https://cdn.example/episode.opus")!))
+        XCTAssertFalse(BufferedHTTPInputStream.requiresKnownByteLength(format: "MP3", url: stream))
+    }
+
     private func disposition(_ transport: SourceTransport, trust: SecTrust, host: String) async -> URLSession.AuthChallengeDisposition {
         let protection = TestProtectionSpace(trust: trust, host: host)
         let challenge = URLAuthenticationChallenge(protectionSpace: protection, proposedCredential: nil,

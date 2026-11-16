@@ -5,7 +5,7 @@ import Foundation
 public struct PlaybackEventLog: Sendable {
     public enum Kind: String, Codable, Sendable {
         case occurrenceStarted, phaseChanged, installation, upcomingPrepared, upcomingCancelled, nativeHandoff
-        case seek, underrun, completed, failed, watchdog, monitoringUnavailable
+        case seek, seekUnavailable, underrun, completed, failed, watchdog, monitoringUnavailable
         public var title: String {
             switch self {
             case .occurrenceStarted: "Playback requested"
@@ -15,6 +15,7 @@ public struct PlaybackEventLog: Sendable {
             case .upcomingCancelled: "Next entry preparation cancelled"
             case .nativeHandoff: "Native track handoff"
             case .seek: "Seek requested"
+            case .seekUnavailable: "Seek unavailable"
             case .underrun: "Stream reader waited"
             case .completed: "Playback completed"
             case .failed: "Playback failed"

@@ -237,7 +237,9 @@ final class AppModel {
     @ObservationIgnored private var artworkTasks: Set<String> = []
     @ObservationIgnored private var heardSeconds: Double = 0
     @ObservationIgnored private var playRecorded = false
-    @ObservationIgnored var restorePosition: Double = 0
+    /// Where the current entry starts when VLC has not loaded it; the stopped timeline displays and edits it.
+    var restorePosition: Double = 0
+    @ObservationIgnored weak var activePlaylistTable: NSTableView?
     @ObservationIgnored private var lastSavedTick = 0
     @ObservationIgnored private var directoryWatchers: [String: DirectoryWatcher] = [:]
     @ObservationIgnored private var watcherSetupTask: Task<Void, Never>?
@@ -375,7 +377,7 @@ final class AppModel {
                 self.cancelUpcomingPlayback(); self.activeStream?.close(); self.activeStream = nil; self.activePlaybackResource = nil
                 self.playbackDiagnostics.record(.failed, occurrenceID: self.playbackGeneration, media: self.playbackMediaKind)
                 if self.currentIsRadio { self.radioDisconnected = true; self.activeStream?.close(); self.activeStream = nil; self.status = "Radio disconnected. Reconnect to listen live." }
-                else { self.fail("Playback failed", error) }
+                else { self.restorePosition = self.player.position; self.fail("Playback failed", error) }
             }
             player.$state.sink { [weak self] state in
                 guard let self else { return }
@@ -701,15 +703,39 @@ final class AppModel {
     func resetArrowSeek() { arrowKeys.reset() }
 
     func seekWithArrow(keyCode: UInt16, isRepeat: Bool) {
-        guard player.isSeekable, [123, 124].contains(keyCode) else { resetArrowSeek(); return }
+        guard canSeekCurrent, [123, 124].contains(keyCode) else { resetArrowSeek(); return }
         guard let target = arrowKeys.target(keyCode: keyCode, isRepeat: isRepeat, generation: playbackGeneration,
-                                           position: player.position, duration: player.duration) else { return }
+                                           position: displayedPlaybackPosition, duration: displayedPlaybackDuration) else { return }
         seekPlayback(to: target)
+    }
+
+    /// VLC has not loaded the current entry (restored, preparing, finished, or failed). Like Apple Music,
+    /// seeking then moves only the resume point; Play starts from it.
+    var seeksResumePoint: Bool {
+        guard let track = currentTrack, !isRadioTrack(track), track.duration > 0 else { return false }
+        return !player.isSeekable && [.stopped, .failed].contains(player.state)
+    }
+    var canSeekCurrent: Bool { !currentIsRadio && (player.isSeekable || seeksResumePoint) }
+    var displayedPlaybackPosition: Double { seeksResumePoint ? restorePosition : player.position }
+    var displayedPlaybackDuration: Double {
+        if seeksResumePoint { return currentTrack?.duration ?? 0 }
+        return player.duration > 0 ? player.duration : currentTrack?.duration ?? 0
     }
 
     func seekPlayback(to seconds: Double) {
         player.synchronizeUpcomingPlayback()
-        guard !currentIsRadio, player.isSeekable else { return }
+        guard !currentIsRadio, seconds.isFinite else { return }
+        if seeksResumePoint {
+            let duration = currentTrack?.duration ?? 0
+            restorePosition = max(0, duration > 0 ? min(seconds, duration) : seconds)
+            saveQueue(); updateNowPlaying()
+            return
+        }
+        // An opening decoder retains the target until VLC reports whether the media is seekable.
+        guard player.isSeekable || player.state == .opening else {
+            playbackDiagnostics.record(.seekUnavailable, occurrenceID: playbackGeneration, media: playbackMediaKind)
+            return
+        }
         player.seek(to: seconds)
         playbackDiagnostics.markSeek(occurrenceID: playbackGeneration, monotonicTime: ProcessInfo.processInfo.systemUptime)
         scrobbling?.seek(); updateNowPlaying()
@@ -736,7 +762,8 @@ final class AppModel {
         cancelUpcomingPlayback()
         scrobbling?.end(); radioBroadcastTitle = nil; radioDisconnected = false
         let resume = id == currentQueueID ? restorePosition : 0
-        restorePosition = 0
+        // Retained while the entry is prepared, so the stopped timeline can still move the start point.
+        restorePosition = resume
         playbackTask?.cancel(); activeStream?.close(); activeStream = nil; activePlaybackResource = nil
         playbackGeneration = UUID(); let generation = playbackGeneration
         playbackIntentQueueID = id; resetArrowSeek()
@@ -759,7 +786,9 @@ final class AppModel {
                     prepared.install(on: self.player, track: item.track, buffer: self.settings.buffer)
                     if let renewed = prepared.renewedSource { Task { try? await self.performLibraryWork { try $0.saveSource(renewed) } } }
                 }
-                if resume > 0, source.kind != .radio { self.player.seek(to: resume) }
+                let start = self.restorePosition
+                self.restorePosition = 0
+                if start > 0, source.kind != .radio { self.player.seek(to: start) }
                 self.status = "Playing “\(item.track.title)”."
                 self.updateNowPlaying(); self.saveQueue()
                 self.prepareNextPlayback()
@@ -789,7 +818,12 @@ final class AppModel {
             url = try await subsonicClient(source).streamURL(songID: remoteID)
         } else { guard let enclosure = track.url else { throw AppFailure.missingFile }; url = enclosure }
         try Task.checkCancellation()
-        let isolated = transport(for: source).isolatedPlaybackTransport()
+        let sourceTransport = transport(for: source)
+        if BufferedHTTPInputStream.requiresKnownByteLength(format: track.format, url: url),
+           sourceTransport.allowsDirectPlayback(of: url) {
+            return PreparedQueuePlayback(url: url)
+        }
+        let isolated = sourceTransport.isolatedPlaybackTransport()
         let stream = BufferedHTTPInputStream(url: url, transport: isolated,
             bufferBytes: Int((settings.buffer ?? 20) * 192_000), bufferSeconds: settings.buffer,
             durationHint: source.kind == .podcasts ? nil : track.duration)
@@ -982,7 +1016,7 @@ final class AppModel {
         queueSaveRevision &+= 1
         let revision = queueSaveRevision
         let ids = queueTrackIDs, index = currentIndex ?? 0
-        let position = currentIsRadio ? 0 : player.position > 0 ? player.position : restorePosition
+        let position = savedResumePosition
         Task { try? await backgroundWorker.saveQueue(store: store, trackIDs: ids, currentIndex: index, position: position, revision: revision) }
     }
 
@@ -990,7 +1024,11 @@ final class AppModel {
         guard let store else { return }
         queueSaveRevision &+= 1
         try? await backgroundWorker.saveQueue(store: store, trackIDs: queueTrackIDs, currentIndex: currentIndex ?? 0,
-                                              position: currentIsRadio ? 0 : player.position > 0 ? player.position : restorePosition, revision: queueSaveRevision)
+                                              position: savedResumePosition, revision: queueSaveRevision)
+    }
+
+    private var savedResumePosition: Double {
+        currentIsRadio ? 0 : seeksResumePoint || player.position <= 0 ? restorePosition : player.position
     }
 
     func pickFolder() {
@@ -1600,6 +1638,11 @@ final class AppModel {
         }
     }
 
+    private var playbackTransportKind: PlaybackDiagnosticsController.Transport {
+        if let url = activePlaybackResource?.url { return url.isFileURL ? .file : .directNetwork }
+        return activeStream == nil ? .none : .bufferedStream
+    }
+
     private func checkPlaybackHealth() {
         let health = player.healthSnapshot // Reconciles a handoff before sampling its queue occurrence.
         let stream = activeStream?.snapshot
@@ -1613,7 +1656,8 @@ final class AppModel {
             isSuspended: playbackSuspended, audioOutputCounter: output,
             transportProgressCounter: stream?.retainedRanges.last?.upperBound, expectedBufferSeconds: settings.buffer)
         guard let incident = playbackDiagnostics.observe(sample, engine: player.diagnostics, stream: stream,
-            media: playbackMediaKind, health: health, duration: player.duration),
+            media: playbackMediaKind, health: health, duration: player.duration,
+            isSeekable: currentTrack == nil ? nil : canSeekCurrent, transport: playbackTransportKind),
             incident.occurrenceID == playbackGeneration else { return }
         cancelUpcomingPlayback()
         guard incident.occurrenceID == playbackGeneration else { return }
@@ -1683,8 +1727,9 @@ final class AppModel {
                 return event
             }
             if PlaybackArrowKeys.isReserved(keyCode: event.keyCode, modifiers: event.modifierFlags) {
-                guard PlaybackArrowKeys.accepts(window: event.window, mainWindow: self.mainPlayerWindow) else { self.resetArrowSeek(); return event }
-                guard self.player.isSeekable else { return event }
+                guard PlaybackArrowKeys.accepts(window: event.window, mainWindow: self.mainPlayerWindow,
+                                                activePlaylist: self.activePlaylistTable) else { self.resetArrowSeek(); return event }
+                guard self.canSeekCurrent else { return event }
                 self.seekWithArrow(keyCode: event.keyCode, isRepeat: event.isARepeat)
                 return nil
             }
@@ -1711,7 +1756,7 @@ final class AppModel {
             MPNowPlayingInfoCenter.default().playbackState = playbackState == .playing ? .playing : playbackState == .paused ? .paused : .stopped
             return
         }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: track.title, MPMediaItemPropertyArtist: track.artist, MPMediaItemPropertyAlbumTitle: track.album, MPMediaItemPropertyPlaybackDuration: player.duration > 0 ? player.duration : track.duration, MPNowPlayingInfoPropertyElapsedPlaybackTime: player.position, MPNowPlayingInfoPropertyPlaybackRate: playbackState == .playing ? 1.0 : 0.0]
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: track.title, MPMediaItemPropertyArtist: track.artist, MPMediaItemPropertyAlbumTitle: track.album, MPMediaItemPropertyPlaybackDuration: displayedPlaybackDuration, MPNowPlayingInfoPropertyElapsedPlaybackTime: displayedPlaybackPosition, MPNowPlayingInfoPropertyPlaybackRate: playbackState == .playing ? 1.0 : 0.0]
         MPNowPlayingInfoCenter.default().playbackState = playbackState == .playing ? .playing : playbackState == .paused ? .paused : .stopped
     }
 }

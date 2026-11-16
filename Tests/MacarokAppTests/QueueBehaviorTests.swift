@@ -154,6 +154,19 @@ final class QueueBehaviorTests: XCTestCase {
         model.queueUndoManager.redo(); XCTAssertTrue(model.queue.isEmpty)
     }
 
+    func testTimelineAndActivePlaylistSeekWithArrowsWhileOtherControlsKeepThem() {
+        _ = NSApplication.shared
+        let timeline = BufferedTimelineSlider.makeSlider()
+        let playlist = NSTableView(), otherList = NSTableView(), library = NSOutlineView(), field = NSTextView()
+        XCTAssertTrue(PlaybackArrowKeys.respondersAllowSeek(from: timeline, until: nil, activePlaylist: playlist))
+        XCTAssertTrue(PlaybackArrowKeys.respondersAllowSeek(from: playlist, until: nil, activePlaylist: playlist))
+        XCTAssertTrue(PlaybackArrowKeys.respondersAllowSeek(from: NSView(), until: nil, activePlaylist: playlist))
+        XCTAssertFalse(PlaybackArrowKeys.respondersAllowSeek(from: playlist, until: nil, activePlaylist: nil))
+        XCTAssertFalse(PlaybackArrowKeys.respondersAllowSeek(from: otherList, until: nil, activePlaylist: playlist))
+        XCTAssertFalse(PlaybackArrowKeys.respondersAllowSeek(from: library, until: nil, activePlaylist: playlist))
+        XCTAssertFalse(PlaybackArrowKeys.respondersAllowSeek(from: field, until: nil, activePlaylist: playlist))
+    }
+
     func testUndoHostKeepsTextUndoSeparateAndRejectsControlArrowNavigation() {
         _ = NSApplication.shared
         let model = AppModel(registerSystemControls: false)

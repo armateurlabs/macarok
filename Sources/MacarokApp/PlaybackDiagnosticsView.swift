@@ -10,12 +10,26 @@ import UniformTypeIdentifiers
 /// Low-frequency health observations and a bounded event history, shared by playback and Help.
 @MainActor @Observable
 final class PlaybackDiagnosticsController {
+    /// How VLC receives the current media; FLAC/Ogg byte streams cannot be seeked by libVLC.
+    enum Transport: String, Codable {
+        case file, directNetwork, bufferedStream, none
+        var title: String {
+            switch self {
+            case .file: "File"
+            case .directNetwork: "VLC network access"
+            case .bufferedStream: "Macarok buffered stream"
+            case .none: "—"
+            }
+        }
+    }
     struct Snapshot: Codable, Equatable {
         let phase: PlaybackWatchdog.Phase
         let media: PlaybackEventLog.MediaKind
         let hasProgressSignal: Bool
         let isSuspended: Bool
         let metrics: PlaybackEventLog.Metrics
+        var isSeekable: Bool? = nil
+        var transport: Transport? = nil
     }
     private struct Export: Encodable {
         let schemaVersion = 1
@@ -45,7 +59,8 @@ final class PlaybackDiagnosticsController {
     @discardableResult
     func observe(_ sample: PlaybackWatchdog.Sample, engine: PlaybackDiagnostics,
                  stream: StreamBufferSnapshot?, media: PlaybackEventLog.MediaKind = .unknown,
-                 health: PlaybackHealthSnapshot? = nil, duration: Double? = nil) -> PlaybackWatchdog.Incident? {
+                 health: PlaybackHealthSnapshot? = nil, duration: Double? = nil,
+                 isSeekable: Bool? = nil, transport: Transport? = nil) -> PlaybackWatchdog.Incident? {
         let metrics = PlaybackEventLog.Metrics(position: sample.position, duration: duration,
             playedAudioBuffers: health?.playedAudioBuffers ?? sample.audioOutputCounter,
             decodedAudio: health?.decodedAudio, readBytes: health?.readBytes ?? sample.transportProgressCounter,
@@ -54,7 +69,7 @@ final class PlaybackDiagnosticsController {
             installationCount: engine.installationCount, installationSeconds: engine.lastInstallationSeconds,
             transitionSeconds: engine.lastTransitionSeconds)
         let next = Snapshot(phase: sample.phase, media: media, hasProgressSignal: sample.hasProgressSignal,
-                            isSuspended: sample.isSuspended, metrics: metrics)
+                            isSuspended: sample.isSuspended, metrics: metrics, isSeekable: isSeekable, transport: transport)
         if snapshot != next { snapshot = next }
         if occurrenceID != sample.occurrenceID {
             occurrenceID = sample.occurrenceID; lastPhase = nil; lastUnderruns = 0; reportedMissingSignal = false
@@ -151,6 +166,7 @@ struct PlaybackDiagnosticsView: View {
             if let snapshot = controller.snapshot {
                 Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
                     GridRow { field("State", snapshot.phase.title); field("Media", snapshot.media.title) }
+                    GridRow { field("Transport", snapshot.transport?.title ?? "—"); field("Seekable", snapshot.isSeekable.map { $0 ? "Yes" : "No" } ?? "—") }
                     GridRow { field("Position", seconds(snapshot.metrics.position)); field("Duration", seconds(snapshot.metrics.duration)) }
                     GridRow { field("Played audio buffers", number(snapshot.metrics.playedAudioBuffers)); field("Decoded audio", number(snapshot.metrics.decodedAudio)) }
                     GridRow { field("VLC bytes read", number(snapshot.metrics.readBytes)); field("Stream buffer", buffer(snapshot.metrics)) }

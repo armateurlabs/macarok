@@ -322,6 +322,13 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         return live ? nil : expectedBytes
     }
 
+    /// VLCKit reports an unknown size for every NSInputStream. libVLC's FLAC and Ogg demuxers need the
+    /// byte length to seek, so these formats must reach VLC another way to remain seekable.
+    public static func requiresKnownByteLength(format: String, url: URL) -> Bool {
+        let formats: Set<String> = ["flac", "fla", "ogg", "oga", "ogx", "opus", "spx"]
+        return formats.contains(format.lowercased()) || formats.contains(url.pathExtension.lowercased())
+    }
+
     static func contentRange(_ value: String) -> (start: UInt64, end: UInt64, total: Int64?)? {
         let parts = value.trimmingCharacters(in: .whitespaces).split(separator: " ", maxSplits: 1)
         guard parts.count == 2, parts[0].lowercased() == "bytes" else { return nil }

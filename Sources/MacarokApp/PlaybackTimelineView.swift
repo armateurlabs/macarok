@@ -14,27 +14,31 @@ struct PlaybackTimelineView: View {
     @Bindable var model: AppModel
     @ObservedObject var timeline: PlaybackTimeline
     let track: TrackRecord
+    /// Set while VLC has not loaded the current entry; the timeline then edits only this start point.
+    var resumePoint: Double? = nil
     @State private var interaction = PlaybackSeekInteraction()
     @State private var bufferedRanges: [Range<Double>] = []
     @State private var sampling = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        let duration = timeline.duration > 0 ? timeline.duration : track.duration
-        let position = interaction.isEditing ? interaction.position ?? timeline.position : timeline.position
+        let duration = resumePoint != nil || timeline.duration <= 0 ? track.duration : timeline.duration
+        let measured = resumePoint ?? timeline.position
+        let position = interaction.isEditing ? interaction.position ?? measured : measured
+        let enabled = (resumePoint != nil || timeline.isSeekable) && duration > 0
         HStack(spacing: 8) {
             Text(position.playbackTime).frame(width: 43, alignment: .trailing)
             BufferedTimelineSlider(value: Binding(get: { min(max(1, duration), max(0, position)) }, set: {
                 interaction.change(to: $0, generation: model.playbackGeneration)
             }), duration: max(1, duration), ranges: model.currentIsPodcast ? bufferedRanges : [],
-                enabled: timeline.isSeekable && duration > 0,
+                enabled: enabled,
                 showsBuffer: model.currentIsPodcast,
                 onEditingChanged: { editing in
-                    if editing { interaction.begin(at: timeline.position, generation: model.playbackGeneration) }
+                    if editing { interaction.begin(at: measured, generation: model.playbackGeneration) }
                     else if let target = interaction.end(generation: model.playbackGeneration) { model.seekPlayback(to: target) }
                 }, animatesPlayback: model.player.state == .playing && model.streamingBufferFraction == nil && !interaction.isEditing,
                 playbackGeneration: model.playbackGeneration, seekRevision: timeline.seekRevision,
-                onEditingCancelled: { interaction.cancel() }, measuredPosition: timeline.position)
-                .help(model.currentIsPodcast ? "Gray: not buffered · White: buffered or downloaded · Blue: played. Stream coverage is approximate for variable-bitrate audio." : "Playback position")
+                onEditingCancelled: { interaction.cancel() }, measuredPosition: measured)
+                .help(help(enabled: enabled, duration: duration))
             Text(duration > 0 ? duration.playbackTime : "--:--").frame(width: 43, alignment: .leading)
         }.font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
         .onReceive(sampling) { _ in sampleBuffer() }
@@ -45,6 +49,16 @@ struct PlaybackTimelineView: View {
             if [.opening, .stopped, .failed].contains(state) { interaction.cancel() }
         }
         .onAppear { sampleBuffer() }
+    }
+
+    private func help(enabled: Bool, duration: Double) -> String {
+        if !enabled {
+            if duration <= 0 { return "The duration of this track is not known yet, so it cannot be seeked." }
+            if [.opening, .buffering].contains(model.player.state) { return "Seeking becomes available once the track has opened." }
+            return "This server or file format does not allow seeking in this track."
+        }
+        if resumePoint != nil { return "Choose where playback starts." }
+        return model.currentIsPodcast ? "Gray: not buffered · White: buffered or downloaded · Blue: played. Stream coverage is approximate for variable-bitrate audio." : "Playback position"
     }
 
     private func sampleBuffer() {
@@ -349,7 +363,8 @@ private final class TimelineSliderCell: NSSliderCell {
 
     override func drawKnob(_ knobRect: NSRect) {
         let dark = controlView?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let gray: CGFloat = dark ? (isEnabled ? 0.78 : 0.58) : (isEnabled ? 0.25 : 0.45)
+        // An unavailable seek must read as inactive at a glance, not as a slightly different gray.
+        let gray: CGFloat = dark ? (isEnabled ? 0.78 : 0.45) : (isEnabled ? 0.25 : 0.62)
         NSColor(calibratedWhite: gray, alpha: 1).setFill()
         NSBezierPath(ovalIn: playbackThumbRect).fill()
     }

@@ -22,12 +22,21 @@ struct PlaybackArrowKeys {
         return target
     }
 
-    @MainActor static func accepts(window: NSWindow?, mainWindow: NSWindow?) -> Bool {
+    /// Text, library outlines, and other controls keep native arrows. The timeline and the active
+    /// playlist (vertical-only navigation) use them for the model's fixed seek step.
+    @MainActor static func accepts(window: NSWindow?, mainWindow: NSWindow?, activePlaylist: NSTableView? = nil) -> Bool {
         guard let window, window === mainWindow, window.isKeyWindow,
               window.attachedSheet == nil, NSApp.modalWindow == nil else { return false }
         guard webView(for: window.firstResponder) == nil else { return false }
-        var responder = window.firstResponder
+        return respondersAllowSeek(from: window.firstResponder, until: window, activePlaylist: activePlaylist)
+    }
+
+    @MainActor static func respondersAllowSeek(from firstResponder: NSResponder?, until window: NSWindow?,
+                                               activePlaylist: NSTableView?) -> Bool {
+        var responder = firstResponder
         while let current = responder, current !== window {
+            if current is TimelineSlider { return true }
+            if let activePlaylist, current === activePlaylist { return true }
             if current is NSTextView || current is NSControl || current is NSTableView || current is NSOutlineView || current is NSCollectionView { return false }
             responder = current.nextResponder
         }

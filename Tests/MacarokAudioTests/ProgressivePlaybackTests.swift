@@ -200,6 +200,26 @@ final class ProgressivePlaybackTests: XCTestCase {
         XCTAssertTrue(server.requestedOffsets.contains { $0 > 0 }, "Seeking must request a new HTTP byte range.")
     }
 
+    /// VLCKit gives libVLC an unknown size for every NSInputStream, so these demuxers cannot seek
+    /// through BufferedHTTPInputStream. The application hands their URLs to libVLC directly.
+    @MainActor
+    func testFLACAndOggSeekWhenLibVLCOpensTheHTTPURL() async throws {
+        for (name, type) in [("seekable-silence.flac", "audio/flac"), ("seekable-silence.ogg", "audio/ogg")] {
+            let fixture = try XCTUnwrap(Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Fixtures"))
+            let server = try ProgressiveHTTPServer(data: Data(contentsOf: fixture), chunkDelay: 0, contentType: type, path: "/\(name)")
+            defer { server.stop() }
+            let player = VLCPlaybackEngine()
+            player.volume = 0
+            defer { player.stop() }
+            player.load(url: server.url, bufferSeconds: 1, durationHint: 40)
+            try await eventually(player: player, timeout: 15) { player.state == .playing && player.isSeekable }
+            player.seek(to: 25)
+            try await eventually(player: player, timeout: 10) { player.position > 25.3 }
+            XCTAssertLessThan(player.position, 32, "\(name) must continue from the requested position.")
+            XCTAssertNil(player.lastError)
+        }
+    }
+
     @MainActor
     private func eventually(player: VLCPlaybackEngine, timeout: TimeInterval = 8,
                             _ predicate: @escaping @MainActor () -> Bool) async throws {

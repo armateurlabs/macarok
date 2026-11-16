@@ -71,6 +71,23 @@ final class PlaybackTimelineRoutingTests: XCTestCase {
         XCTAssertLessThan(fixture.model.player.position, 10)
     }
 
+    func testRestoredEntryTimelineMovesItsResumePointWithoutStartingPlayback() async throws {
+        _ = NSApplication.shared
+        let fixture = try Fixture(backend: .restored)
+        defer { fixture.stop() }
+        let host = Host(model: fixture.model, scheme: .light)
+        defer { host.close() }
+        try await host.settle()
+        let slider = try XCTUnwrap(findSlider(in: host.hosting))
+        XCTAssertTrue(slider.isEnabled, "A restored entry must accept a new start point before VLC loads it.")
+        let revision = fixture.model.player.timeline.seekRevision
+        try host.click(slider, fraction: 0.25, verticalOffset: 0)
+        try await host.settle()
+        XCTAssertEqual(fixture.model.restorePosition, 22.5, accuracy: 1)
+        XCTAssertEqual(fixture.model.player.state, .stopped)
+        XCTAssertEqual(fixture.model.player.timeline.seekRevision, revision)
+    }
+
     private func findSlider(in view: NSView) -> TimelineSlider? {
         if let slider = view as? TimelineSlider, slider.accessibilityIdentifier() == "playbackTimeline" { return slider }
         return view.subviews.lazy.compactMap { self.findSlider(in: $0) }.first
@@ -84,7 +101,7 @@ final class PlaybackTimelineRoutingTests: XCTestCase {
         throw Failure.timeout
     }
 
-    private enum Backend { case local, stream, unseekableStream }
+    private enum Backend { case local, stream, unseekableStream, restored }
     private enum Failure: Error { case timeout, hit(String) }
 
     @MainActor
@@ -181,12 +198,13 @@ final class PlaybackTimelineRoutingTests: XCTestCase {
             try Self.wave().write(to: file)
             var preferences = AppPreferences(); preferences.volume = 0
             model = AppModel(preferences: preferences, registerSystemControls: false)
-            let source = SourceRecord(id: "timeline-routing", kind: backend == .local ? .local : .podcasts,
+            let source = SourceRecord(id: "timeline-routing", kind: [.local, .restored].contains(backend) ? .local : .podcasts,
                                       name: "Timeline Routing", location: directory.absoluteString)
             let track = TrackRecord(id: "timeline-routing-track", sourceID: source.id, title: "Timeline Routing",
                                     artist: "Macarok", album: "Input Tests", duration: 90, fileURL: file.absoluteString)
             model.sources = [source]
             model.queue = [QueueItem(track: track)]; model.currentQueueID = model.queue[0].id
+            if backend == .restored { return }
             if backend == .local { model.player.load(url: file, durationHint: 90) }
             else {
                 let stream = try XCTUnwrap(InputStream(url: file))

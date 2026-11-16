@@ -4,10 +4,13 @@ import SwiftUI
 /// Preserve native alternating rows and interaction, covering only the unused striped canvas.
 struct NativeListBackground: NSViewRepresentable {
     let revision: Int
+    /// Receives the backing table when it is found; receivers keep only a weak reference.
+    var onTableChange: ((NSTableView?) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NativeListBackgroundProbe {
+        context.coordinator.onTableChange = onTableChange
         let probe = NativeListBackgroundProbe(frame: .zero)
         probe.setAccessibilityElement(false)
         probe.setAccessibilityIdentifier("nativeListBackgroundProbe")
@@ -19,6 +22,7 @@ struct NativeListBackground: NSViewRepresentable {
     }
 
     func updateNSView(_ probe: NativeListBackgroundProbe, context: Context) {
+        context.coordinator.onTableChange = onTableChange
         context.coordinator.requestRefresh(from: probe)
     }
 
@@ -34,6 +38,7 @@ struct NativeListBackground: NSViewRepresentable {
     @MainActor
     final class Coordinator {
         private weak var table: NSTableView?
+        var onTableChange: ((NSTableView?) -> Void)?
         private weak var probe: NSView?
         private var observers: [NSObjectProtocol] = []
         private var scheduled = false
@@ -67,6 +72,7 @@ struct NativeListBackground: NSViewRepresentable {
             detach()
             probe = currentProbe
             self.table = table
+            onTableChange?(table)
             originalAlternation = table.usesAlternatingRowBackgroundColors
             originalFrameNotifications = table.postsFrameChangedNotifications
             table.postsFrameChangedNotifications = true
