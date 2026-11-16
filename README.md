@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Support/AppIcon.png" width="128" height="128" alt="Macarok: a blue wolf holding a red apple">
+</p>
+
 # Macarok
 
 A native macOS music player inspired by Amarok 1.4: a searchable library, rich listening context, and an active playlist in three persistent panels.
@@ -7,6 +11,47 @@ A native macOS music player inspired by Amarok 1.4: a searchable library, rich l
 ## Download
 
 Get the DMG from [GitHub Releases](https://github.com/armateurlabs/macarok/releases), open it, and drag Macarok to Applications. Release builds currently support Apple Silicon Macs with macOS 14 or later. They are ad-hoc signed and not notarized by Apple; macOS may block the first launch.
+
+## Screenshots
+
+Native SwiftUI views rendered from the current application with a synthetic music collection.
+
+**Home · Light** — library browsing, recently added albums, listening history, and the active playlist.
+
+![Macarok Home in Light appearance](design/native/home-light.png)
+
+**Playing · Dark** — album context and individual CUE tracks alongside the library and playlist.
+
+![Macarok Playing in Dark appearance](design/native/cue-album-dark.png)
+
+The same views are available in [Home · Dark](design/native/home-dark.png) and [Playing · Light](design/native/cue-album-light.png).
+
+<details>
+<summary>Lyrics, metadata editors, and more native views</summary>
+
+**Synchronized lyrics and All Sources**
+
+![Synchronized lyrics with source labels in Dark appearance](design/native/lyrics-dark.png)
+
+**Pinned song metadata editor** — the target and draft stay in place when the queue advances.
+
+![Pinned song metadata editor in Dark appearance](design/native/metadata-dark.png)
+
+**Album metadata editor** — shared album fields without individual song titles or numbering.
+
+![Album metadata editor in Dark appearance](design/native/album-metadata-dark.png)
+
+The album editor is also available in [Light](design/native/album-metadata-light.png), with compact [Light](design/native/album-metadata-narrow-light.png) and [Dark](design/native/album-metadata-narrow-dark.png) layouts.
+
+**Menu bar mini player**
+
+![Menu bar mini player in Dark appearance](design/native/menu-bar-mini-player-dark.png)
+
+Additional views show the [panel footers](design/native/panel-footers-dark.png), [alternating library and playlist rows](design/native/list-rows-dark.png), [buffered podcast coverage](design/native/podcast-timeline-dark.png), [completed episode downloads](design/native/podcast-timeline-downloaded-dark.png), and playback diagnostics in [Light](design/native/playback-diagnostics-light.png) and [Dark](design/native/playback-diagnostics-dark.png).
+
+</details>
+
+The original design explorations remain in [the mockup gallery](design/mockups/index.html). See [playback performance](docs/PLAYBACK-PERFORMANCE.md) for the background work and streaming architecture.
 
 ## Build and run
 
@@ -23,7 +68,7 @@ The wolf-and-apple icon is generated from the checked-in artwork at every build.
 
 Open `Package.swift` in Xcode for development, or use `swift build` and `swift test` from the command line. The app bundle is the recommended way to run the application with its resources and macOS integration.
 
-To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.1.0 1`. Tags such as `v0.1.0` trigger the GitHub Actions release workflow. See [release procedures](docs/RELEASING.md).
+To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.2.0 2`. Tags such as `v0.2.0` trigger the GitHub Actions release workflow. See [release procedures](docs/RELEASING.md).
 
 ## Native application
 
@@ -62,53 +107,6 @@ AcoustID lookup sends a fingerprint and duration after an explicit Identify acti
 Lyrics are retrieved only while the Lyrics panel is open, following the current queue track or the inspected track when no current entry exists. Automatic LRCLIB lookup sends the title, artist, album, and duration to that public service after local/server fallbacks. Edit / Paste saves a private library correction. Save to Files is explicit: local audio receives lyrics tags and synchronized sidecars; CUE segments receive separate track sidecars. Remote originals are never written and lyrics are never submitted publicly. See [lyrics behavior and storage](docs/LYRICS.md).
 
 See [verification and remaining manual checks](docs/VERIFICATION.md), [testing and synthetic demo data](docs/TESTING.md), [product decisions](docs/PRODUCT.md), and the [direct cloud-storage feasibility study](docs/CLOUD-STORAGE.md).
-
-## Native interface previews
-
-Offscreen renders of the implemented SwiftUI views, using the synthetic demo collection:
-
-![Native Home in light mode](design/native/home-light.png)
-
-![Native CUE album in dark mode](design/native/cue-album-dark.png)
-
-![Synchronized lyrics in dark mode](design/native/lyrics-dark.png)
-
-The metadata editor keeps its target and draft while the next track plays:
-
-![Pinned metadata editor in dark mode](design/native/metadata-dark.png)
-
-The separate album editor is also rendered in [Light](design/native/album-metadata-light.png) and [Dark](design/native/album-metadata-dark.png), with compact [Light](design/native/album-metadata-narrow-light.png) and [Dark](design/native/album-metadata-narrow-dark.png) layouts at the minimum central-panel width.
-
-Additional native renders show the [menu bar mini player](design/native/menu-bar-mini-player-dark.png), [single-row panel footers](design/native/panel-footers-dark.png), [real alternating rows](design/native/list-rows-dark.png), [buffered podcast coverage](design/native/podcast-timeline-dark.png), and a [completed episode download](design/native/podcast-timeline-downloaded-dark.png). See [playback performance](docs/PLAYBACK-PERFORMANCE.md) for the background work and streaming architecture.
-
-The playback diagnostics panel is previewed in [Light](design/native/playback-diagnostics-light.png) and [Dark](design/native/playback-diagnostics-dark.png).
-
-## Explore the mockups
-
-Open the standalone preview on macOS:
-
-```sh
-open design/mockups/index.html
-```
-
-Use the switcher below the window to compare **Collection** and **Albums**. Both designs support System, Light, and Dark appearances through the monitor/sun/moon button.
-
-- Browse source-specific Home, Artists, Albums, Years, Folders, and Tags views.
-- Double-click a library track to append it; double-click a playlist entry to play it.
-- Cycle the repeat button through **None → Playlist → Track → None**.
-- Inspect CUE tracks, metadata editing, artwork selection, and settings.
-
-The editable source is [macarok-ui.fragment.html](design/mockups/macarok-ui.fragment.html); [index.html](design/mockups/index.html) is the standalone preview.
-
-## Design previews
-
-### Collection · Light
-
-![Collection design in light mode](design/mockups/collection-light.png)
-
-### Albums · Dark
-
-![Albums design in dark mode](design/mockups/albums-dark.png)
 
 ## Architecture
 

@@ -42,6 +42,13 @@ struct SettingsView: View {
         .sheet(isPresented: Binding(get: { model.addSourcePresenter == .settings }, set: { if !$0 && model.addSourcePresenter == .settings { model.addSourcePresenter = nil } })) { AddSourceSheet(model: model) }
     }
 
+    private var applicationVersion: String {
+        guard Bundle.main.bundleURL.pathExtension == "app",
+              let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+              !version.isEmpty else { return "Development" }
+        return version
+    }
+
     private var general: some View {
         Form {
             Section("Appearance") {
@@ -65,7 +72,7 @@ struct SettingsView: View {
                 Toggle("Show Macarok in the menu bar", isOn: $model.settings.showMenuBar)
             }
             Section("About") {
-                LabeledContent("Macarok", value: "0.1.0 · Private Beta")
+                LabeledContent("Macarok", value: applicationVersion)
                 LabeledContent("Audio engine", value: "libVLC 4")
                 Link("Project on GitHub", destination: URL(string: "https://github.com/armateurlabs/macarok")!)
             }
