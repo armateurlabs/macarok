@@ -6,6 +6,9 @@ The completed-check records below describe their respective revisions. See [curr
 
 ## Completed checks
 
+- The first v0.2.0 hosted run stopped before packaging on one hardware-dependent timing assertion: a history patch took 3.137 seconds against a fixed 2-second limit. Its other checks reported no failures; five cases were skipped (optional live AcoustID and four loopback fixture checks). No v0.2.0 release was published, and its pushed tag remains unchanged.
+- The v0.2.1 catalog regression checks reuse of nonempty prepared folder, album, artist, and folder-content buffers instead of a wall-clock budget. A deliberately forced full rebuild failed all four checks; restoring the actual patch path passed all **7 focused tests**. Logs: `.build/release-0.2.1-rebuild-red.log` and `.build/release-0.2.1-catalog-final.log`. The release workflow can reuse pinned dependency caches across manifest-only changes on the same runner/toolchain.
+
 - The 0.2.0 release preparation regenerated the native README previews in both appearances and passed **35 focused rendering/controller checks**, with zero failures. Log: `.build/release-0.2.0-previews.log`. The README uses the selected wolf-and-apple icon and implemented views; the older mockup gallery remains linked separately. All 34 local README links resolve.
 - The local versioned **0.2.0 / build 2** Release app and DMG passed packaging, SHA-256, disk-image verification, and mounted deep strict signature/version/license checks. Both the bundle and executable retain macOS **14.0** as their minimum. Log: `.build/release-0.2.0-package.log`. Settings About now uses the actual bundle version instead of a fixed beta label.
 

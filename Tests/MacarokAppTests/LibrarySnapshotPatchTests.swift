@@ -156,7 +156,20 @@ final class LibrarySnapshotPatchTests: XCTestCase {
         XCTAssertEqual(patched.tracks.count, 50_000)
         XCTAssertEqual(patched.folderNodes, snapshot.folderNodes)
         XCTAssertEqual(patched.mostPlayedTracks, [updated])
-        XCTAssertLessThan(elapsed, .seconds(2), "A one-track history patch must not sort and rebuild a 50,000-track catalog.")
+        // A history-only patch must reuse prepared topology and unaffected groups. Checking
+        // nonempty copy-on-write buffers catches a full rebuild without a runner-speed budget.
+        assertSharesStorage(patched.folderNodes, snapshot.folderNodes, "A history patch must reuse the prepared folder tree.")
+        let unaffectedAlbumID = StableID.make("first", "album", "album-0")
+        let originalAlbum = try XCTUnwrap(snapshot.albumsByID[unaffectedAlbumID])
+        let patchedAlbum = try XCTUnwrap(patched.albumsByID[unaffectedAlbumID])
+        assertSharesStorage(patchedAlbum.tracks, originalAlbum.tracks, "A history patch must not rebuild unaffected albums.")
+        let originalArtist = try XCTUnwrap(snapshot.artistsByName["artist 0"])
+        let patchedArtist = try XCTUnwrap(patched.artistsByName["artist 0"])
+        assertSharesStorage(patchedArtist.albums, originalArtist.albums, "A history patch must not regroup unaffected artists.")
+        let unaffectedFolderID = "source:" + StableID.make("first")
+        let originalFolderTracks = try XCTUnwrap(snapshot.tracksByFolder[unaffectedFolderID])
+        let patchedFolderTracks = try XCTUnwrap(patched.tracksByFolder[unaffectedFolderID])
+        assertSharesStorage(patchedFolderTracks, originalFolderTracks, "A history patch must not rebuild unaffected folder contents.")
         print("Patched one track in a 50,000-track catalog in \(elapsed).")
     }
 
@@ -172,6 +185,17 @@ final class LibrarySnapshotPatchTests: XCTestCase {
         await gate.open()
         do { _ = try await task.value; XCTFail("A cancelled patch must not publish a snapshot.") }
         catch is CancellationError { }
+    }
+
+    private func assertSharesStorage<Element>(_ actual: [Element], _ expected: [Element], _ message: String,
+                                              file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertFalse(expected.isEmpty, "Storage identity requires a nonempty prepared array.", file: file, line: line)
+        XCTAssertEqual(actual.count, expected.count, message, file: file, line: line)
+        expected.withUnsafeBufferPointer { expectedBuffer in
+            actual.withUnsafeBufferPointer { actualBuffer in
+                XCTAssertEqual(actualBuffer.baseAddress, expectedBuffer.baseAddress, message, file: file, line: line)
+            }
+        }
     }
 
     private var sources: [SourceRecord] {
