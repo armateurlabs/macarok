@@ -98,7 +98,7 @@ extension AppModel {
                 let missing = result.missing
                 if !values.isEmpty {
                     self.add(values)
-                    if let first = values.first { self.inspect(first) }
+                    if let first = values.first { self.inspect(first, userInitiated: false) }
                     if missing > 0 {
                         self.status = "Added \(values.count) tracks; \(missing) playlist entries are unavailable or need their original source."
                     }
@@ -124,7 +124,7 @@ extension AppModel {
                 let known = try await self.performLibraryWork { store in
                     Self.matchingTracks(for: entry, in: try store.allTracks())
                 }
-                if !known.isEmpty { self.add(known); self.inspect(known[0]); return }
+                if !known.isEmpty { self.add(known); self.inspect(known[0], userInitiated: false); return }
 
                 let source = try await self.explicitLocalSource(url: url, preferredName: url.deletingPathExtension().lastPathComponent)
                 self.status = "Reading “\(url.lastPathComponent)”…"
@@ -142,7 +142,7 @@ extension AppModel {
                     return
                 }
                 self.add(result.tracks)
-                self.inspect(result.tracks[0])
+                self.inspect(result.tracks[0], userInitiated: false)
             } catch {
                 self.fail("Could not import the audio file", error.localizedDescription)
             }

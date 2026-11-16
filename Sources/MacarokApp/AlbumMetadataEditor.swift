@@ -90,7 +90,7 @@ struct AlbumMetadataEditor: View {
                             Text(session.track.album).font(.headline).lineLimit(2)
                             Text(session.isLoading ? "Loading album tracks…" : "\(session.tracks.count) tracks · \(model.sourceName(for: session.track.sourceID))")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Button("Change Artwork…", systemImage: "photo") { model.artworkTrack = session.track }
+                            Button("Change Artwork…", systemImage: "photo") { model.beginArtworkEditing(session.track) }
                                 .disabled(session.isSaving)
                             Text("Artwork is saved separately.").font(.caption2).foregroundStyle(.secondary)
                         }

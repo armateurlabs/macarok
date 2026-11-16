@@ -43,12 +43,12 @@ struct MacarokCommands: Commands {
             Button(model.isStoppingRefresh ? "Stopping Refresh…" : model.isRefreshing ? "Stop Refresh" : model.isAllSources ? "Refresh All Sources" : "Refresh Source", action: model.toggleRefresh)
                 .keyboardShortcut("r").disabled(model.sources.isEmpty || model.isStoppingRefresh)
             Divider()
-            Button("Home") { model.libraryView = .home }.keyboardShortcut("1")
-            Button("Artists") { model.libraryView = .artists }.keyboardShortcut("2")
-            Button("Albums") { model.libraryView = .albums }.keyboardShortcut("3")
-            Button("Years") { model.libraryView = .years }.keyboardShortcut("4")
-            Button("Folders") { model.libraryView = .folders }.keyboardShortcut("5")
-            Button("Tags") { model.libraryView = .tags }.keyboardShortcut("6")
+            Button("Home") { model.selectLibraryView(.home) }.keyboardShortcut("1")
+            Button("Artists") { model.selectLibraryView(.artists) }.keyboardShortcut("2")
+            Button("Albums") { model.selectLibraryView(.albums) }.keyboardShortcut("3")
+            Button("Years") { model.selectLibraryView(.years) }.keyboardShortcut("4")
+            Button("Folders") { model.selectLibraryView(.folders) }.keyboardShortcut("5")
+            Button("Tags") { model.selectLibraryView(.tags) }.keyboardShortcut("6")
             Divider()
             Menu("Saved Playlists") {
                 if model.playlists.isEmpty { Text("No saved playlists") }
@@ -59,7 +59,7 @@ struct MacarokCommands: Commands {
             Button("Add to Active Playlist") { if let track = model.selectedTrack { model.add([track]) } }.keyboardShortcut(model.menuShortcut("addToPlaylist")).disabled(model.selectedTrack == nil)
             Button("Edit Song Metadata…") { model.beginMetadataEditing(model.selectedTrack) }.keyboardShortcut("i").disabled(model.selectedTrack == nil || model.isRadioTrack(model.selectedTrack))
             Button("Edit Album Metadata…") { model.beginAlbumMetadataEditing(model.selectedTrack) }.disabled(model.selectedTrack == nil || model.isRadioTrack(model.selectedTrack))
-            Button("Choose Artwork…") { model.artworkTrack = model.selectedTrack }.keyboardShortcut("i", modifiers: [.command, .shift]).disabled(model.selectedTrack == nil)
+            Button("Choose Artwork…") { model.beginArtworkEditing(model.selectedTrack) }.keyboardShortcut("i", modifiers: [.command, .shift]).disabled(model.selectedTrack == nil)
         }
         CommandGroup(replacing: .help) {
             Button("Playback Diagnostics…") { model.playbackDiagnostics.showWindow(appearance: model.settings.appearance.colorScheme) }

@@ -55,6 +55,12 @@ struct SettingsView: View {
                     ForEach(TrackDoubleClickAction.allCases) { Text($0.title).tag($0) }
                 }
             }
+            Section("Center Panel") {
+                LabeledContent("Show Playing automatically") {
+                    PlayingAutoSwitchModePicker(selection: $model.settings.playingAutoSwitchMode)
+                        .fixedSize()
+                }
+            }
             Section("Menu Bar") {
                 Toggle("Show Macarok in the menu bar", isOn: $model.settings.showMenuBar)
             }
@@ -211,6 +217,39 @@ struct SettingsView: View {
                     }
                 }
             }.formStyle(.grouped).id(trustVersion)
+        }
+    }
+}
+
+private struct PlayingAutoSwitchModePicker: NSViewRepresentable {
+    @Binding var selection: PlayingAutoSwitchMode
+
+    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let picker = NSPopUpButton(frame: .zero, pullsDown: false)
+        picker.addItems(withTitles: PlayingAutoSwitchMode.allCases.map(\.title))
+        picker.selectItem(withTitle: selection.title)
+        picker.target = context.coordinator
+        picker.action = #selector(Coordinator.select(_:))
+        picker.setAccessibilityLabel("Show Playing automatically")
+        picker.setAccessibilityIdentifier("playingAutoSwitchModePicker")
+        return picker
+    }
+
+    func updateNSView(_ picker: NSPopUpButton, context: Context) {
+        context.coordinator.selection = $selection
+        picker.selectItem(withTitle: selection.title)
+    }
+
+    final class Coordinator: NSObject {
+        var selection: Binding<PlayingAutoSwitchMode>
+        init(selection: Binding<PlayingAutoSwitchMode>) { self.selection = selection }
+
+        @objc func select(_ sender: NSPopUpButton) {
+            guard let title = sender.selectedItem?.title,
+                  let mode = PlayingAutoSwitchMode.allCases.first(where: { $0.title == title }) else { return }
+            selection.wrappedValue = mode
         }
     }
 }

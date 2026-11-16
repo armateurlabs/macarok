@@ -238,7 +238,7 @@ struct AlbumTile: View {
             .contextMenu {
                 LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }; AlbumMetadataAction(model: model, album: album)
                 Button("Shuffle Album") { model.shuffle(album.tracks) }
-                Button("Choose Artwork…") { model.artworkTrack = album.tracks.first }
+                Button("Choose Artwork…") { model.beginArtworkEditing(album.tracks.first) }
             }
     }
 }
@@ -270,7 +270,7 @@ struct TrackContextView: View {
                     Text((track.isCUETrack ? "CUE + " : "") + track.format.uppercased()).font(.system(size: 9, weight: .medium)).padding(.horizontal, 5).padding(.vertical, 2).overlay(RoundedRectangle(cornerRadius: 3).stroke(.quaternary))
                 }
             }
-            Picker("Track details", selection: $model.contextTab) { Text("Overview").tag("Overview"); Text("Tags").tag("Tags") }
+            Picker("Track details", selection: Binding(get: { model.contextTab }, set: model.selectContextTab)) { Text("Overview").tag("Overview"); Text("Tags").tag("Tags") }
                 .pickerStyle(.segmented).labelsHidden().frame(width: 185).frame(maxWidth: .infinity)
             PodcastEpisodeActions(model: model, track: track)
             if model.contextTab == "Overview" { overview }
@@ -315,7 +315,7 @@ struct TrackContextView: View {
                 if let path = track.remotePath { tag("Server path", path) }
                 if track.metadataLocked { tag("Metadata", "Personal corrections preserved") }
             }.font(.system(size: 12)).textSelection(.enabled)
-            HStack { Button { model.beginMetadataEditing(track) } label: { Label("Edit Song Metadata…", systemImage: "square.and.pencil") }; Button { model.artworkTrack = track } label: { Label("Artwork…", systemImage: "photo") } }.controlSize(.small)
+            HStack { Button { model.beginMetadataEditing(track) } label: { Label("Edit Song Metadata…", systemImage: "square.and.pencil") }; Button { model.beginArtworkEditing(track) } label: { Label("Artwork…", systemImage: "photo") } }.controlSize(.small)
         }
     }
     private func tag(_ label: String, _ value: String) -> some View { GridRow(alignment: .top) { Text(label).foregroundStyle(.secondary); Text(value).frame(maxWidth: .infinity, alignment: .leading) } }
@@ -342,7 +342,7 @@ struct AlbumContextView: View {
                     SourceBadge(model: model, sourceID: album.sourceID)
                 }
             }
-            HStack { Button { model.add(album.tracks) } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }.buttonStyle(.borderedProminent); Button { model.shuffle(album.tracks) } label: { Label("Shuffle", systemImage: "shuffle") }; Spacer(); Button { model.artworkTrack = album.tracks.first } label: { Image(systemName: "photo") }.help("Choose album artwork") }.controlSize(.small)
+            HStack { Button { model.add(album.tracks) } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }.buttonStyle(.borderedProminent); Button { model.shuffle(album.tracks) } label: { Label("Shuffle", systemImage: "shuffle") }; Spacer(); Button { model.beginArtworkEditing(album.tracks.first) } label: { Image(systemName: "photo") }.help("Choose album artwork") }.controlSize(.small)
             Divider()
             LazyVStack(spacing: 0) { ForEach(album.tracks) { track in TrackLine(track: track, model: model).padding(.horizontal, 5).padding(.vertical, 5); Divider().opacity(0.45) } }
             if album.tracks.contains(where: \.isCUETrack) { Label("CUE tracks reference their original audio file. Each track has its own playback boundaries.", systemImage: "waveform.path").font(.system(size: 11)).foregroundStyle(.secondary).padding(10).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary, in: RoundedRectangle(cornerRadius: 6)) }

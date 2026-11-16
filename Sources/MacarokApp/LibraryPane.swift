@@ -23,7 +23,7 @@ struct LibraryPane: View {
                 TextField(model.isAllSources ? "Search all sources" : "Search this library", text: $model.search).textFieldStyle(.roundedBorder).focused($searchFocused)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
                     ForEach(LibraryView.allCases) { view in
-                        Button { model.libraryView = view } label: {
+                        Button { model.selectLibraryView(view) } label: {
                             Text(view.title)
                                 .font(.system(size: 11))
                                 .frame(maxWidth: .infinity)

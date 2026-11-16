@@ -237,7 +237,7 @@ struct TrackLine: View {
                 Divider()
                 Button("Edit Song Metadata…") { model.beginMetadataEditing(track) }
                 Button("Edit Album Metadata…") { model.beginAlbumMetadataEditing(track) }
-                Button("Choose Artwork…") { model.artworkTrack = track }
+                Button("Choose Artwork…") { model.beginArtworkEditing(track) }
                 TrackFileActions(model: model, track: track)
             }
     }

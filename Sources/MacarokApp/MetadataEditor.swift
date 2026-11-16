@@ -193,7 +193,7 @@ struct MetadataEditor: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(track.album).font(.headline).lineLimit(2)
                 Text(track.albumArtist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Button("Change Artwork…", systemImage: "photo") { model.artworkTrack = track }
+                Button("Change Artwork…", systemImage: "photo") { model.beginArtworkEditing(track) }
                     .disabled(isSaving)
                 Text("Artwork is saved separately.").font(.caption2).foregroundStyle(.secondary)
             }

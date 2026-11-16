@@ -2,6 +2,46 @@ import Foundation
 import MacarokCore
 
 extension AppModel {
+    func recordUserCenterNavigation() { playingAutoSwitchPolicy.recordUserNavigation() }
+
+    func selectCenterPage(_ page: CenterPage) {
+        recordUserCenterNavigation()
+        centerPage = page
+    }
+
+    func selectHomeFilter(_ filter: HomeFilter) {
+        recordUserCenterNavigation()
+        homeFilter = filter
+    }
+
+    func selectContextMode(_ mode: ContextMode) {
+        recordUserCenterNavigation()
+        contextMode = mode
+    }
+
+    func selectContextTab(_ tab: String) {
+        recordUserCenterNavigation()
+        contextTab = tab
+    }
+
+    func selectLibraryView(_ view: LibraryView) {
+        if view == .home { recordUserCenterNavigation() }
+        libraryView = view
+    }
+
+    func beginArtworkEditing(_ track: TrackRecord?) {
+        guard let track else { return }
+        recordUserCenterNavigation()
+        artworkTrack = track
+    }
+
+    func showPlayingForPlaybackStart(origin: PlaybackStartOrigin) {
+        if playingAutoSwitchPolicy.acceptStart(mode: settings.playingAutoSwitchMode,
+                                               origin: origin, editing: isEditingContext) {
+            centerPage = .playing
+        }
+    }
+
     var centerPage: CenterPage {
         get { contextPage == .home ? .home : .playing }
         set {
@@ -52,7 +92,7 @@ extension AppModel {
             // Ordinary view changes preserve manual inspection. Leaving a visible editor releases
             // its lock immediately, while its original draft remains available on return.
             guard previousMode != contextMode, let previousEditorTrack, centerPage == .playing else { return }
-            if currentTrack == nil, !isEditingContext { inspect(previousEditorTrack) }
+            if currentTrack == nil, !isEditingContext { inspect(previousEditorTrack, userInitiated: false) }
             else { followPlaybackContext() }
         }
     }
@@ -77,6 +117,7 @@ extension AppModel {
     }
 
     func beginMetadataEditing(_ track: TrackRecord? = nil) {
+        recordUserCenterNavigation()
         if metadataEditingSession == nil {
             guard let target = track ?? playingContextTrack, !isRadioTrack(target) else { return }
             metadataEditingSession = MetadataEditingSession(track: target)
@@ -104,6 +145,7 @@ extension AppModel {
     }
 
     func beginAlbumMetadataEditing(_ track: TrackRecord? = nil) {
+        recordUserCenterNavigation()
         if albumMetadataEditingSession == nil {
             guard let target = track ?? playingContextTrack, !isRadioTrack(target) else { return }
             albumMetadataEditingSession = AlbumMetadataEditingSession(track: target)

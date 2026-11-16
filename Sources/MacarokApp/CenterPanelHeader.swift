@@ -9,7 +9,7 @@ struct CenterPanelHeader: View {
         VStack(spacing: 0) {
             PanelHeader {
                 CenterSegmentedPicker(selection: Binding(get: { model.centerPage == .home ? 0 : 1 }, set: {
-                    model.centerPage = $0 == 0 ? .home : .playing
+                    model.selectCenterPage($0 == 0 ? .home : .playing)
                 }), labels: ["Home", "Playing"], label: "Center panel", identifier: "centerPagePicker", maximumWidth: 208)
                 .frame(width: 208).frame(maxWidth: .infinity)
             }.accessibilityIdentifier("contextPanelHeader")
@@ -19,14 +19,14 @@ struct CenterPanelHeader: View {
                     if model.centerPage == .home {
                         CenterSegmentedPicker(selection: Binding(get: { HomeFilter.allCases.firstIndex(of: model.homeFilter) ?? 0 }, set: {
                             guard HomeFilter.allCases.indices.contains($0) else { return }
-                            model.homeFilter = HomeFilter.allCases[$0]
+                            model.selectHomeFilter(HomeFilter.allCases[$0])
                         }), labels: HomeFilter.allCases.map(\.title), label: "Home filter", identifier: "homeFilterPicker",
                                               maximumWidth: 522, fontSize: 11, proportional: true)
                             .frame(maxWidth: 522)
                     } else {
                         CenterSegmentedPicker(selection: Binding(get: { ContextMode.allCases.firstIndex(of: model.contextMode) ?? 0 }, set: {
                             guard ContextMode.allCases.indices.contains($0) else { return }
-                            model.contextMode = ContextMode.allCases[$0]
+                            model.selectContextMode(ContextMode.allCases[$0])
                         }), labels: ContextMode.allCases.map(\.title), label: "Playing view", identifier: "playingViewPicker", maximumWidth: 522,
                                               fontSize: 10.5, proportional: true,
                                               compactLabels: ContextMode.allCases.map { mode in

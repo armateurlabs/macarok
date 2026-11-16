@@ -67,11 +67,24 @@ enum TrackDoubleClickAction: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum PlayingAutoSwitchMode: String, Codable, CaseIterable, Identifiable {
+    case manualTrackStart, oncePerLaunch, playbackSessionStart
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .manualTrackStart: "Every manually started track"
+        case .oncePerLaunch: "First playback after app launch"
+        case .playbackSessionStart: "First playback after Stop or playlist end"
+        }
+    }
+}
+
 struct AppPreferences: Codable {
     var appearance: Appearance = .system
     var showMenuBar = false
     var repeatMode: RepeatMode = .none
     var trackDoubleClickAction: TrackDoubleClickAction = .append
+    var playingAutoSwitchMode: PlayingAutoSwitchMode = .manualTrackStart
     var doubleClickPlays: Bool {
         get { trackDoubleClickAction == .playNow }
         set { trackDoubleClickAction = newValue ? .playNow : .append }
@@ -85,7 +98,7 @@ struct AppPreferences: Codable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case appearance, showMenuBar, repeatMode, trackDoubleClickAction, doubleClickPlays, customBuffer, bufferSeconds, volume, localShortcuts
+        case appearance, showMenuBar, repeatMode, trackDoubleClickAction, doubleClickPlays, playingAutoSwitchMode, customBuffer, bufferSeconds, volume, localShortcuts
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -94,6 +107,8 @@ struct AppPreferences: Codable {
         repeatMode = try values.decodeIfPresent(RepeatMode.self, forKey: .repeatMode) ?? .none
         trackDoubleClickAction = try values.decodeIfPresent(TrackDoubleClickAction.self, forKey: .trackDoubleClickAction)
             ?? ((try values.decodeIfPresent(Bool.self, forKey: .doubleClickPlays) ?? false) ? .playNow : .append)
+        playingAutoSwitchMode = (try? values.decodeIfPresent(String.self, forKey: .playingAutoSwitchMode))
+            .flatMap(PlayingAutoSwitchMode.init(rawValue:)) ?? .manualTrackStart
         customBuffer = try values.decodeIfPresent(Bool.self, forKey: .customBuffer) ?? false
         bufferSeconds = try values.decodeIfPresent(Double.self, forKey: .bufferSeconds) ?? 20
         volume = try values.decodeIfPresent(Double.self, forKey: .volume) ?? 0.75
@@ -105,6 +120,7 @@ struct AppPreferences: Codable {
         try values.encode(showMenuBar, forKey: .showMenuBar)
         try values.encode(repeatMode, forKey: .repeatMode)
         try values.encode(trackDoubleClickAction, forKey: .trackDoubleClickAction)
+        try values.encode(playingAutoSwitchMode, forKey: .playingAutoSwitchMode)
         try values.encode(customBuffer, forKey: .customBuffer)
         try values.encode(bufferSeconds, forKey: .bufferSeconds)
         try values.encode(volume, forKey: .volume)

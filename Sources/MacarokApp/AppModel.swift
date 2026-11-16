@@ -56,6 +56,8 @@ final class AppModel {
     let playbackDiagnostics = PlaybackDiagnosticsController()
     @ObservationIgnored private var playbackSuspended = false
     @ObservationIgnored private var accountedHandoffUptime: TimeInterval?
+    @ObservationIgnored var playingAutoSwitchPolicy = PlayingAutoSwitchPolicy()
+    @ObservationIgnored private var playbackResumptionPending = false
     var settings = AppPreferences.load() {
         didSet {
             if registerSystemControls { settings.save() }
@@ -605,20 +607,22 @@ final class AppModel {
         }
     }
 
-    func inspect(_ track: TrackRecord) {
+    func inspect(_ track: TrackRecord, userInitiated: Bool = true) {
+        if userInitiated { recordUserCenterNavigation() }
         selectedTrackID = track.id; selectedAlbumID = track.albumID; selectedAlbumSourceID = track.sourceID; selectedArtist = track.albumArtist
         contextPage = .track
     }
 
-    func inspect(_ album: AlbumRecord) { selectedAlbumID = album.id; selectedAlbumSourceID = album.sourceID; selectedTrackID = album.tracks.first?.id; selectedArtist = album.artist; contextPage = .album }
+    func inspect(_ album: AlbumRecord) { recordUserCenterNavigation(); selectedAlbumID = album.id; selectedAlbumSourceID = album.sourceID; selectedTrackID = album.tracks.first?.id; selectedArtist = album.artist; contextPage = .album }
     func inspectAlbum(containing track: TrackRecord) {
+        recordUserCenterNavigation()
         if !scopeIncludes(sourceID: track.sourceID) { libraryScope = .source(track.sourceID) }
         selectedAlbumID = track.albumID; selectedAlbumSourceID = track.sourceID; selectedTrackID = track.id
         selectedArtist = track.albumArtist; contextPage = .album
     }
-    func inspectFolder(_ nodeID: String) { selectedFolder = nodeID; contextPage = .folder }
+    func inspectFolder(_ nodeID: String) { recordUserCenterNavigation(); selectedFolder = nodeID; contextPage = .folder }
     var folderTitle: String { selectedFolder.flatMap { catalog.folderTitles[$0] } ?? scopeTitle }
-    func inspectArtist(_ name: String) { selectedArtist = name; contextPage = .artist }
+    func inspectArtist(_ name: String) { recordUserCenterNavigation(); selectedArtist = name; contextPage = .artist }
     func showCurrentTrack() {
         guard let track = currentTrack else { return }
         if !scopeIncludes(sourceID: track.sourceID) { sourceID = track.sourceID }
@@ -742,6 +746,8 @@ final class AppModel {
     }
 
     func stopPlayback(clearCurrent: Bool) {
+        playingAutoSwitchPolicy.endPlaybackSession()
+        playbackResumptionPending = false
         let unadopted = player.handoffTiming.flatMap { $0.requestedUptime == accountedHandoffUptime ? nil : $0 }
         player.stop() // Stop discards a native handoff without adopting or restarting it.
         scrobbling?.end(discardUnsampledTime: unadopted != nil, atMonotonic: unadopted?.requestedUptime, at: unadopted?.requestedAt)
@@ -753,12 +759,16 @@ final class AppModel {
         if clearCurrent { currentQueueID = nil; radioBroadcastTitle = nil; radioDisconnected = false }
     }
 
-    func playQueueItem(_ id: UUID) {
+    func playQueueItem(_ id: UUID, origin: PlaybackStartOrigin = .manual) {
         guard let index = queueIndices[id], queue.indices.contains(index) else { return }
         let item = queue[index]
         if let prepared = nextPreparation, prepared.id == id, prepared.resource != nil,
            sourcesByID[item.track.sourceID] == prepared.source,
-           player.playUpcoming(token: id) { return }
+           player.playUpcoming(token: id) {
+            playbackResumptionPending = false
+            showPlayingForPlaybackStart(origin: origin)
+            return
+        }
         cancelUpcomingPlayback()
         scrobbling?.end(); radioBroadcastTitle = nil; radioDisconnected = false
         let resume = id == currentQueueID ? restorePosition : 0
@@ -768,6 +778,8 @@ final class AppModel {
         playbackGeneration = UUID(); let generation = playbackGeneration
         playbackIntentQueueID = id; resetArrowSeek()
         player.stop(); currentQueueID = id; heardSeconds = 0; playRecorded = false
+        playbackResumptionPending = false
+        showPlayingForPlaybackStart(origin: origin)
         playbackTask = Task { [weak self] in
             guard let self else { return }
             defer { if self.playbackGeneration == generation { self.playbackTask = nil } }
@@ -884,6 +896,7 @@ final class AppModel {
         }
         let timing = player.handoffTiming
         accountedHandoffUptime = timing?.requestedUptime
+        playbackResumptionPending = false
         nextPreparation = nil
         scrobbling?.end(discardUnsampledTime: true, atMonotonic: timing?.requestedUptime, at: timing?.requestedAt)
         activeStream = resource.stream; activePlaybackResource = resource
@@ -922,17 +935,24 @@ final class AppModel {
             pausePlayback(); return
         }
         if currentIsRadio {
-            if let id = currentQueueID { playQueueItem(id) }
+            if let id = currentQueueID {
+                playQueueItem(id, origin: playbackResumptionPending || player.state == .paused ? .resumption : .manual)
+            }
             return
         }
         if player.state == .stopped || player.state == .failed {
-            if let id = currentQueueID ?? queue.first?.id { playQueueItem(id) }
+            if let id = currentQueueID ?? queue.first?.id {
+                playQueueItem(id, origin: playbackResumptionPending ? .resumption : .manual)
+            }
             else if let track = selectedTrack { add([track], play: true) }
         } else { resumePlayback(); updateNowPlaying(); saveQueue() }
     }
 
     func pausePlayback() {
         player.synchronizeUpcomingPlayback()
+        if playbackTask != nil || playbackIntentQueueID != nil || [.playing, .opening, .buffering, .paused].contains(player.state) {
+            playbackResumptionPending = true
+        }
         playbackIntentQueueID = nil; resetArrowSeek()
         if currentIsRadio {
             playbackGeneration = UUID(); playbackTask?.cancel(); playbackTask = nil
@@ -950,16 +970,19 @@ final class AppModel {
 
     func resumePlayback() {
         if currentIsRadio || player.state == .stopped || player.state == .failed {
-            if let id = currentQueueID ?? queue.first?.id { playQueueItem(id) }
-        } else { player.play() }
+            if let id = currentQueueID ?? queue.first?.id {
+                playQueueItem(id, origin: playbackResumptionPending || player.state == .paused ? .resumption : .manual)
+            }
+        } else { playbackResumptionPending = false; player.play() }
     }
 
     func advance(manual: Bool = true) {
         player.synchronizeUpcomingPlayback()
-        guard let index = currentIndex else { if let first = queue.first { playQueueItem(first.id) }; return }
-        if !manual && settings.repeatMode == .track { playQueueItem(queue[index].id) }
-        else if index + 1 < queue.count { playQueueItem(queue[index + 1].id) }
-        else if settings.repeatMode == .playlist, let first = queue.first { playQueueItem(first.id) }
+        let origin: PlaybackStartOrigin = manual ? .manual : .automatic
+        guard let index = currentIndex else { if let first = queue.first { playQueueItem(first.id, origin: origin) }; return }
+        if !manual && settings.repeatMode == .track { playQueueItem(queue[index].id, origin: origin) }
+        else if index + 1 < queue.count { playQueueItem(queue[index + 1].id, origin: origin) }
+        else if settings.repeatMode == .playlist, let first = queue.first { playQueueItem(first.id, origin: origin) }
         else { stopPlayback(clearCurrent: false); status = "Playback finished."; saveQueue(); updateNowPlaying() }
     }
 
