@@ -86,6 +86,9 @@ final class PlaybackTimelineBufferTests: XCTestCase {
         let slider = try XCTUnwrap(findSlider(in: hosting))
         XCTAssertEqual(slider.accessibilityIdentifier(), "playbackTimeline")
         XCTAssertEqual(slider.doubleValue, 25, accuracy: 0.01)
+        XCTAssertEqual(slider.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]),
+                       scheme == .dark ? .darkAqua : .aqua,
+                       "The native timeline must honor the app's selected appearance.")
         let bitmap = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
         hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
         if let path = ProcessInfo.processInfo.environment["MACAROK_SNAPSHOT_DIRECTORY"], let png = bitmap.representation(using: .png, properties: [:]) {
@@ -113,6 +116,40 @@ final class PlaybackTimelineBufferTests: XCTestCase {
             XCTAssertLessThan(abs(gray.greenComponent - gray.blueComponent), 0.06)
             XCTAssertGreaterThan(white.brightnessComponent - gray.brightnessComponent, 0.06, "Buffered and unavailable audio must remain distinguishable in Light and Dark.")
         }
+        let knob = slider.convert(cell.knobRect(flipped: slider.isFlipped), to: hosting)
+        let centerX = Int(knob.midX * scale)
+        let diameter = min(cell.knobThickness, min(knob.width, knob.height))
+        let radius = diameter * scale / 2
+        let outsideX = min(bitmap.pixelsWide - 1, Int((knob.maxX + 4) * scale))
+        let outsideY = min(bitmap.pixelsHigh - 1, row + Int(radius + 3 * scale))
+        let background = try XCTUnwrap(bitmap.colorAt(x: outsideX, y: outsideY)?.usingColorSpace(.sRGB))
+        func isOutlinedPixel(x: Int, y: Int) -> Bool {
+            guard let edge = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                  abs(edge.redComponent - edge.greenComponent) < 0.08,
+                  abs(edge.greenComponent - edge.blueComponent) < 0.08,
+                  edge.brightnessComponent < 0.94 else { return false }
+            let contrast = scheme == .dark ? edge.brightnessComponent - background.brightnessComponent
+                : background.brightnessComponent - edge.brightnessComponent
+            return contrast > 0.18
+        }
+        // Measure the rendered contour through the thumb center. White buffered audio and the
+        // blue played bar are excluded, so a misplaced tracking-rectangle outline cannot pass
+        // just because it paints a contrasting edge somewhere below the actual circular knob.
+        let reach = Int(radius + 3 * scale), axis = max(0, Int(scale / 4))
+        let outlinedX = (max(0, centerX - reach)...min(bitmap.pixelsWide - 1, centerX + reach)).filter { x in
+            (max(0, row - axis)...min(bitmap.pixelsHigh - 1, row + axis)).contains { isOutlinedPixel(x: x, y: $0) }
+        }
+        let outlinedY = (max(0, row - reach)...min(bitmap.pixelsHigh - 1, row + reach)).filter { y in
+            (max(0, centerX - axis)...min(bitmap.pixelsWide - 1, centerX + axis)).contains { isOutlinedPixel(x: $0, y: y) }
+        }
+        let left = try XCTUnwrap(outlinedX.first), right = try XCTUnwrap(outlinedX.last)
+        let top = try XCTUnwrap(outlinedY.first), bottom = try XCTUnwrap(outlinedY.last)
+        let paintedWidth = CGFloat(right - left + 1) / scale
+        let paintedHeight = CGFloat(bottom - top + 1) / scale
+        XCTAssertEqual(paintedWidth, paintedHeight, accuracy: 1.5, "The knob outline must be circular, including disabled timelines.")
+        XCTAssertEqual(paintedHeight, diameter, accuracy: 1.5)
+        XCTAssertEqual(CGFloat(top + bottom) / 2, CGFloat(row), accuracy: scale,
+                       "The circular outline must be centered on the painted bar, without tracking/shadow padding below it.")
         XCTAssertFalse(window.isVisible)
 
     }

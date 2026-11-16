@@ -73,6 +73,7 @@ struct PlaybackTimelineView: View {
 
 /// Native tracking, keyboard navigation, and accessibility with a custom layered progress bar.
 struct BufferedTimelineSlider: NSViewRepresentable {
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var value: Double
     let duration: Double
     let ranges: [Range<Double>]
@@ -97,6 +98,8 @@ struct BufferedTimelineSlider: NSViewRepresentable {
     }
     func updateNSView(_ slider: TimelineSlider, context: Context) {
         context.coordinator.parent = self
+        let appearance: NSAppearance.Name = colorScheme == .dark ? .darkAqua : .aqua
+        if slider.appearance?.name != appearance { slider.appearance = NSAppearance(named: appearance) }
         slider.minValue = 0; slider.maxValue = max(1, duration)
         slider.doubleValue = min(slider.maxValue, max(0, value))
         slider.isEnabled = enabled
@@ -130,6 +133,21 @@ final class TimelineSlider: NSSlider {
 private final class TimelineSliderCell: NSSliderCell {
     var bufferedRanges: [Range<Double>] = []
     var showsBuffer = false
+    override func drawKnob(_ knobRect: NSRect) {
+        super.drawKnob(knobRect)
+        let dark = controlView?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        NSColor(calibratedWhite: dark ? 0.78 : 0.25, alpha: isEnabled ? 0.9 : 0.45).setStroke()
+        // The native tracking rectangle includes shadow/vertical padding. Its center and aspect
+        // ratio need not match the visible circular thumb, which stays centered on the bar.
+        let diameter = min(knobThickness, min(knobRect.width, knobRect.height))
+        let bar = barRect(flipped: controlView?.isFlipped ?? false)
+        let outline = NSRect(x: knobRect.midX - diameter / 2, y: bar.midY - diameter / 2,
+                             width: diameter, height: diameter).insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(ovalIn: outline)
+        path.lineWidth = 1
+        path.stroke()
+    }
+
     override func drawBar(inside rect: NSRect, flipped: Bool) {
         let bar = NSRect(x: rect.minX, y: rect.midY - 1.5, width: rect.width, height: 3)
         NSColor.tertiaryLabelColor.withAlphaComponent(0.35).setFill()

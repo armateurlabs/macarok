@@ -93,6 +93,236 @@ final class CenterNavigationTests: XCTestCase {
         XCTAssertFalse(model.metadataEditingSession === session)
     }
 
+    func testLeavingSongEditorResumesPlaybackFollowingAndReturningRestoresItsUnsavedDraft() throws {
+        let fixture = makeFixture()
+        let model = fixture.model
+        model.currentQueueID = fixture.entries[0].id
+        model.centerPage = .playing
+        model.contextTab = "Tags"
+        model.beginMetadataEditing()
+        let session = try XCTUnwrap(model.metadataEditingSession)
+        session.draft.title = "Unfinished song correction"
+
+        model.currentQueueID = fixture.entries[1].id
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[0].track.id)
+        model.contextMode = .context
+
+        XCTAssertFalse(model.isEditingContext, "An inactive stored draft must not keep Playing locked.")
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id, "Leaving the editor catches up immediately, without waiting for another queue transition.")
+        XCTAssertEqual(model.selectedAlbumID, fixture.entries[1].track.albumID)
+        XCTAssertEqual(model.selectedAlbumSourceID, fixture.entries[1].track.sourceID)
+        XCTAssertEqual(model.selectedArtist, fixture.entries[1].track.albumArtist)
+        XCTAssertEqual(model.contextTab, "Tags")
+        for mode in [ContextMode.lyrics, .wikipedia, .context] {
+            model.contextMode = mode
+            model.currentQueueID = fixture.entries[2].id
+            XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[2].track.id)
+            XCTAssertEqual(model.contextMode, mode)
+            model.currentQueueID = fixture.entries[1].id
+            XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+        }
+        XCTAssertTrue(model.metadataEditingSession === session)
+        XCTAssertEqual(session.draft.title, "Unfinished song correction")
+        model.contextMode = .editMetadata
+        XCTAssertTrue(model.isEditingContext)
+        XCTAssertTrue(model.metadataEditingSession === session)
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[0].track.id)
+        XCTAssertEqual(session.draft.title, "Unfinished song correction")
+    }
+
+    func testInactiveAlbumAndSongDraftsPinOnlyTheirOwnVisibleEditors() throws {
+        let fixture = makeFixture()
+        let model = fixture.model
+        model.currentQueueID = fixture.entries[0].id
+        model.centerPage = .playing
+        model.beginMetadataEditing()
+        let songSession = try XCTUnwrap(model.metadataEditingSession)
+        songSession.draft.artist = "Song correction"
+        model.contextMode = .context
+        model.currentQueueID = fixture.entries[1].id
+        model.beginAlbumMetadataEditing()
+        let albumSession = try XCTUnwrap(model.albumMetadataEditingSession)
+        albumSession.draft.album = "Album correction"
+        XCTAssertEqual(albumSession.track.id, fixture.entries[1].track.id, "Opening the album editor must use the live target, not an inactive song draft.")
+        model.currentQueueID = fixture.entries[2].id
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+        model.contextMode = .wikipedia
+        XCTAssertFalse(model.isEditingContext)
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[2].track.id)
+        XCTAssertEqual(WikipediaLookup.query(for: model.playingContextTrack, topic: .album), "Album A Artist A album")
+        model.contextMode = .editMetadata
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[0].track.id)
+        model.contextMode = .editAlbumMetadata
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+        XCTAssertTrue(model.metadataEditingSession === songSession)
+        XCTAssertTrue(model.albumMetadataEditingSession === albumSession)
+        XCTAssertEqual(songSession.draft.artist, "Song correction")
+        XCTAssertEqual(albumSession.draft.album, "Album correction")
+    }
+
+    func testFreshOtherEditorInheritsTheVisibleEditorsTargetRatherThanPlaybackOrSelection() throws {
+        for startsWithAlbum in [false, true] {
+            let fixture = makeFixture()
+            let model = fixture.model
+            model.currentQueueID = fixture.entries[0].id
+            model.centerPage = .playing
+            if startsWithAlbum { model.beginAlbumMetadataEditing(fixture.entries[1].track) }
+            else { model.beginMetadataEditing(fixture.entries[1].track) }
+            model.currentQueueID = fixture.entries[2].id
+            XCTAssertEqual(model.selectedTrackID, fixture.entries[0].track.id)
+            XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+
+            model.contextMode = startsWithAlbum ? .editMetadata : .editAlbumMetadata
+
+            XCTAssertEqual(model.metadataEditingSession?.track.id, fixture.entries[1].track.id)
+            XCTAssertEqual(model.albumMetadataEditingSession?.track.id, fixture.entries[1].track.id)
+            XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+            XCTAssertEqual(model.currentTrack?.id, fixture.entries[2].track.id)
+        }
+    }
+
+    func testSwitchingOrdinaryModesPreservesManualInspectionWithInactiveDrafts() throws {
+        let fixture = makeFixture()
+        let model = fixture.model
+        model.currentQueueID = fixture.entries[0].id
+        model.centerPage = .playing
+        model.beginMetadataEditing()
+        let session = try XCTUnwrap(model.metadataEditingSession)
+        session.draft.title = "Retained correction"
+        model.contextMode = .context
+        model.inspect(fixture.entries[1].track)
+        model.contextMode = .wikipedia
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+        XCTAssertEqual(model.lyricsContextTrack?.id, fixture.entries[0].track.id, "Ordinary lyrics retain the queue-following policy.")
+        model.contextMode = .lyrics
+        model.contextMode = .context
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+        XCTAssertTrue(model.metadataEditingSession === session)
+        XCTAssertEqual(session.draft.title, "Retained correction")
+        model.currentQueueID = fixture.entries[2].id
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[2].track.id)
+    }
+
+    func testLeavingEditorWithoutAQueueRetainsItsInspectedTargetAndDraft() throws {
+        let fixture = makeFixture()
+        let model = fixture.model
+        model.contextPage = .track
+        model.beginMetadataEditing(fixture.entries[1].track)
+        let session = try XCTUnwrap(model.metadataEditingSession)
+        session.draft.title = "Offline correction"
+        model.contextMode = .context
+        XCTAssertNil(model.currentTrack)
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+        XCTAssertTrue(model.metadataEditingSession === session)
+        XCTAssertEqual(session.draft.title, "Offline correction")
+    }
+
+    func testInactiveSongSaveCompletionPreservesLaterManualTrackAndAlbumInspection() throws {
+        for inspectsAlbum in [false, true] {
+            let fixture = makeFixture()
+            let model = fixture.model
+            model.libraryScope = .all
+            model.currentQueueID = fixture.entries[0].id
+            model.centerPage = .playing
+            model.beginMetadataEditing()
+            let session = try XCTUnwrap(model.metadataEditingSession)
+            session.draft.title = "Saving the original recording"
+            model.contextMode = .context
+            let inspected = fixture.entries[1].track
+            if inspectsAlbum { model.inspectAlbum(containing: inspected) }
+            else { model.inspect(inspected) }
+
+            // A Save task can complete after the user leaves the editor and inspects something else.
+            model.finishMetadataEditing(sessionID: session.id)
+
+            XCTAssertNil(model.metadataEditingSession)
+            XCTAssertEqual(model.contextMode, .context)
+            XCTAssertTrue(model.contextPage == (inspectsAlbum ? .album : .track))
+            XCTAssertEqual(model.playingContextTrack?.id, inspected.id)
+            XCTAssertEqual(model.selectedAlbumID, inspected.albumID)
+            XCTAssertEqual(model.selectedAlbumSourceID, inspected.sourceID)
+            XCTAssertEqual(model.selectedArtist, inspected.albumArtist)
+            XCTAssertEqual(model.currentTrack?.id, fixture.entries[0].track.id)
+        }
+    }
+
+    func testInactiveAlbumSaveCompletionPreservesLaterManualTrackAndAlbumInspection() throws {
+        for inspectsAlbum in [false, true] {
+            let fixture = makeFixture()
+            let model = fixture.model
+            model.libraryScope = .all
+            model.currentQueueID = fixture.entries[0].id
+            model.centerPage = .playing
+            model.beginAlbumMetadataEditing()
+            let session = try XCTUnwrap(model.albumMetadataEditingSession)
+            session.draft.album = "Saving the original album"
+            model.contextMode = .context
+            let inspected = fixture.entries[1].track
+            if inspectsAlbum { model.inspectAlbum(containing: inspected) }
+            else { model.inspect(inspected) }
+            model.contextMode = .wikipedia
+
+            model.finishAlbumMetadataEditing(sessionID: session.id)
+
+            XCTAssertNil(model.albumMetadataEditingSession)
+            XCTAssertEqual(model.contextMode, .wikipedia)
+            XCTAssertTrue(model.contextPage == (inspectsAlbum ? .album : .track))
+            XCTAssertEqual(model.playingContextTrack?.id, inspected.id)
+            XCTAssertEqual(model.selectedAlbumID, inspected.albumID)
+            XCTAssertEqual(model.selectedAlbumSourceID, inspected.sourceID)
+            XCTAssertEqual(model.selectedArtist, inspected.albumArtist)
+            XCTAssertEqual(model.currentTrack?.id, fixture.entries[0].track.id)
+        }
+    }
+
+    func testFinishingTheActiveAlbumEditorReleasesItsPinAndCatchesUp() throws {
+        let fixture = makeFixture()
+        let model = fixture.model
+        model.currentQueueID = fixture.entries[0].id
+        model.centerPage = .playing
+        model.contextTab = "Tags"
+        model.beginAlbumMetadataEditing(fixture.entries[1].track)
+        let session = try XCTUnwrap(model.albumMetadataEditingSession)
+        model.currentQueueID = fixture.entries[2].id
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+
+        model.finishAlbumMetadataEditing(sessionID: session.id)
+
+        XCTAssertNil(model.albumMetadataEditingSession)
+        XCTAssertFalse(model.isEditingContext)
+        XCTAssertEqual(model.contextMode, .context)
+        XCTAssertEqual(model.contextTab, "Tags")
+        XCTAssertTrue(model.contextPage == .track)
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[2].track.id)
+        XCTAssertEqual(model.selectedAlbumSourceID, fixture.entries[2].track.sourceID)
+    }
+
+    func testArtworkSheetPinsItsOwnTargetEvenWithAnInactiveMetadataDraft() throws {
+        let fixture = makeFixture()
+        let model = fixture.model
+        model.currentQueueID = fixture.entries[0].id
+        model.centerPage = .playing
+        model.beginMetadataEditing()
+        let session = try XCTUnwrap(model.metadataEditingSession)
+        session.draft.album = "Keep this draft"
+        model.contextMode = .context
+        model.currentQueueID = fixture.entries[1].id
+        model.artworkTrack = fixture.entries[1].track
+        model.currentQueueID = fixture.entries[2].id
+        XCTAssertTrue(model.isEditingContext)
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+        model.contextMode = .wikipedia
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[1].track.id)
+        XCTAssertEqual(model.lyricsContextTrack?.id, fixture.entries[1].track.id)
+        model.artworkTrack = nil
+        XCTAssertFalse(model.isEditingContext)
+        XCTAssertEqual(model.playingContextTrack?.id, fixture.entries[2].track.id)
+        XCTAssertEqual(model.lyricsContextTrack?.id, fixture.entries[2].track.id)
+        XCTAssertEqual(model.contextMode, .wikipedia)
+        XCTAssertTrue(model.metadataEditingSession === session)
+        XCTAssertEqual(session.draft.album, "Keep this draft")
+    }
+
     func testMetadataAndArtworkSheetsKeepContextPinnedUntilBothClose() {
         let fixture = makeFixture()
         let model = fixture.model

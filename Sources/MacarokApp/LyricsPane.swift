@@ -12,7 +12,7 @@ struct LyricsPane: View {
         _controller = State(initialValue: LyricsController(model: model))
     }
 
-    private var targetTrack: TrackRecord? { model.currentTrack ?? model.selectedTrack }
+    private var targetTrack: TrackRecord? { model.lyricsContextTrack }
 
     var body: some View {
         VStack(spacing: 0) {

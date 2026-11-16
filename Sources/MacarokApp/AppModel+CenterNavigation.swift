@@ -13,14 +13,48 @@ extension AppModel {
         }
     }
 
-    var isEditingContext: Bool { metadataEditingSession != nil || albumMetadataEditingSession != nil || editingTrack != nil || artworkTrack != nil }
+    /// A retained draft is available when returning to its editor; only a visible editor or
+    /// presented sheet pins the central target while playback advances.
+    var isEditingContext: Bool {
+        editingTrack != nil || artworkTrack != nil ||
+            (contextMode == .editMetadata && metadataEditingSession != nil) ||
+            (contextMode == .editAlbumMetadata && albumMetadataEditingSession != nil)
+    }
 
     var playingContextTrack: TrackRecord? {
         if contextMode == .editAlbumMetadata, let session = albumMetadataEditingSession { return session.track }
-        if let track = metadataEditingSession?.track ?? editingTrack ?? artworkTrack { return track }
-        if let session = albumMetadataEditingSession { return session.track }
+        if contextMode == .editMetadata, let session = metadataEditingSession { return session.track }
+        if let track = editingTrack ?? artworkTrack { return track }
         if let currentTrack, selectedTrackID == nil || selectedTrackID == currentTrack.id { return currentTrack }
         return selectedTrack
+    }
+
+    /// Lyrics normally follow the queue; a presented editor pins the same target as the rest of Playing.
+    var lyricsContextTrack: TrackRecord? { isEditingContext ? playingContextTrack : currentTrack ?? selectedTrack }
+
+    func contextModeDidChange(from previousMode: ContextMode) {
+        let previousEditorTrack: TrackRecord?
+        switch previousMode {
+        case .editMetadata: previousEditorTrack = metadataEditingSession?.track
+        case .editAlbumMetadata: previousEditorTrack = albumMetadataEditingSession?.track
+        default: previousEditorTrack = nil
+        }
+        switch contextMode {
+        case .editMetadata:
+            if metadataEditingSession == nil, let track = previousEditorTrack, !isRadioTrack(track) {
+                metadataEditingSession = MetadataEditingSession(track: track)
+            } else { ensureMetadataEditingSession() }
+        case .editAlbumMetadata:
+            if albumMetadataEditingSession == nil, let track = previousEditorTrack, !isRadioTrack(track) {
+                albumMetadataEditingSession = AlbumMetadataEditingSession(track: track)
+            } else { ensureAlbumMetadataEditingSession() }
+        default:
+            // Ordinary view changes preserve manual inspection. Leaving a visible editor releases
+            // its lock immediately, while its original draft remains available on return.
+            guard previousMode != contextMode, let previousEditorTrack, centerPage == .playing else { return }
+            if currentTrack == nil, !isEditingContext { inspect(previousEditorTrack) }
+            else { followPlaybackContext() }
+        }
     }
 
     /// A queue transition updates the inspected record without changing the user's selected view or library scope.
@@ -58,9 +92,10 @@ extension AppModel {
 
     func finishMetadataEditing(sessionID: UUID) {
         guard metadataEditingSession?.id == sessionID else { return }
-        if contextMode == .editMetadata { contextMode = .context }
+        let wasEditing = contextMode == .editMetadata
+        if wasEditing { contextMode = .context }
         metadataEditingSession = nil
-        followPlaybackContext()
+        if wasEditing { followPlaybackContext() }
     }
 
     func ensureAlbumMetadataEditingSession() {
@@ -78,8 +113,9 @@ extension AppModel {
 
     func finishAlbumMetadataEditing(sessionID: UUID) {
         guard albumMetadataEditingSession?.id == sessionID else { return }
-        if contextMode == .editAlbumMetadata { contextMode = .context }
+        let wasEditing = contextMode == .editAlbumMetadata
+        if wasEditing { contextMode = .context }
         albumMetadataEditingSession = nil
-        followPlaybackContext()
+        if wasEditing { followPlaybackContext() }
     }
 }

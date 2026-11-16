@@ -2,6 +2,8 @@
 
 Subscribe to a publisher RSS/Atom feed or find a show through Podcast Index or Apple Podcasts. See [source setup](SOURCES.md#podcasts) for discovery and subscription.
 
+Each show's library episodes appear newest first by publication date, including cached feeds and search results. Undated episodes follow dated episodes. Existing playlist entries keep their saved order.
+
 ## Read the timeline
 
 The podcast timeline has three layers:

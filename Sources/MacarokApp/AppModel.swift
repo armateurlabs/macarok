@@ -103,19 +103,16 @@ final class AppModel {
     }
     var libraryView: LibraryView = .home { didSet { if libraryView == .home { contextPage = .home } } }
     var contextMode: ContextMode = .context {
-        didSet {
-            if contextMode == .editMetadata { ensureMetadataEditingSession() }
-            if contextMode == .editAlbumMetadata { ensureAlbumMetadataEditingSession() }
-        }
+        didSet { contextModeDidChange(from: oldValue) }
     }
     var contextPage: ContextPage = .home
     var homeFilter: HomeFilter = .all
     var contextTab = "Overview"
     var metadataEditingSession: MetadataEditingSession? {
-        didSet { if oldValue != nil && metadataEditingSession == nil { followPlaybackContext() } }
+        didSet { if oldValue != nil && metadataEditingSession == nil && contextMode == .editMetadata { followPlaybackContext() } }
     }
     var albumMetadataEditingSession: AlbumMetadataEditingSession? {
-        didSet { if oldValue != nil && albumMetadataEditingSession == nil { followPlaybackContext() } }
+        didSet { if oldValue != nil && albumMetadataEditingSession == nil && contextMode == .editAlbumMetadata { followPlaybackContext() } }
     }
     var search = "" { didSet { searchLibrary(reset: true) } }
     private var catalog = LibrarySnapshot.empty

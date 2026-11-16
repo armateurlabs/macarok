@@ -97,18 +97,25 @@ final class WikipediaPaneTests: XCTestCase {
         XCTAssertEqual(replacementCalls, 2)
     }
 
-    func testWikipediaUsesThePinnedEditorTargetThenFollowsPlaybackWhenEditingEnds() throws {
+    func testWikipediaFollowsPlaybackWithAnInactiveDraftAndRespectsAPresentedArtworkPin() throws {
         let model = AppModel(preferences: AppPreferences(), registerSystemControls: false)
         let first = QueueItem(track: TrackRecord(id: "wiki-first", sourceID: "source", title: "First", artist: "First Artist", album: "First Album"))
         let next = QueueItem(track: TrackRecord(id: "wiki-next", sourceID: "source", title: "Next", artist: "Next Artist", album: "Next Album"))
         model.queue = [first, next]; model.currentQueueID = first.id; model.centerPage = .playing
         model.beginMetadataEditing(first.track)
         let session = try XCTUnwrap(model.metadataEditingSession)
+        session.draft.title = "Unfinished correction"
         model.contextMode = .wikipedia
         model.currentQueueID = next.id
+        XCTAssertEqual(WikipediaLookup.query(for: model.playingContextTrack, topic: .artist), "Next Artist")
+        XCTAssertTrue(model.metadataEditingSession === session)
+        XCTAssertEqual(session.draft.title, "Unfinished correction")
+        model.artworkTrack = first.track
         XCTAssertEqual(WikipediaLookup.query(for: model.playingContextTrack, topic: .artist), "First Artist")
         model.finishMetadataEditing(sessionID: session.id)
         XCTAssertEqual(model.contextMode, .wikipedia)
+        XCTAssertEqual(WikipediaLookup.query(for: model.playingContextTrack, topic: .artist), "First Artist")
+        model.artworkTrack = nil
         XCTAssertEqual(WikipediaLookup.query(for: model.playingContextTrack, topic: .artist), "Next Artist")
     }
 }

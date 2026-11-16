@@ -22,7 +22,7 @@ The three panels share a 42-point bar header and a full-width bottom divider. Li
 
 The central panel has two centered segmented menu rows with stable heights. Home / Playing selects the main view. Home offers All, Recently added, Recently played, and Most played, filtering the displayed sections. Playing offers Context, Lyrics, Wikipedia, Edit song metadata, and Edit album metadata; Context retains its Overview / Tags detail choice. Track changes update the central playback context without changing these menu selections or the library's browsing scope. Home keeps its selected filter while playback advances.
 
-An active metadata or artwork editor pins its original track and draft while playback continues. Switching to Home does not discard an unfinished metadata session. Returning to Playing restores that editor; finishing it catches up with the current track. Saving a metadata draft changes only its edited fields, retaining newer artwork, listening history, and unrelated concurrent tag corrections.
+An active metadata or artwork editor pins its original track and draft while playback continues. Switching to Home does not discard an unfinished metadata session. Returning to Playing restores that editor. Choosing Context, Lyrics, or Wikipedia releases an inactive metadata draft's pin and resumes following playback; returning to its editor restores the original draft. Switching directly between fresh song and album editors keeps the visible editing target, while an existing draft keeps its own target. Artwork and modal metadata sheets stay pinned until closed. Saving a metadata draft changes only its edited fields, retaining newer artwork, listening history, and unrelated concurrent tag corrections. A save completing after the editor is left preserves any later manual inspection.
 
 Library and playlist lists use the same native alternating row style. The unused viewport below the last actual row stays plain, including after adding/removing entries, resizing, scrolling, or expanding folders. A transparent view covers only that unused canvas; native row selection, keyboard navigation, drag operations, context menus, and scrollbars remain owned by AppKit.
 
@@ -51,6 +51,8 @@ The source catalog includes a Bandcamp preset for `https://bandcamp.com/api/subs
 Podcast discovery offers Podcast Index by default and an Apple Podcasts selector. Search returns publisher feeds; Use Feed fills the subscription sheet, and Subscribe retrieves the chosen RSS/Atom feed. Search has cancellation, caching, rate limits, and explicit errors. Direct feed entry remains available.
 
 Podcast streaming retains a bounded RAM buffer; durable episode files require Download Episode. Completed downloads stay until explicitly removed, and Reveal in Finder locates the source-specific file. The timeline layers gray unavailable data, white buffered/downloaded ranges, and blue playback progress. Byte-to-time coverage is approximate for variable bitrate, and unknown lengths have no percentage. See [podcast storage and cleanup](PODCASTS.md).
+
+Podcast episodes within a feed use publication dates in descending order throughout the library and search, with undated episodes last. The timeline's native knob has a light-gray outline in Dark and a dark-gray outline in Light; the native volume control retains its existing visible border.
 
 Wikipedia context uses artist or album metadata for an English Wikipedia page or search result, with editable search and Open in Browser. Loading is limited to the visible pane, follows the central pinned/current target, and rejects obsolete navigation. The unmodified page retains its own attribution and licenses. See [Wikipedia context](WIKIPEDIA.md).
 
@@ -130,7 +132,7 @@ Writing tags to remote originals requires a source that provides file-write acce
 
 ### Album metadata editing
 
-**Edit song metadata** and **Edit album metadata** have separate drafts. The album editor exposes only Album, Album artist, Artist (all tracks), Year, and Genre. It resolves every available track in the original source and album, even when a search displays only a subset. An identically named album in another source is a separate target. The source/album target and unfinished draft remain pinned when playback advances or the central view changes.
+**Edit song metadata** and **Edit album metadata** have separate drafts. The album editor exposes only Album, Album artist, Artist (all tracks), Year, and Genre. It resolves every available track in the original source and album, even when a search displays only a subset. An identically named album in another source is a separate target. The visible editor keeps its source/album target when playback advances or Home is shown. Other Playing views follow playback while preserving that draft for a later return.
 
 Only shared fields changed in the draft are applied. Unchanged per-track artists, titles, track/disc numbers, CUE timestamps, artwork, listening history, ratings, and unrelated concurrent corrections are preserved. The protection checkbox controls whether local corrections survive future scans; remote corrections remain library overlays.
 

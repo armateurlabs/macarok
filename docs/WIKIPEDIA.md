@@ -2,7 +2,7 @@
 
 Open **Playing → Wikipedia** to read about the inspected or playing track's artist or album. The centered **Artist / Album** selector chooses the metadata used for the search. Its selection stays unchanged as tracks advance. The search field is editable, and **Search** submits a manual query.
 
-The pane follows the same track as the central context. Active metadata or artwork editing keeps its original target pinned; finishing the editor resumes following playback. The same artist or album query reuses the loaded page while the pane remains visible.
+The pane follows the same track as the central context. A presented artwork or metadata sheet keeps its original target pinned until closed. Metadata drafts retained after leaving their Playing editor do not pin Wikipedia; returning to that editor restores its original draft. The same artist or album query reuses the loaded page while the pane remains visible.
 
 Search uses English Wikipedia's [MediaWiki Go behavior](https://www.mediawiki.org/wiki/Help:Go_button): an exact article when available, otherwise search results. Search requests ask for the compact [Minerva skin](https://www.mediawiki.org/wiki/Beta_Features/Minerva); the final page layout and appearance remain controlled by Wikipedia. **Open in Browser** opens the current page with the website's full controls. Page links to other sites open the browser when clicked.
 

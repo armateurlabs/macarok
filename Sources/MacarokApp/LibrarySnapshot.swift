@@ -101,6 +101,8 @@ struct LibrarySnapshot: Sendable {
             else { tracks.append(track) }
         }
         tracks = try tracks.sorted { try Task.checkCancellation(); return TrackRecord.libraryOrder($0, $1) }
+        let podcastIDs = Set(visibleSources.filter { $0.kind == .podcasts }.map(\.id))
+        try orderPodcastEpisodes(&tracks, sourceIDs: podcastIDs)
 
         var tracksByID = Dictionary(uniqueKeysWithValues: stations.map { ($0.id, $0) })
         var albumTracks: [LibraryAlbumKey: [TrackRecord]] = [:]
@@ -358,6 +360,30 @@ struct LibrarySnapshot: Sendable {
 
     private static func trackGroups(_ groups: [String: [TrackRecord]]) -> [LibraryTrackGroup] {
         groups.keys.sorted(by: stringOrder).map { LibraryTrackGroup(id: $0, title: $0, tracks: groups[$0] ?? []) }
+    }
+
+    private static func orderPodcastEpisodes(_ tracks: inout [TrackRecord], sourceIDs: Set<String>) throws {
+        guard !sourceIDs.isEmpty else { return }
+        var positions: [LibraryAlbumKey: [Int]] = [:]
+        for (index, track) in tracks.enumerated() where sourceIDs.contains(track.sourceID) {
+            if index.isMultiple(of: 256) { try Task.checkCancellation() }
+            positions[LibraryAlbumKey(sourceID: track.sourceID, albumID: track.albumID), default: []].append(index)
+        }
+        for indices in positions.values where indices.count > 1 {
+            try Task.checkCancellation()
+            let episodes = try indices.map { tracks[$0] }.sorted { left, right in
+                try Task.checkCancellation()
+                // Podcast import stores publication time in addedAt; year is absent when the
+                // publisher supplied no date, whose addedAt instead records the import time.
+                if (left.year == nil) != (right.year == nil) { return left.year != nil }
+                if left.year != nil, left.addedAt != right.addedAt { return left.addedAt > right.addedAt }
+                let title = left.title.localizedStandardCompare(right.title)
+                return title == .orderedSame ? left.id < right.id : title == .orderedAscending
+            }
+            // Replace only this feed's slots. Music ordering and interleaved source copies keep
+            // their exact positions, while every view derives the same newest-first feed order.
+            for (index, episode) in zip(indices, episodes) { tracks[index] = episode }
+        }
     }
     private static func albumOrder(_ lhs: AlbumRecord, _ rhs: AlbumRecord) -> Bool {
         let title = lhs.title.localizedStandardCompare(rhs.title)
