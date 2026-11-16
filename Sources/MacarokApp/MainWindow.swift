@@ -148,10 +148,7 @@ struct QueuePane: View {
                 .background(NativeListBackground(revision: model.queueRevision))
                 .onDeleteCommand { if let id = model.selectedQueueID, let index = model.queue.firstIndex(where: { $0.id == id }) { model.removeQueue(IndexSet(integer: index)) } }
             }
-            Divider()
-            HStack { Spacer(minLength: 0); PlaylistControls(model: model, location: "bottom") }
-                .padding(.horizontal, 13).frame(height: 42).background(.bar)
-                .accessibilityIdentifier("playlistPanelFooter")
+            PlaylistPanelFooter(model: model)
         }
     }
 }

@@ -23,6 +23,11 @@ struct RadioLibraryView: View {
                     Text("Stations").tag(false)
                     Text("Favorites").tag(true)
                 }.pickerStyle(.segmented).labelsHidden()
+                HStack {
+                    Button { showsDiscovery = true } label: { Label("Browse…", systemImage: "magnifyingglass") }
+                    Spacer(minLength: 3)
+                    Button { showsAddURL = true } label: { Label("Add URL…", systemImage: "plus") }
+                }.font(.system(size: 11)).buttonStyle(.borderless).disabled(model.radio == nil)
             }.padding(12)
             if stations.isEmpty {
                 ContentUnavailableView(favoritesOnly ? "No Favorite Stations" : "No Stations", systemImage: "antenna.radiowaves.left.and.right",
@@ -44,16 +49,7 @@ struct RadioLibraryView: View {
             if let error = model.radio?.errorMessage {
                 Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 13).padding(.bottom, 8)
             }
-            Divider()
-            VStack(alignment: .leading, spacing: 9) {
-                Text("\(stations.count) stations").font(.system(size: 10)).foregroundStyle(.secondary)
-                HStack {
-                    Button { showsDiscovery = true } label: { Label("Browse…", systemImage: "magnifyingglass") }
-                    Spacer(minLength: 3)
-                    Button { showsAddURL = true } label: { Label("Add URL…", systemImage: "plus") }
-                }.font(.system(size: 11)).buttonStyle(.borderless).disabled(model.radio == nil)
-                LibraryRefreshControl(model: model)
-            }.padding(13)
+            LibraryPanelFooter(model: model, summary: .radio(stations: stations.count))
         }
         .sheet(isPresented: $showsDiscovery) { if let controller = model.radio { RadioDiscoverySheet(controller: controller, model: model) } }
         .sheet(isPresented: $showsAddURL) { if let controller = model.radio { AddRadioURLSheet(controller: controller) } }
