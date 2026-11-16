@@ -26,7 +26,7 @@ An active metadata or artwork editor pins its original track and draft while pla
 
 Library and playlist lists use the same native alternating row style. The unused viewport below the last actual row stays plain, including after adding/removing entries, resizing, scrolling, or expanding folders. A transparent view covers only that unused canvas; native row selection, keyboard navigation, drag operations, context menus, and scrollbars remain owned by AppKit.
 
-Settings → General → Menu Bar offers **Show Macarok in the menu bar**, disabled by default and remembered across launches. The system menu bar item shows the current title and artist, Play/Pause or radio Reconnect, Previous, Next, Show Macarok, and Quit Macarok. Playback controls remain available while the main window is closed. Disabling the option removes the item without changing playback or keyboard preferences.
+Settings → General → Menu Bar offers **Show Macarok in the menu bar**, disabled by default and remembered across launches. Clicking the system menu bar item opens a compact native player with album artwork, the current title and artist, Play/Pause or radio Reconnect, Previous, Next, Show Macarok, and Quit Macarok. Playback controls remain available while the main window is closed. Disabling the option removes the item without changing playback or keyboard preferences.
 
 A single click inspects an item. Double-clicking a library track, album, or artist starts its first available track when the active playlist is empty. With an existing playlist, individual tracks follow the Track double-click preference: Add to Playlist, Add After Current Track, or Play Now. Double-clicking a playlist entry plays that existing entry.
 
@@ -52,7 +52,7 @@ Podcast discovery offers Podcast Index by default and an Apple Podcasts selector
 
 Podcast streaming retains a bounded RAM buffer; durable episode files require Download Episode. Completed downloads stay until explicitly removed, and Reveal in Finder locates the source-specific file. The timeline layers gray unavailable data, white buffered/downloaded ranges, and blue playback progress. Byte-to-time coverage is approximate for variable bitrate, and unknown lengths have no percentage. See [podcast storage and cleanup](PODCASTS.md).
 
-Podcast episodes within a feed use publication dates in descending order throughout the library and search, with undated episodes last. The timeline's native knob has a light-gray outline in Dark and a dark-gray outline in Light; the native volume control retains its existing visible border.
+Podcast episodes within a feed use publication dates in descending order throughout the library and search, with undated episodes last. The timeline uses one small filled circle, light gray in Dark and dark gray in Light, centered on the played-progress endpoint. Only the seek cell smooths movement toward confirmed playback samples, for at most 200 milliseconds; controls, lyrics, history, and scrobbling retain the measured audio time. The native volume control retains its existing visible border.
 
 Wikipedia context uses artist or album metadata for an English Wikipedia page or search result, with editable search and Open in Browser. Loading is limited to the visible pane, follows the central pinned/current target, and rejects obsolete navigation. The unmodified page retains its own attribution and licenses. See [Wikipedia context](WIKIPEDIA.md).
 
@@ -67,6 +67,8 @@ Connecting a server retrieves its album list in pages of 500. Each page's albums
 SQLite retains the indexed titles, artists, albums, tags, durations, remote IDs, paths, and cover references. Startup and source switching display this cached catalog immediately; an explicit Refresh currently repeats the complete metadata traversal. OpenSubsonic audio is requested for playback through an in-memory streaming buffer. Cover images are fetched on demand and stored in the separate Artwork cache.
 
 Cancellation or a later request failure keeps both the previous cache and newly committed albums usable. Missing-track reconciliation runs only after a successful complete retrieval and updates only availability differences. An interrupted import remains marked incomplete across restarts; Refresh traverses the catalog again. Remote cover caches survive refresh while their cover IDs remain unchanged.
+
+Library and playlist footers share a fixed single-row height, an opaque native control background, and a top divider, distinct from the full-width status bar. Library totals and refresh controls share that row; compact widths keep the full counts and action available through accessible labels and tooltips.
 
 The library footer starts refresh, changes to Stop Refresh while active, shows progress, and waits in Stopping while cancellation completes. Cancelling clears already queued local rescans so the same operation does not immediately restart.
 
