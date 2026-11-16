@@ -194,6 +194,42 @@ public actor LastFMClient {
         }
     }
 
+    /// Listening-based similar tracks. An unknown track is an empty result rather than an error.
+    public func similarTracks(artist: String, title: String, limit: Int = 100) async throws -> [SimilarTrack] {
+        let value: [String: Any]
+        do {
+            value = try await request(method: "track.getSimilar", parameters: ["artist": artist, "track": title,
+                                                                                 "autocorrect": "1", "limit": String(limit)])
+        } catch LastFMError.api(code: 6, _) { return [] }
+        return Self.list((value["similartracks"] as? [String: Any])?["track"]).compactMap { item in
+            guard let name = item["name"] as? String, let artist = (item["artist"] as? [String: Any])?["name"] as? String else { return nil }
+            return SimilarTrack(artist: artist, title: name, score: Self.number(item["match"]) ?? 0)
+        }
+    }
+
+    /// Listening-based similar artists. An unknown artist is an empty result rather than an error.
+    public func similarArtists(artist: String, limit: Int = 60) async throws -> [SimilarArtist] {
+        let value: [String: Any]
+        do {
+            value = try await request(method: "artist.getSimilar", parameters: ["artist": artist, "autocorrect": "1", "limit": String(limit)])
+        } catch LastFMError.api(code: 6, _) { return [] }
+        return Self.list((value["similarartists"] as? [String: Any])?["artist"]).compactMap { item in
+            guard let name = item["name"] as? String else { return nil }
+            return SimilarArtist(name: name, score: Self.number(item["match"]) ?? 0)
+        }
+    }
+
+    /// Last.fm returns a lone object instead of a one-element array.
+    private static func list(_ value: Any?) -> [[String: Any]] {
+        if let values = value as? [[String: Any]] { return values }
+        return (value as? [String: Any]).map { [$0] } ?? []
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        if let value = value as? NSNumber { return value.doubleValue }
+        return (value as? String).flatMap(Double.init)
+    }
+
     public static func signature(parameters: [String: String], secret: String) -> String {
         let input = parameters.keys.filter { !["api_sig", "format", "callback"].contains($0) }.sorted()
             .map { $0 + parameters[$0]! }.joined() + secret

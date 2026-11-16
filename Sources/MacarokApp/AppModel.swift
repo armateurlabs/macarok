@@ -139,6 +139,7 @@ final class AppModel {
                 queueTrackIDs = queue.map(\.track.id)
                 queueRevision &+= 1
                 prepareNextPlayback()
+                similarity.queueChanged()
             }
             if !sameEntries || zip(queue, oldValue).contains(where: { $0.track.duration != $1.track.duration }) {
                 cachedQueueDuration = queue.reduce(0) { $0 + $1.track.duration }
@@ -151,7 +152,7 @@ final class AppModel {
     @ObservationIgnored private var queueTrackIDs: [String] = []
     @ObservationIgnored var queueMetadataOverrides: [String: TrackRecord] = [:]
     var currentQueueID: UUID? {
-        didSet { if oldValue != currentQueueID { followPlaybackContext(); prepareNextPlayback() } }
+        didSet { if oldValue != currentQueueID { followPlaybackContext(); prepareNextPlayback(); similarity.currentEntryChanged() } }
     }
     var selectedQueueID: UUID?
     var playlists: [PlaylistRecord] = []
@@ -189,6 +190,7 @@ final class AppModel {
     var scanWarnings: [String] = []
     var radio: RadioController?
     var scrobbling: ScrobblingController?
+    let similarity = SimilarityController()
     var podcastDownloads: PodcastDownloadsController?
     var radioBroadcastTitle: String?
     var radioDisconnected = false
@@ -283,6 +285,7 @@ final class AppModel {
             return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
         }
         if let preferences { settings = preferences }
+        similarity.model = self
     }
 
     var selectedSource: SourceRecord? { sourceID.flatMap { sourcesByID[$0] } }
@@ -728,6 +731,18 @@ final class AppModel {
         status = new.count == 1 ? "Added “\(new[0].track.title)” to the active playlist." : "Added \(new.count) tracks to the active playlist."
         registerQueueEdit(before, name: "Add to Playlist"); saveQueue()
     }
+    /// Replaces the whole playlist as one undoable edit; Undo restores it without autoplay.
+    @discardableResult
+    func replaceQueue(with values: [TrackRecord], name: String, play: Bool) -> [UUID] {
+        let new = values.filter(\.isAvailable).map { QueueItem(track: $0) }
+        guard !new.isEmpty else { fail("Tracks unavailable", "The selected files are no longer available. Rescan the source after reconnecting it."); return [] }
+        let before = queueEditState()
+        stopPlayback(clearCurrent: true)
+        queue = new; selectedQueueID = nil
+        registerQueueEdit(before, name: name); saveQueue()
+        if play { playQueueItem(new[0].id) } else { updateNowPlaying() }
+        return new.map(\.id)
+    }
     func showCurrentTrack() {
         guard let track = currentTrack else { return }
         if !scopeIncludes(sourceID: track.sourceID) { sourceID = track.sourceID }
@@ -1083,6 +1098,7 @@ final class AppModel {
 
     func advance(manual: Bool = true) {
         player.synchronizeUpcomingPlayback()
+        if similarity.handleAdvance(manual: manual) { return }
         let origin: PlaybackStartOrigin = manual ? .manual : .automatic
         guard let index = currentIndex else { if let first = queue.first { playQueueItem(first.id, origin: origin) }; return }
         if !manual && settings.repeatMode == .track { playQueueItem(queue[index].id, origin: origin) }
@@ -1126,6 +1142,7 @@ final class AppModel {
         registerQueueEdit(before, name: "Remove from Playlist"); saveQueue()
     }
     func clearQueue() {
+        similarity.end()
         let before = queueEditState()
         let active = [.playing, .opening, .buffering].contains(player.state)
             || (playbackTask != nil && playbackIntentQueueID == currentQueueID)

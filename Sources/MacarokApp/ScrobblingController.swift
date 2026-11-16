@@ -43,6 +43,8 @@ final class ScrobblingController {
     private(set) var isLoading = false
     private(set) var isWorking = false
     private(set) var isConfigured = false
+    /// Similarity lookups need only the personal API key, not a scrobbling session.
+    var similarityClient: LastFMClient? { isConfigured ? client : nil }
     private(set) var isEnabled = false
     private(set) var sharesNowPlaying = true
     private(set) var excludedSourceIDs: Set<String> = []

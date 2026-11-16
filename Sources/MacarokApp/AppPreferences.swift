@@ -96,6 +96,7 @@ struct AppPreferences: Codable {
     var librarySortOrder = LibrarySortOrder()
     var playlistAlbumGroups = true
     var playlistShowsSources = true
+    var similarMixFollow: SimilarMixFollow = .blend
     var buffer: Double? { customBuffer ? min(120, max(1, bufferSeconds)) : nil }
 
     init() {}
@@ -105,6 +106,7 @@ struct AppPreferences: Codable {
         // Renamed when album groups became the default, so unreleased builds' saved Off does not persist.
         case playlistAlbumGroups = "showPlaylistAlbumGroups"
         case playlistShowsSources = "showPlaylistSources"
+        case similarMixFollow
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -122,6 +124,7 @@ struct AppPreferences: Codable {
         librarySortOrder = (try? values.decodeIfPresent(LibrarySortOrder.self, forKey: .librarySortOrder)) ?? LibrarySortOrder()
         playlistAlbumGroups = (try? values.decodeIfPresent(Bool.self, forKey: .playlistAlbumGroups)) ?? true
         playlistShowsSources = (try? values.decodeIfPresent(Bool.self, forKey: .playlistShowsSources)) ?? true
+        similarMixFollow = (try? values.decodeIfPresent(SimilarMixFollow.self, forKey: .similarMixFollow)) ?? .blend
     }
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
@@ -137,6 +140,7 @@ struct AppPreferences: Codable {
         try values.encode(librarySortOrder, forKey: .librarySortOrder)
         try values.encode(playlistAlbumGroups, forKey: .playlistAlbumGroups)
         try values.encode(playlistShowsSources, forKey: .playlistShowsSources)
+        try values.encode(similarMixFollow, forKey: .similarMixFollow)
     }
 
     static func load() -> Self {

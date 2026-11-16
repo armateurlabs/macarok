@@ -71,7 +71,7 @@ enum LyricsMatching {
         return candidates.first != nil && candidates.first == queries.first || !Set(candidates).isDisjoint(with: queries)
     }
 
-    private static func editions(_ title: String) -> Set<String> {
+    static func editions(_ title: String) -> Set<String> {
         Set(folded(title).split(separator: " ").map(String.init).filter(distinctEditions.contains))
     }
 }

@@ -106,6 +106,8 @@ AcoustID lookup sends a fingerprint and duration after an explicit Identify acti
 
 Lyrics are retrieved only while the Lyrics panel is open, following the current queue track or the inspected track when no current entry exists. Automatic LRCLIB lookup sends the title, artist, album, and duration to that public service after local/server fallbacks. Edit / Paste saves a private library correction. Save to Files is explicit: local audio receives lyrics tags and synchronized sidecars; CUE segments receive separate track sidecars. Remote originals are never written and lyrics are never submitted publicly. See [lyrics behavior and storage](docs/LYRICS.md).
 
+Similar playlists and mixes send only seed artist names and titles to Last.fm (when configured), ListenBrainz, and MusicBrainz, and suggest only tracks from your library. See [similar playlists and mixes](docs/RECOMMENDATIONS.md).
+
 See [verification and remaining manual checks](docs/VERIFICATION.md), [testing and synthetic demo data](docs/TESTING.md), [product decisions](docs/PRODUCT.md), and the [direct cloud-storage feasibility study](docs/CLOUD-STORAGE.md).
 
 ## Architecture

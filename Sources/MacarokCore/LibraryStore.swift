@@ -131,6 +131,7 @@ public final class LibraryStore: @unchecked Sendable {
         RadioStoreStorage.registerMigration(&migrator)
         LastFMStoreStorage.registerMigration(&migrator)
         LocalScanCacheStorage.registerMigration(&migrator)
+        SimilarityCacheStorage.registerMigration(&migrator)
         try migrator.migrate(database)
     }
 

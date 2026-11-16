@@ -12,6 +12,8 @@ struct LibraryPlaybackActions: View {
         }
         Button(addTitle) { model.add(tracks()) }
         Button("Add After Current Track") { model.addAfterCurrent(tracks()) }
+        Divider()
+        SimilarityActions(model: model, tracks: tracks)
     }
 }
 

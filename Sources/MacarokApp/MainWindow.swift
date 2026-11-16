@@ -45,6 +45,7 @@ struct MainWindow: View {
         }
         .sheet(isPresented: Binding(get: { model.addSourcePresenter == .mainWindow }, set: { if !$0 && model.addSourcePresenter == .mainWindow { model.addSourcePresenter = nil } })) { AddSourceSheet(model: model) }
         .sheet(item: $model.editingTrack) { MetadataEditor(model: model, track: $0) }
+        .sheet(item: Binding(get: { model.similarity.request }, set: { model.similarity.request = $0 })) { SimilarPlaylistSheet(model: model, request: $0) }
         .sheet(item: $model.artworkTrack) { ArtworkChooser(model: model, track: $0) }
         .sheet(isPresented: Binding(get: { model.addSourcePresenter == nil && !model.radioDiscoveryOwnsCertificates && !model.certificatePrompts.isEmpty }, set: { if !$0 && model.addSourcePresenter == nil && !model.radioDiscoveryOwnsCertificates { model.answerCertificate(false) } })) {
             if let prompt = model.certificatePrompts.first { CertificateSheet(prompt: prompt, answer: model.answerCertificate) }
@@ -115,6 +116,10 @@ struct QueuePane: View {
                 Spacer(minLength: 0)
                 PlaylistControls(model: model, location: "top")
             }.accessibilityIdentifier("playlistPanelHeader")
+            if let session = model.similarity.session {
+                SimilarMixBanner(model: model, similarity: model.similarity, session: session)
+                Divider()
+            }
             if model.queue.isEmpty {
                 ContentUnavailableView { Label("Your playlist is empty", systemImage: "music.note.list") } description: { Text("Double-click or drag library items here.") }
                     .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
@@ -146,6 +151,10 @@ struct QueuePane: View {
                     .onInsert(of: [.macarokLibraryItems]) { destination, providers in
                         let index = PlaylistAlbumGrouping.queueDestination(destination, rows: rows)
                         Task { model.insertLibraryItems(await LibraryItemID.load(from: providers), at: index) }
+                    }
+                    let similarity = model.similarity
+                    if similarity.isMixing, similarity.session?.suggestionID == nil, similarity.isSearching || similarity.error != nil {
+                        SimilarMixStatusRow(similarity: similarity).selectionDisabled(true).listRowBackground(Color.clear)
                     }
                 }.listStyle(.inset(alternatesRowBackgrounds: true))
                 // Row gestures would intercept the native drag that reorders entries.
@@ -182,6 +191,7 @@ private struct QueueEntryRow: View {
             if layout == .single { ArtworkView(track: item.track, model: model).frame(width: 34, height: 34) }
             Group {
                 if item.id == model.currentQueueID { Image(systemName: player.state == .playing ? "waveform" : "pause.fill").foregroundStyle(Color.accentColor) }
+                else if isSuggestion { Image(systemName: "sparkles").foregroundStyle(Color.accentColor).help("Suggested next track") }
                 else { Text(String(format: "%02d", index + 1)).foregroundStyle(.tertiary) }
             }.font(.system(size: 10)).frame(width: 19)
             VStack(alignment: .leading, spacing: 2) {
@@ -202,11 +212,21 @@ private struct QueueEntryRow: View {
             Text(model.isRadioTrack(item.track) ? "LIVE" : item.track.formattedDuration)
                 .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
                 .fixedSize(horizontal: true, vertical: false)
-        }.font(.system(size: 12)).padding(.vertical, 4).padding(.leading, layout == .grouped ? 8 : 0).contentShape(Rectangle())
+        }.font(.system(size: 12)).padding(.vertical, 4).padding(.leading, layout == .grouped ? 8 : 0)
+            .padding(.horizontal, isSuggestion ? 6 : 0)
+            .modifier(OptionalSuggestionFrame(active: isSuggestion, highlighted: model.selectedQueueID == item.id))
+            .contentShape(Rectangle())
     }
+
+    private var isSuggestion: Bool { model.similarity.isSuggestion(item.id) }
 
     private var subtitle: String {
         let details: [String]
+        // The announced track names its artist and why it was chosen; the album would truncate the reason.
+        if isSuggestion {
+            let reason = model.similarity.session.map { "Up next, similar to \($0.suggestionReason)" } ?? ""
+            return [item.track.artist, reason].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
         switch layout {
         case .plain: details = [item.track.artist]
         case .single: details = [[item.track.artist, item.track.album].filter { !$0.isEmpty }.joined(separator: " — ")]
@@ -217,13 +237,32 @@ private struct QueueEntryRow: View {
     }
 }
 
+private struct OptionalSuggestionFrame: ViewModifier {
+    let active: Bool
+    let highlighted: Bool
+    func body(content: Content) -> some View {
+        if active { content.modifier(SuggestionFrame(highlighted: highlighted)) } else { content }
+    }
+}
+
 private struct QueueEntryMenu: View {
     @Bindable var model: AppModel
     let item: QueueItem
     var body: some View {
+        let similarity = model.similarity
+        if similarity.isSuggestion(item.id) {
+            Button { similarity.skipSuggestion() } label: { Label("Skip Suggestion", systemImage: "forward.end") }
+        }
         Button("Play Now") { model.playQueueItem(item.id) }
         Button("Show in Library") { if !model.scopeIncludes(sourceID: item.track.sourceID) { model.sourceID = item.track.sourceID }; model.inspect(item.track) }
         TrackFileActions(model: model, track: item.track)
+        Divider()
+        if let session = similarity.session {
+            Button("Restore Skipped Tracks (\(session.skippedCount))") { similarity.restoreSkipped() }.disabled(session.skippedCount == 0)
+            Button("Stop Mix") { similarity.end() }
+        } else {
+            SimilarityActions(model: model) { [item.track] }
+        }
         Divider()
         Button("Remove from Playlist", role: .destructive) { if let index = model.queue.firstIndex(where: { $0.id == item.id }) { model.removeQueue(IndexSet(integer: index)) } }
     }
@@ -278,7 +317,7 @@ struct PlaylistControls: View {
         HStack(spacing: 5) {
             Button(action: model.shuffleQueue) { Image(systemName: "shuffle").frame(width: 22, height: 23) }
                 .help("Shuffle playlist").accessibilityLabel("Shuffle playlist")
-                .accessibilityIdentifier("playlistShuffle-\(location)").disabled(model.queue.count < 2)
+                .accessibilityIdentifier("playlistShuffle-\(location)").disabled(model.queue.count < 2 || model.similarity.isMixing)
             Button(action: model.cycleRepeat) {
                 Image(systemName: model.settings.repeatMode.symbol).frame(width: 22, height: 23)
                     .background(model.settings.repeatMode == .none ? Color.clear : Color.accentColor.opacity(0.17), in: RoundedRectangle(cornerRadius: 5))
@@ -286,6 +325,7 @@ struct PlaylistControls: View {
             }
             .help("Repeat: \(model.settings.repeatMode.title) · Next: \(model.settings.repeatMode.next.title)")
             .accessibilityLabel("Repeat: \(model.settings.repeatMode.title)").accessibilityIdentifier("playlistRepeat-\(location)")
+            .disabled(model.similarity.isMixing)
             Button(action: model.clearQueue) { Image(systemName: "trash").frame(width: 22, height: 23) }
                 .help("Clear playlist").accessibilityLabel("Clear playlist")
                 .accessibilityIdentifier("playlistClear-\(location)").disabled(model.queue.isEmpty)

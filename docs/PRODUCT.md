@@ -128,6 +128,10 @@ Local and OpenSubsonic music sources can be individually excluded. Podcasts and 
 
 Now Playing is separately configurable. Qualified plays are persisted and delivered oldest first, with retry and pending/ignored/failed counts. Disconnect removes the saved session and stops submission while retaining that account's pending plays. Reconnecting the same account resumes them; another account cannot submit them. See [Last.fm setup and privacy](SCROBBLING.md).
 
+## Similar playlists and mixes
+
+Library, Playing, and playlist menus can replace the active playlist with a fixed similar playlist, unlimited by default, or a dynamic mix that announces only the next track. Skip Suggestion and Next exclude a recording for the rest of the mix; suggestions can follow the seed, the last played track, or both. Similarity comes from Last.fm (with a personal API key) and ListenBrainz similar artists, matched to tracks in every local and OpenSubsonic source. See [similar playlists and mixes](RECOMMENDATIONS.md).
+
 ## Library, metadata, and artwork
 
 Use SQLite through GRDB, with FTS5 for library search. Store source references, indexed metadata, playlists, listening history, statistics, external identifiers, and pending metadata changes. Reindexing preserves playlists and listening history.
