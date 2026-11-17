@@ -63,7 +63,7 @@ struct TransportBar: View {
     @ObservedObject var player: VLCPlaybackEngine
 
     var body: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 20) {
             HStack(spacing: 12) {
                 Button(action: model.previous) { Image(systemName: "backward.end.fill") }.help("Previous track")
                 Button(action: model.togglePlayback) { Image(systemName: [.playing, .opening, .buffering].contains(player.state) || model.playbackIntentQueueID != nil ? "pause.fill" : "play.fill").font(.system(size: 19)).frame(width: 34, height: 34) }
@@ -71,13 +71,14 @@ struct TransportBar: View {
                 Button { model.advance() } label: { Image(systemName: "forward.end.fill") }.help("Next track")
             }.buttonStyle(.borderless).disabled(model.queue.isEmpty && model.selectedTrack == nil)
             if let track = model.currentTrack {
-                ArtworkView(track: track, model: model).frame(width: 46, height: 46)
-                VStack(spacing: 5) {
-                    HStack {
-                        Button { model.showCurrentTrack() } label: { Text(track.title).fontWeight(.medium).lineLimit(1) }.buttonStyle(.plain)
-                        Spacer()
-                        TransportSubtitle(model: model, timeline: player.timeline, track: track)
-                    }.font(.system(size: 12))
+                // One boxed unit: artwork, then the track details, then the timeline on the same line.
+                HStack(spacing: 12) {
+                    TransportArtwork(model: model, track: track).frame(width: 48, height: 48)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Button { model.showCurrentTrack() } label: { Text(track.title).font(.system(size: 13, weight: .semibold)).lineLimit(1) }
+                            .buttonStyle(.plain).help("Show “\(track.title)” in the library")
+                        TransportSubtitle(model: model, timeline: player.timeline, track: track).font(.system(size: 12))
+                    }.frame(minWidth: 150, idealWidth: 300, maxWidth: 320, alignment: .leading).layoutPriority(1)
                     if model.currentIsRadio {
                         HStack(spacing: 7) {
                             Circle().fill(model.radioDisconnected || player.state == .paused ? Color.secondary : .red).frame(width: 5, height: 5)
@@ -85,12 +86,17 @@ struct TransportBar: View {
                             Text(model.radioBroadcastTitle ?? "Internet Radio").foregroundStyle(.secondary).lineLimit(1)
                             Spacer(minLength: 0)
                             if model.radioDisconnected { Button("Reconnect", action: model.reconnectRadio).buttonStyle(.link) }
-                        }.font(.system(size: 10))
+                        }.font(.system(size: 10)).frame(maxWidth: .infinity)
                     } else {
-                    PlaybackTimelineView(model: model, timeline: player.timeline, track: track,
-                                         resumePoint: model.seeksResumePoint ? model.restorePosition : nil)
+                        PlaybackTimelineView(model: model, timeline: player.timeline, track: track,
+                                             resumePoint: model.seeksResumePoint ? model.restorePosition : nil)
+                            .frame(maxWidth: .infinity)
                     }
                 }
+                .padding(.trailing, 12).frame(height: 48)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.75), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
+                .frame(maxWidth: .infinity)
             } else {
                 VStack(alignment: .leading, spacing: 4) { Text("Nothing playing").fontWeight(.medium); Text("Find something in your library and add it to the playlist.").foregroundStyle(.secondary) }.font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -100,7 +106,51 @@ struct TransportBar: View {
                 Image(systemName: "speaker.wave.1").foregroundStyle(.secondary)
                 Slider(value: $model.settings.volume, in: 0...1).frame(width: 78).controlSize(.mini).help("Volume")
             }
-        }.padding(.horizontal, 20).padding(.vertical, 13).background(.bar)
+        }.padding(.horizontal, 20).padding(.vertical, 12).background(.bar)
+    }
+}
+
+/// The playing artwork: a click enlarges it, the context menu changes it.
+struct TransportArtwork: View {
+    @Bindable var model: AppModel
+    let track: TrackRecord
+    @State private var zoomed = false
+
+    var body: some View {
+        ArtworkView(track: track, model: model, cornerRadius: 0)
+            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 6))
+            .contentShape(Rectangle())
+            .onTapGesture { zoomed.toggle() }
+            .help("Click to enlarge the artwork")
+            .accessibilityAddTraits(.isButton).accessibilityAction(named: Text("Enlarge Artwork")) { zoomed = true }
+            .popover(isPresented: $zoomed, arrowEdge: .bottom) { ZoomedArtwork(model: model, track: track) }
+            .contextMenu {
+                Button("Show Current Track", action: model.showCurrentTrack)
+                if !model.isRadioTrack(track) && !model.isPodcastTrack(track) {
+                    Button("Choose Artwork…") { model.beginArtworkEditing(track) }
+                }
+            }
+    }
+}
+
+/// The artwork at its full resolution, not the list thumbnail.
+private struct ZoomedArtwork: View {
+    @Bindable var model: AppModel
+    let track: TrackRecord
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image { Image(nsImage: image).resizable().scaledToFit() }
+            else { ArtworkView(track: track, model: model, cornerRadius: 0) }
+        }
+        .frame(width: 420, height: 420)
+        .task(id: "\(track.artworkPath ?? "")-\(model.artworkRevision)") {
+            guard let path = track.artworkPath else { return }
+            let loaded = await Task.detached(priority: .userInitiated) { NSImage(contentsOfFile: path) }.value
+            if !Task.isCancelled { image = loaded }
+        }
+        .accessibilityLabel("Artwork for \(track.album)")
     }
 }
 

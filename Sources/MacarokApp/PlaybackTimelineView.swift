@@ -143,7 +143,8 @@ struct TransportSubtitle: View {
                 .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).help(track.artist)
                 .accessibilityLabel("Chapter \(index + 1) of \(chapters.count): \(chapters[index].title)")
         } else {
-            Text(track.artist).foregroundStyle(.secondary).lineLimit(1)
+            Text(model.isRadioTrack(track) || track.album.isEmpty ? track.artist : "\(track.artist) — \(track.album)")
+                .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
         }
     }
 }
