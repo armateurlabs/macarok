@@ -76,6 +76,7 @@ final class AppModel {
             radioSourceIDs = Set(sources.filter { $0.kind == .radio }.map(\.id))
             let removedIDs = Set(oldValue.map(\.id)).subtracting(sources.map(\.id))
             podcastDownloads?.cancel(sourceIDs: removedIDs)
+            if let open = podcasts.openShowID, removedIDs.contains(open) { podcasts.openShowID = nil }
             for source in oldValue where sourcesByID[source.id] != source { invalidateSourceClient(source.id) }
             if !removedIDs.isEmpty {
                 presentationPatches.removeAll(); presentationPatchRevision &+= 1
@@ -99,7 +100,8 @@ final class AppModel {
             if !isEditingContext {
                 selectedTrackID = nil; selectedAlbumID = nil; selectedAlbumSourceID = nil; selectedArtist = nil; selectedFolder = nil
             }
-            search = ""; reloadLibrary(); watchSelectedSource(); persistLibraryScope()
+            search = ""; podcasts.openShowID = nil; reloadLibrary(); watchSelectedSource(); persistLibraryScope()
+            if libraryView == .podcasts && podcastSourcesInScope.isEmpty { libraryView = .home }
             followPlaybackContext()
         }
     }
@@ -156,7 +158,7 @@ final class AppModel {
     @ObservationIgnored private var queueTrackIDs: [String] = []
     @ObservationIgnored var queueMetadataOverrides: [String: TrackRecord] = [:]
     var currentQueueID: UUID? {
-        didSet { if oldValue != currentQueueID { followPlaybackContext(); prepareNextPlayback(); similarity.currentEntryChanged() } }
+        didSet { if oldValue != currentQueueID { followPlaybackContext(); prepareNextPlayback(); similarity.currentEntryChanged(); podcasts.loadCurrentChapters() } }
     }
     var selectedQueueID: UUID?
     var playlists: [PlaylistRecord] = []
@@ -196,6 +198,7 @@ final class AppModel {
     var archive: InternetArchiveController?
     var scrobbling: ScrobblingController?
     let similarity = SimilarityController()
+    let podcasts = PodcastController()
     var podcastDownloads: PodcastDownloadsController?
     var radioBroadcastTitle: String?
     var radioDisconnected = false
@@ -313,6 +316,9 @@ final class AppModel {
     }
     private var displayedCatalog: LibrarySnapshot { search.isEmpty ? catalog : searchCatalog }
     var displayedTracks: [TrackRecord] { displayedCatalog.tracks }
+    /// Podcast episodes in scope, filtered by the current search, newest first.
+    var podcastEpisodes: [TrackRecord] { displayedCatalog.podcastEpisodes }
+    var allPodcastEpisodes: [TrackRecord] { catalog.podcastEpisodes }
     var albums: [AlbumRecord] { catalog.albums }
     var visibleAlbums: [AlbumRecord] { displayedCatalog.presentation.albums }
     var artists: [LibraryArtistGroup] { displayedCatalog.presentation.artists }
@@ -320,11 +326,15 @@ final class AppModel {
     var genreGroups: [LibraryTrackGroup] { displayedCatalog.presentation.genreGroups }
     var formatGroups: [LibraryTrackGroup] { displayedCatalog.presentation.formatGroups }
     var folderNodes: [FolderNode] { displayedCatalog.presentation.folderNodes }
-    var librarySortIsDescending: Bool { settings.librarySortOrder.isDescending(libraryView.sortKey) }
+    var librarySortIsDescending: Bool { settings.librarySortOrder.isDescending(currentSortKey) }
+    /// Podcast lists, including a selected podcast source, sort by publication date.
+    var currentSortKey: LibrarySortKey {
+        libraryView == .podcasts || selectedSource?.kind == .podcasts ? .podcasts : libraryView.sortKey
+    }
 
     /// Reverses only the current list's presentation; the playlist and playback are untouched.
     func toggleLibrarySort() {
-        settings.librarySortOrder.toggle(libraryView.sortKey)
+        settings.librarySortOrder.toggle(currentSortKey)
         applyLibrarySortOrder()
         if !search.isEmpty { searchLibrary(reset: false) }
     }
@@ -408,6 +418,7 @@ final class AppModel {
             radio = RadioController(model: self)
             archive = InternetArchiveController(model: self)
             await archive?.start()
+            await podcasts.start(model: self)
             if let store { scrobbling = ScrobblingController(store: store) }
             await radio?.reload()
             if registerSystemControls { await scrobbling?.start() }
@@ -431,7 +442,10 @@ final class AppModel {
                 guard let self else { return }
                 self.playbackDiagnostics.record(.completed, occurrenceID: self.playbackGeneration, media: self.playbackMediaKind)
                 if self.currentIsRadio { self.radioDisconnected = true; self.playbackIntentQueueID = nil; self.activeStream?.close(); self.activeStream = nil; self.status = "Radio disconnected. Reconnect to listen live." }
-                else { self.advance(manual: false) }
+                else {
+                    if let track = self.currentTrack { self.podcasts.markCompleted(track) }
+                    self.advance(manual: false)
+                }
             }
             player.onHandoff = { [weak self] id in self?.adoptUpcomingPlayback(id) }
             player.onError = { [weak self] error in
@@ -459,13 +473,19 @@ final class AppModel {
             NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
                 .sink { [weak self] _ in self?.playbackSuspended = false }.store(in: &eventSubscriptions)
             NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
-                .sink { [weak self] _ in Task { @MainActor in await self?.podcastDownloads?.start() } }.store(in: &eventSubscriptions)
+                .sink { [weak self] _ in
+                    Task { @MainActor in
+                        await self?.podcastDownloads?.start()
+                        if self?.registerSystemControls == true { await self?.podcasts.refreshDue() }
+                    }
+                }.store(in: &eventSubscriptions)
             if registerSystemControls {
                 configureControls()
                 menuBarController = MenuBarController(model: self)
                 tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.playbackTick() }
             }
             await waitForLibraryLoad()
+            if registerSystemControls { podcasts.startAutomaticRefresh() }
             if let source = selectedSource, source.kind == .openSubsonic, initial.incomplete.contains(source.id) {
                 status = "Catalog import is incomplete. Refresh this source to load the remaining albums."
             } else {
@@ -895,6 +915,12 @@ final class AppModel {
         if clearCurrent { currentQueueID = nil; radioBroadcastTitle = nil; radioDisconnected = false }
     }
 
+    /// A stopped entry keeps its chosen start point; an in-progress podcast episode otherwise continues where it stopped.
+    func playbackStartPosition(for item: QueueItem) -> Double {
+        let chosen = item.id == currentQueueID ? restorePosition : 0
+        return chosen > 0 ? chosen : podcasts.resumePosition(for: item.track) ?? 0
+    }
+
     func playQueueItem(_ id: UUID, origin: PlaybackStartOrigin = .manual) {
         guard let index = queueIndices[id], queue.indices.contains(index) else { return }
         let item = queue[index]
@@ -907,7 +933,7 @@ final class AppModel {
         }
         cancelUpcomingPlayback()
         scrobbling?.end(); radioBroadcastTitle = nil; radioDisconnected = false
-        let resume = id == currentQueueID ? restorePosition : 0
+        let resume = playbackStartPosition(for: item)
         // Retained while the entry is prepared, so the stopped timeline can still move the start point.
         restorePosition = resume
         playbackTask?.cancel(); activeStream?.close(); activeStream = nil; activePlaybackResource = nil
@@ -1035,6 +1061,7 @@ final class AppModel {
         playbackResumptionPending = false
         nextPreparation = nil
         scrobbling?.end(discardUnsampledTime: true, atMonotonic: timing?.requestedUptime, at: timing?.requestedAt)
+        if let finished = currentTrack { podcasts.markCompleted(finished) }
         activeStream = resource.stream; activePlaybackResource = resource
         playbackGeneration = UUID(); playbackIntentQueueID = id; resetArrowSeek()
         currentQueueID = id; restorePosition = 0; heardSeconds = 0; playRecorded = false
@@ -1285,7 +1312,8 @@ final class AppModel {
         let presentationID = beginSourceConnection(sourceID: pendingSource.id)
         defer { endSourceConnection(sourceID: pendingSource.id) }
         do {
-            let feed = try await PodcastClient(transport: transport(for: pendingSource)).fetchFeed(url: url)
+            guard case let .feed(feed, validators) = try await PodcastClient(transport: transport(for: pendingSource))
+                .fetchFeed(url: url, validators: PodcastFeedValidators()) else { throw PodcastError.invalidFeed }
             try requireSourceConnection(presentationID)
             if let existing = sources.first(where: { $0.kind == .podcasts && Self.samePodcastFeed($0.location, feed.url.absoluteString) }) {
                 transportCache.removeValue(forKey: pendingSource.id)?.invalidate()
@@ -1303,10 +1331,12 @@ final class AppModel {
             let connectedSources = try await performLibraryWork { store in
                 let episodes = feed.episodes.map { $0.asTrackRecord(sourceID: savedSource.id, feed: feed, artworkPath: artwork?.path) }
                 try store.saveSource(savedSource, tracks: episodes)
+                try store.savePodcastFeed(sourceID: savedSource.id, feed: feed, validators: validators)
                 return try store.sources()
             }
             try requireSourceConnection(presentationID)
             sources = connectedSources; selectAddedSource(source.id)
+            await podcasts.reload()
             reloadLibrary(); status = "Subscribed to “\(source.name)”."
         } catch {
             await Task.detached { try? connectionStore?.deleteSource(id: pendingSource.id) }.value
@@ -1482,15 +1512,38 @@ final class AppModel {
         case .internetArchive:
             return try await refreshArchive(source, store: store, generation: generation)
         case .podcasts:
-            guard let url = source.url else { throw SourceNetworkError.invalidURL }
-            let feed = try await PodcastClient(transport: transport(for: source)).fetchFeed(url: url)
-            let artwork = try? await cachePodcastArtwork(feed: feed, source: source)
-            try Task.checkCancellation()
-            let changed = try await backgroundWorker.upsert(store: store, sourceID: source.id, generation: generation,
-                tracks: feed.episodes.map { $0.asTrackRecord(sourceID: source.id, feed: feed, artworkPath: artwork?.path) })
-            if changed { unpublishedSourceChanges[source.id, default: 0] &+= 1 }
-            return changed
+            return try await refreshPodcast(source, store: store, generation: generation)
         }
+    }
+
+    /// Fetches one show with its HTTP validators; an unchanged feed is not parsed or written again.
+    /// Without a generation (background refresh) the write is not tied to a manual refresh pass.
+    func refreshPodcast(_ source: SourceRecord, store: LibraryStore, generation: UUID? = nil) async throws -> Bool {
+        guard let url = source.url else { throw SourceNetworkError.invalidURL }
+        let validators = podcasts.shows[source.id]?.validators ?? PodcastFeedValidators()
+        let result: PodcastFetchResult
+        do { result = try await PodcastClient(transport: transport(for: source)).fetchFeed(url: url, validators: validators) }
+        catch {
+            if !(error is CancellationError) { await podcasts.recordRefresh(sourceID: source.id, error: error.localizedDescription) }
+            throw error
+        }
+        guard case let .feed(feed, received) = result else {
+            await podcasts.recordRefresh(sourceID: source.id, error: nil)
+            return false
+        }
+        let artwork = try? await cachePodcastArtwork(feed: feed, source: source)
+        try Task.checkCancellation()
+        let tracks = feed.episodes.map { $0.asTrackRecord(sourceID: source.id, feed: feed, artworkPath: artwork?.path) }
+        let changed = if let generation {
+            try await backgroundWorker.upsert(store: store, sourceID: source.id, generation: generation, tracks: tracks)
+        } else { try await performLibraryWork { try $0.upsertTracks(tracks) } }
+        await podcasts.saveFeed(sourceID: source.id, feed: feed, validators: received)
+        if changed { unpublishedSourceChanges[source.id, default: 0] &+= 1 }
+        return changed
+    }
+
+    func publishPodcastChanges(sourceIDs: [String]) {
+        if sourceIDs.contains(where: scopeIncludes(sourceID:)) { reloadLibrary() }
     }
 
     /// Re-reads only items already in the library; collections are browsed on demand, never imported.
@@ -1934,7 +1987,10 @@ final class AppModel {
         lastSavedTick += 1
         if lastSavedTick >= 5 {
             lastSavedTick = 0; updateNowPlaying()
-            if player.state == .playing, !currentIsRadio, let track = currentTrack { archive?.recordProgress(track: track, position: player.position) }
+            if player.state == .playing, !currentIsRadio, let track = currentTrack {
+                archive?.recordProgress(track: track, position: player.position)
+                podcasts.record(track: track, position: player.position, duration: player.duration)
+            }
             if player.state == .playing, let store {
                 queueSaveRevision &+= 1
                 let revision = queueSaveRevision, index = currentIndex ?? 0, position = currentIsRadio ? 0 : player.position
@@ -1966,6 +2022,11 @@ final class AppModel {
             if event.type == .keyUp {
                 if [123, 124].contains(event.keyCode) { self.resetArrowSeek() }
                 return event
+            }
+            if PlaybackArrowKeys.isChapterKey(keyCode: event.keyCode, modifiers: event.modifierFlags), self.canSeekChapters,
+               PlaybackArrowKeys.accepts(window: event.window, mainWindow: self.mainPlayerWindow, activePlaylist: self.activePlaylistTable) {
+                if !event.isARepeat { self.seekChapter(forward: event.keyCode == 124) }
+                return nil
             }
             if PlaybackArrowKeys.isReserved(keyCode: event.keyCode, modifiers: event.modifierFlags) {
                 guard PlaybackArrowKeys.accepts(window: event.window, mainWindow: self.mainPlayerWindow,

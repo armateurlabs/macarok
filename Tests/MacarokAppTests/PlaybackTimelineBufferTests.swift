@@ -37,6 +37,44 @@ final class PlaybackTimelineBufferTests: XCTestCase {
         }
     }
 
+    func testChapterBoundariesCutGapsThroughPlayedAndBufferedLayers() async throws {
+        _ = NSApplication.shared
+        XCTAssertEqual(PlaybackTimelineView.chapterFractions([PodcastChapter(start: 0, title: "A"), PodcastChapter(start: 15, title: "B"),
+                                                             PodcastChapter(start: 50, title: "C")], duration: 100), [0.15, 0.5])
+        for scheme in [ColorScheme.light, .dark] {
+            let hosting = NSHostingView(rootView: BufferedTimelineSlider(value: .constant(25), duration: 100, ranges: [0.2..<0.8], enabled: true,
+                    showsBuffer: true, onEditingChanged: { _ in }, chapterStarts: [0.15, 0.5])
+                .frame(width: 420, height: 40).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme))
+            hosting.sizingOptions = []
+            hosting.frame = NSRect(x: 0, y: 0, width: 420, height: 40)
+            let window = NSWindow(contentRect: hosting.bounds, styleMask: [.borderless], backing: .buffered, defer: true)
+            window.isReleasedWhenClosed = false
+            window.appearance = NSAppearance(named: scheme == .light ? .aqua : .darkAqua)
+            window.contentView = hosting
+            defer { window.contentView = nil; window.close() }
+            for _ in 0..<12 { hosting.layoutSubtreeIfNeeded(); await Task.yield(); try await Task.sleep(for: .milliseconds(10)) }
+            let slider = try XCTUnwrap(findSlider(in: hosting))
+            let bitmap = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+            hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+            let bar = slider.convert(slider.playbackTrackRect, to: hosting)
+            let scale = CGFloat(bitmap.pixelsWide) / hosting.bounds.width
+            func pixelX(_ fraction: CGFloat) -> Int { Int(((bar.minX + bar.width * fraction) * scale).rounded(.down)) }
+            func color(_ fraction: CGFloat, _ row: Int) -> NSColor? { bitmap.colorAt(x: pixelX(fraction), y: row)?.usingColorSpace(.sRGB) }
+            func isBlue(_ value: NSColor?) -> Bool { value.map { $0.blueComponent > $0.redComponent + 0.25 } ?? false }
+            func isWhite(_ value: NSColor?) -> Bool { value.map { min($0.redComponent, $0.greenComponent, $0.blueComponent) > 0.94 } ?? false }
+            let rows = (0..<bitmap.pixelsHigh).filter { isBlue(color(0.05, $0)) }
+            let row = try XCTUnwrap(rows.isEmpty ? nil : rows[rows.count / 2])
+            XCTAssertTrue(isBlue(color(0.10, row)) && isBlue(color(0.20, row)), "Played audio stays blue on both sides of a chapter.")
+            XCTAssertFalse(isBlue(color(0.15, row)), "A chapter start is a gap in the played layer.")
+            XCTAssertTrue(isWhite(color(0.45, row)) && isWhite(color(0.55, row)))
+            // The light window background is nearly white, so compare the gap with the real background.
+            let background = try XCTUnwrap(color(0.5, max(0, row - Int(8 * scale))))
+            let gap = try XCTUnwrap(color(0.5, row))
+            XCTAssertEqual(gap.brightnessComponent, background.brightnessComponent, accuracy: 0.03,
+                           "A chapter start is a gap in the buffered layer.")
+        }
+    }
+
     func testCompletedDownloadShowsFullCoverageThroughTheControllerAndTimeline() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokDownloadedTimeline-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }

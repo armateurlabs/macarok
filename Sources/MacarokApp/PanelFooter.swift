@@ -25,12 +25,14 @@ enum LibraryFooterSummary {
     case music(albums: Int, tracks: Int)
     case radio(stations: Int)
     case archive(saved: Int)
+    case podcasts(shows: Int, episodes: Int)
 
     var title: String {
         switch self {
         case let .music(albums, tracks): "\(albums) albums · \(tracks) tracks"
         case let .radio(stations): "\(stations) stations"
         case let .archive(saved): "\(saved) saved"
+        case let .podcasts(shows, episodes): "\(shows) \(shows == 1 ? "show" : "shows") · \(episodes) episodes"
         }
     }
 }
@@ -63,6 +65,11 @@ struct LibraryPanelFooter: View {
                 }
             case let .radio(stations): Label(shortCount(stations), systemImage: "antenna.radiowaves.left.and.right")
             case let .archive(saved): Label(shortCount(saved), systemImage: "bookmark")
+            case let .podcasts(shows, episodes):
+                HStack(spacing: 8) {
+                    Label { Text(shortCount(shows)) } icon: { Image.podcast }
+                    Label(shortCount(episodes), systemImage: "list.bullet")
+                }
             }
         } else { Text(summary.title) }
     }

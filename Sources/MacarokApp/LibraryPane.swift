@@ -19,34 +19,18 @@ struct LibraryPane: View {
                 RadioLibraryView(model: model)
             } else if let source = model.selectedSource, source.kind == .internetArchive, let archive = model.archive {
                 ArchiveLibraryView(model: model, controller: archive, source: source)
+            } else if let source = model.selectedSource, source.kind == .podcasts {
+                PodcastSourceLibraryView(model: model, source: source)
             } else {
             VStack(spacing: 0) {
-            VStack(spacing: 11) {
-                TextField(model.isAllSources ? "Search all sources" : "Search this library", text: $model.search).textFieldStyle(.roundedBorder).focused($searchFocused)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
-                    ForEach(LibraryView.allCases) { view in
-                        Button { model.selectLibraryView(view) } label: {
-                            Text(view.title)
-                                // Same typography and color as the panel titles, such as Active Playlist.
-                                .font(.system(size: 12, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 5)
-                                .background(model.libraryView == view ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 5))
-                                .foregroundStyle(.primary)
-                                .contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                    }
-                }
-            }.padding(12)
-            HStack {
-                Text(model.search.isEmpty ? model.libraryView == .home ? "YOUR LIBRARY" : model.libraryView.title.uppercased() : "SEARCH RESULTS").font(.system(size: 10, weight: .medium)).tracking(0.7).foregroundStyle(.secondary)
-                if model.isSearching { ProgressView().controlSize(.mini) }
-                Spacer()
-                Button(action: model.toggleLibrarySort) {
-                    Image(systemName: model.librarySortIsDescending ? "chevron.down" : "chevron.up").frame(width: 18, height: 16).contentShape(Rectangle())
-                }.buttonStyle(.borderless).help(sortHelp).accessibilityLabel(sortHelp)
-                    .accessibilityIdentifier("librarySortDirection").disabled(model.tracks.isEmpty)
-            }.padding(.horizontal, 15).padding(.bottom, 5).contentShape(Rectangle())
+            VStack(spacing: 9) {
+                SearchField(prompt: model.isAllSources ? "Search all sources" : "Search this library", text: $model.search, focus: $searchFocused)
+                LibraryViewPicker(model: model)
+            }.padding(.horizontal, 12).padding(.vertical, 10)
+            if model.libraryView == .podcasts {
+                PodcastLibraryView(model: model, podcasts: model.podcasts)
+            } else {
+            LibraryListHeader(model: model, title: listTitle, count: listCount, sortEnabled: !model.tracks.isEmpty)
             .contextMenu {
                 Button(model.libraryView == .folders ? "Shuffle Selected Folder" : "Shuffle Library") { model.shuffle(shuffleScope) }
                     .disabled(shuffleScope.isEmpty)
@@ -56,6 +40,14 @@ struct LibraryPane: View {
             } else if (model.isLoadingLibrary && model.tracks.isEmpty) || (model.isSearching && model.displayedTracks.isEmpty) {
                 ProgressView(model.isSearching ? "Searching library…" : "Loading library…")
                     .controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.displayedTracks.isEmpty && visibleRadioStations.isEmpty && !model.podcastEpisodes.isEmpty {
+                // All Sources keeps podcasts out of the music lists; point to where they are.
+                VStack(spacing: 12) {
+                    ContentUnavailableView(model.search.isEmpty ? "No Music" : "No Matching Music", systemImage: "music.note",
+                                           description: Text(model.search.isEmpty ? "Your podcasts are in the Podcasts tab." : "Matching podcast episodes are in the Podcasts tab."))
+                        .font(.caption).fixedSize(horizontal: false, vertical: true)
+                    Button("Show Podcasts") { model.selectLibraryView(.podcasts) }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.displayedTracks.isEmpty && visibleRadioStations.isEmpty {
                 ContentUnavailableView.search(text: model.search).font(.caption)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -105,6 +97,8 @@ struct LibraryPane: View {
                         }
                     case .folders:
                         FolderLibrary(model: model)
+                    case .podcasts:
+                        EmptyView()
                     case .tags:
                         Section("Genre") {
                             ForEach(model.genreGroups) { group in
@@ -134,6 +128,7 @@ struct LibraryPane: View {
             LibraryPanelFooter(model: model, summary: .music(albums: model.albums.count, tracks: model.tracks.count))
             }
             }
+            }
         }.background(.regularMaterial)
         .onReceive(NotificationCenter.default.publisher(for: .macarokFocusSearch)) { _ in searchFocused = true }
         .onChange(of: model.contextPage) { _, _ in searchFocused = false }
@@ -147,10 +142,22 @@ struct LibraryPane: View {
         }
     }
 
-    private var sortHelp: String {
-        let descending = model.librarySortIsDescending
-        let order = model.libraryView == .years ? (descending ? "newest first" : "oldest first") : (descending ? "Z to A" : "A to Z")
-        return "Sorted \(order). Click to reverse."
+    private var listTitle: String {
+        guard model.search.isEmpty else { return "Search Results" }
+        return model.libraryView == .home ? "Your Library" : model.libraryView.title
+    }
+
+    /// Items at the top level of the current list; Folders browse a tree and show no total.
+    private var listCount: Int? {
+        if model.tracks.isEmpty { return nil }
+        if !model.search.isEmpty { return model.displayedTracks.count }
+        switch model.libraryView {
+        case .home, .artists: return model.artists.count
+        case .albums: return model.visibleAlbums.count
+        case .years: return model.yearGroups.count
+        case .tags: return model.genreGroups.count
+        case .folders, .podcasts: return nil
+        }
     }
 
     private var shuffleScope: [TrackRecord] { model.libraryView == .folders ? model.folderTracks : model.displayedTracks }

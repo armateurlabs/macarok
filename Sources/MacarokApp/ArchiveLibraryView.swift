@@ -72,12 +72,12 @@ private struct ArchiveArtistsView: View {
     @Bindable var controller: InternetArchiveController
     let source: SourceRecord
     @State private var draft = ""
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 6) {
-                TextField("Search artists", text: $draft).textFieldStyle(.roundedBorder)
-                    .onSubmit { controller.artistSearch = draft }
+                SearchField(prompt: "Search artists", text: $draft, focus: $searchFocused, onSubmit: { controller.artistSearch = draft })
                 Picker("Sort", selection: $controller.artistSort) {
                     ForEach([ArchiveSort.popular, .alphabetical]) { Text($0.title).tag($0) }
                 }.labelsHidden().fixedSize()
@@ -96,11 +96,12 @@ private struct ArchiveBooksView: View {
     @Bindable var controller: InternetArchiveController
     let source: SourceRecord
     @State private var draft = ""
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 8) {
-            TextField("Search titles or authors", text: $draft).textFieldStyle(.roundedBorder)
-                .onSubmit { controller.bookSearch = draft }.padding(.horizontal, 12)
+            SearchField(prompt: "Search titles or authors", text: $draft, focus: $searchFocused, onSubmit: { controller.bookSearch = draft })
+                .padding(.horizontal, 12)
             HStack(spacing: 6) {
                 Picker("Language", selection: $controller.bookLanguage) {
                     Text("All Languages").tag("")

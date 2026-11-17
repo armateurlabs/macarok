@@ -18,6 +18,7 @@ struct PlaybackTimelineView: View {
     var resumePoint: Double? = nil
     @State private var interaction = PlaybackSeekInteraction()
     @State private var bufferedRanges: [Range<Double>] = []
+    @State private var hover: (fraction: Double, x: CGFloat)?
     @State private var sampling = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -25,7 +26,9 @@ struct PlaybackTimelineView: View {
         let measured = resumePoint ?? timeline.position
         let position = interaction.isEditing ? interaction.position ?? measured : measured
         let enabled = (resumePoint != nil || timeline.isSeekable) && duration > 0
+        let chapters = model.isPodcastTrack(track) ? model.podcasts.currentChapters : []
         HStack(spacing: 8) {
+            if chapters.count > 1 { chapterButton(forward: false) }
             Text(position.playbackTime).frame(width: 43, alignment: .trailing)
             BufferedTimelineSlider(value: Binding(get: { min(max(1, duration), max(0, position)) }, set: {
                 interaction.change(to: $0, generation: model.playbackGeneration)
@@ -37,9 +40,13 @@ struct PlaybackTimelineView: View {
                     else if let target = interaction.end(generation: model.playbackGeneration) { model.seekPlayback(to: target) }
                 }, animatesPlayback: model.player.state == .playing && model.streamingBufferFraction == nil && !interaction.isEditing,
                 playbackGeneration: model.playbackGeneration, seekRevision: timeline.seekRevision,
-                onEditingCancelled: { interaction.cancel() }, measuredPosition: measured)
+                onEditingCancelled: { interaction.cancel() }, measuredPosition: measured,
+                chapterStarts: Self.chapterFractions(chapters, duration: duration),
+                onHover: { fraction, x in hover = fraction.map { ($0, x) } })
                 .help(help(enabled: enabled, duration: duration))
+                .overlay { if let hover, enabled || resumePoint != nil { hoverLabel(hover, chapters: chapters, duration: duration) } }
             Text(duration > 0 ? duration.playbackTime : "--:--").frame(width: 43, alignment: .leading)
+            if chapters.count > 1 { chapterButton(forward: true) }
         }.font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
         .onReceive(sampling) { _ in sampleBuffer() }
         .onChange(of: model.playbackGeneration) { _, _ in interaction.cancel(); sampleBuffer() }
@@ -49,6 +56,35 @@ struct PlaybackTimelineView: View {
             if [.opening, .stopped, .failed].contains(state) { interaction.cancel() }
         }
         .onAppear { sampleBuffer() }
+    }
+
+    static func chapterFractions(_ chapters: [PodcastChapter], duration: Double) -> [Double] {
+        guard duration > 0 else { return [] }
+        return chapters.map { $0.start / duration }.filter { $0 > 0 && $0 < 1 }
+    }
+
+    /// Follows the pointer above the bar: the time it points at, with that moment's chapter.
+    private func hoverLabel(_ hover: (fraction: Double, x: CGFloat), chapters: [PodcastChapter], duration: Double) -> some View {
+        let time = hover.fraction * duration
+        let index = PodcastController.chapterIndex(chapters, at: time)
+        let title = index.map { chapters[$0].title.isEmpty ? "Chapter \($0 + 1)" : chapters[$0].title }
+        return GeometryReader { geometry in
+            Text([time.playbackTime, title].compactMap { $0 }.joined(separator: " · "))
+                .font(.system(size: 10, weight: .medium)).monospacedDigit().lineLimit(1).foregroundStyle(.primary)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(.regularMaterial, in: Capsule()).overlay(Capsule().stroke(.separator, lineWidth: 0.5))
+                .fixedSize()
+                .position(x: min(max(hover.x, 70), max(70, geometry.size.width - 70)), y: -2)
+        }.allowsHitTesting(false).accessibilityHidden(true)
+    }
+
+    private func chapterButton(forward: Bool) -> some View {
+        Button { model.seekChapter(forward: forward) } label: {
+            Image(systemName: forward ? "arrow.right.to.line" : "arrow.left.to.line").font(.system(size: 9, weight: .semibold))
+                .frame(width: 16, height: 16).contentShape(Rectangle())
+        }.buttonStyle(.borderless).disabled(!model.canSeekChapters)
+            .help(forward ? "Next chapter (⌥→)" : "Previous chapter (⌥←)")
+            .accessibilityLabel(forward ? "Next chapter" : "Previous chapter")
     }
 
     private func help(enabled: Bool, duration: Double) -> String {
@@ -93,6 +129,25 @@ struct PlaybackTimelineView: View {
     }
 }
 
+/// The artist, or for an episode with chapters the chapter being heard ("3/12 · Title").
+struct TransportSubtitle: View {
+    @Bindable var model: AppModel
+    @ObservedObject var timeline: PlaybackTimeline
+    let track: TrackRecord
+
+    var body: some View {
+        let chapters = model.isPodcastTrack(track) ? model.podcasts.currentChapters : []
+        let position = model.seeksResumePoint ? model.restorePosition : timeline.position
+        if chapters.count > 1, let index = PodcastController.chapterIndex(chapters, at: position) {
+            Text("\(index + 1)/\(chapters.count) · \(chapters[index].title.isEmpty ? "Chapter \(index + 1)" : chapters[index].title)")
+                .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).help(track.artist)
+                .accessibilityLabel("Chapter \(index + 1) of \(chapters.count): \(chapters[index].title)")
+        } else {
+            Text(track.artist).foregroundStyle(.secondary).lineLimit(1)
+        }
+    }
+}
+
 /// Native tracking, keyboard navigation, and accessibility with a custom layered progress bar.
 struct BufferedTimelineSlider: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
@@ -108,6 +163,9 @@ struct BufferedTimelineSlider: NSViewRepresentable {
     var seekRevision: UInt64 = 0
     var onEditingCancelled: (() -> Void)?
     var measuredPosition: Double?
+    /// Chapter boundaries as fractions of the duration, drawn as gaps in the bar.
+    var chapterStarts: [Double] = []
+    var onHover: ((Double?, CGFloat) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeNSView(context: Context) -> TimelineSlider {
@@ -129,7 +187,7 @@ struct BufferedTimelineSlider: NSViewRepresentable {
         context.coordinator.parent = self
         let appearance: NSAppearance.Name = colorScheme == .dark ? .darkAqua : .aqua
         if slider.appearance?.name != appearance { slider.appearance = NSAppearance(named: appearance) }
-        if let cell = slider.cell as? TimelineSliderCell { cell.bufferedRanges = ranges; cell.showsBuffer = showsBuffer }
+        if let cell = slider.cell as? TimelineSliderCell { cell.bufferedRanges = ranges; cell.showsBuffer = showsBuffer; cell.chapterStarts = chapterStarts }
         slider.updatePlayback(position: value, measuredPosition: measuredPosition, duration: duration, enabled: enabled,
             playing: animatesPlayback && !reduceMotion && enabled && !slider.trackingMouse,
             generation: playbackGeneration, seekRevision: seekRevision)
@@ -147,6 +205,7 @@ struct BufferedTimelineSlider: NSViewRepresentable {
             slider.onEditingChanged = { [weak self] editing in self?.parent.onEditingChanged(editing) }
             slider.onFinalTrackingValue = { [weak self] value in self?.parent.value = value }
             slider.onTrackingCancelled = { [weak self] in self?.parent.onEditingCancelled?() }
+            slider.onHover = { [weak self] fraction, x in self?.parent.onHover?(fraction, x) }
         }
         @objc func changed(_ slider: TimelineSlider) {
             guard slider.acceptNativeInput() else { return }
@@ -160,6 +219,9 @@ final class TimelineSlider: NSSlider {
     var onEditingChanged: ((Bool) -> Void)?
     var onFinalTrackingValue: ((Double) -> Void)?
     var onTrackingCancelled: (() -> Void)?
+    /// Pointer position over the bar as a fraction (nil when outside), with its x in view coordinates.
+    var onHover: ((Double?, CGFloat) -> Void)?
+    private var hoverArea: NSTrackingArea?
     private(set) var trackingMouse = false
     private(set) var trackingCancelled = false
     private var trackingStartValue: Double = 0
@@ -177,6 +239,29 @@ final class TimelineSlider: NSSlider {
     var playbackThumbRect: NSRect { (cell as? TimelineSliderCell)?.playbackThumbRect ?? .zero }
 
     deinit { presentationTimer?.invalidate() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area); hoverArea = area
+    }
+
+    func hoverFraction(at point: NSPoint) -> Double? {
+        let bar = playbackTrackRect
+        guard bar.width > 0, bounds.contains(point) else { return nil }
+        return min(1, max(0, (point.x - bar.minX) / bar.width))
+    }
+
+    private func reportHover(_ event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        onHover?(hoverFraction(at: point), point.x)
+    }
+
+    override func mouseEntered(with event: NSEvent) { reportHover(event) }
+    override func mouseMoved(with event: NSEvent) { reportHover(event) }
+    override func mouseExited(with event: NSEvent) { if !trackingMouse { onHover?(nil, 0) } }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, alphaValue > 0, let superview,
@@ -318,7 +403,10 @@ final class TimelineSlider: NSSlider {
             let point = convert(next.locationInWindow, from: nil)
             if abs(point.x - start.x) > 0.25 { moved = true }
             if moved { trackMouse(at: point) }
-            if next.type == .leftMouseUp { break }
+            if next.type == .leftMouseUp {
+                if !bounds.contains(point) { onHover?(nil, 0) }
+                break
+            }
         }
     }
 
@@ -328,6 +416,7 @@ final class TimelineSlider: NSSlider {
         guard bar.width > 0 else { return }
         let fraction = min(1, max(0, (point.x - bar.minX) / bar.width))
         doubleValue = minValue + fraction * (maxValue - minValue)
+        onHover?(fraction, min(max(point.x, bar.minX), bar.maxX))
         _ = sendAction(action, to: target)
     }
 }
@@ -335,6 +424,7 @@ final class TimelineSlider: NSSlider {
 private final class TimelineSliderCell: NSSliderCell {
     var bufferedRanges: [Range<Double>] = []
     var showsBuffer = false
+    var chapterStarts: [Double] = []
     var presentationValue: Double?
 
     var renderedValue: Double {
@@ -369,8 +459,29 @@ private final class TimelineSliderCell: NSSliderCell {
         NSBezierPath(ovalIn: playbackThumbRect).fill()
     }
 
+    /// Chapter boundaries cut a 2-point gap through every layer, keeping one continuous control.
+    static func chapterClip(bar: NSRect, starts: [Double]) -> [NSRect] {
+        var segments: [NSRect] = []
+        var x = bar.minX
+        for start in starts.sorted() {
+            let gap = bar.minX + bar.width * start
+            guard gap - 1 > x + 1, gap + 1 < bar.maxX - 1 else { continue }
+            segments.append(NSRect(x: x, y: bar.minY - 1, width: gap - 1 - x, height: bar.height + 2))
+            x = gap + 1
+        }
+        segments.append(NSRect(x: x, y: bar.minY - 1, width: bar.maxX - x, height: bar.height + 2))
+        return segments
+    }
+
     override func drawBar(inside rect: NSRect, flipped: Bool) {
         let bar = paintedBar(inside: rect)
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        if !chapterStarts.isEmpty {
+            let clip = NSBezierPath()
+            for segment in Self.chapterClip(bar: bar, starts: chapterStarts) { clip.appendRect(segment) }
+            clip.addClip()
+        }
         NSColor.tertiaryLabelColor.withAlphaComponent(0.35).setFill()
         NSBezierPath(roundedRect: bar, xRadius: 1.5, yRadius: 1.5).fill()
         if showsBuffer {

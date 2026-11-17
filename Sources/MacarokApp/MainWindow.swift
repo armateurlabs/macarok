@@ -76,7 +76,7 @@ struct TransportBar: View {
                     HStack {
                         Button { model.showCurrentTrack() } label: { Text(track.title).fontWeight(.medium).lineLimit(1) }.buttonStyle(.plain)
                         Spacer()
-                        Text(track.artist).foregroundStyle(.secondary).lineLimit(1)
+                        TransportSubtitle(model: model, timeline: player.timeline, track: track)
                     }.font(.system(size: 12))
                     if model.currentIsRadio {
                         HStack(spacing: 7) {

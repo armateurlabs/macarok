@@ -6,6 +6,7 @@ struct RadioLibraryView: View {
     @Bindable var model: AppModel
     @State private var favoritesOnly = false
     @State private var query = ""
+    @FocusState private var searchFocused: Bool
     @State private var showsDiscovery = false
     @State private var showsAddURL = false
 
@@ -18,7 +19,7 @@ struct RadioLibraryView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 11) {
-                TextField("Search saved stations", text: $query).textFieldStyle(.roundedBorder)
+                SearchField(prompt: "Search saved stations", text: $query, focus: $searchFocused)
                 Picker("Radio view", selection: $favoritesOnly) {
                     Text("Stations").tag(false)
                     Text("Favorites").tag(true)

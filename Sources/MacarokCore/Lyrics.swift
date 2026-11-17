@@ -184,3 +184,18 @@ public enum LRCParser {
         }.joined(separator: "\n") + "\n"
     }
 }
+
+extension String {
+    /// Text as it should be displayed: control characters other than tabs and line breaks, and soft
+    /// hyphens, are removed. Providers sometimes mark hyphenation points with them, and macOS draws
+    /// those characters as missing-glyph boxes in the middle of words.
+    public var removingInvisibleControls: String {
+        func isInvisible(_ scalar: Unicode.Scalar) -> Bool {
+            scalar.value == 0xAD || (scalar.properties.generalCategory == .control && scalar != "\n" && scalar != "\t")
+        }
+        guard unicodeScalars.contains(where: isInvisible) else { return self }
+        var result = String.UnicodeScalarView()
+        result.append(contentsOf: unicodeScalars.filter { !isInvisible($0) })
+        return String(result)
+    }
+}

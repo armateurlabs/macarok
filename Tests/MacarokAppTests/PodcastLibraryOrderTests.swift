@@ -30,7 +30,7 @@ final class PodcastLibraryOrderTests: XCTestCase {
         XCTAssertEqual(patched.albums.first?.tracks.map(\.id), expected)
     }
 
-    func testAllSourcesPreservesMusicSlotsAndKeepsIdenticalFeedCopiesIndependent() throws {
+    func testAllSourcesKeepsPodcastsOutOfMusicListsAndKeepsIdenticalFeedCopiesIndependent() throws {
         let first = podcastSource("podcast-a"), second = podcastSource("podcast-b")
         let music = SourceRecord(id: "music", kind: .local, name: "Music", location: "file:///Music/")
         let firstOld = episode("a-old", source: first, date: 1_600_000_000, number: 1)
@@ -45,16 +45,25 @@ final class PodcastLibraryOrderTests: XCTestCase {
                 addedAt: Date(timeIntervalSince1970: Double(number)))
         }
         let input = [firstOld, firstNew, secondOld, secondNew] + musicTracks
-        let baseline = input.sorted(by: TrackRecord.libraryOrder)
         let snapshot = try LibrarySnapshot.build(scope: .all, tracks: Array(input.reversed()), sources: [first, second, music])
-        for (index, track) in baseline.enumerated() where track.sourceID == music.id {
-            XCTAssertEqual(snapshot.tracks[index].id, track.id, "Podcast sorting must preserve every music slot in All Sources.")
-        }
-        XCTAssertEqual(snapshot.tracks.filter { $0.sourceID == first.id }.map(\.id), [firstNew.id, firstOld.id])
-        XCTAssertEqual(snapshot.tracks.filter { $0.sourceID == second.id }.map(\.id), [secondNew.id, secondOld.id])
+        XCTAssertEqual(snapshot.tracks.map(\.id), musicTracks.map(\.id), "All Sources music lists contain music only, in their own order.")
+        XCTAssertEqual(snapshot.podcastEpisodes.filter { $0.sourceID == first.id }.map(\.id), [firstNew.id, firstOld.id])
+        XCTAssertEqual(snapshot.podcastEpisodes.filter { $0.sourceID == second.id }.map(\.id), [secondNew.id, secondOld.id])
         XCTAssertEqual(snapshot.albumsByID[StableID.make(first.id, "album", firstOld.albumID)]?.tracks.map(\.id), [firstNew.id, firstOld.id])
         XCTAssertEqual(snapshot.albumsByID[StableID.make(second.id, "album", secondOld.albumID)]?.tracks.map(\.id), [secondNew.id, secondOld.id])
-        XCTAssertEqual(snapshot.tracks.filter { $0.sourceID == music.id }.map(\.id), musicTracks.map(\.id))
+        XCTAssertEqual(snapshot.tracksByID[firstNew.id]?.id, firstNew.id, "Episodes stay addressable for selection and playback.")
+        XCTAssertFalse(snapshot.albums.contains { [first.id, second.id].contains($0.sourceID) })
+        XCTAssertFalse(snapshot.recentlyAdded.contains { [first.id, second.id].contains($0.sourceID) },
+                       "A frequently publishing show must not occupy Recently Added.")
+        XCTAssertFalse(snapshot.artists.flatMap(\.albums).contains { [first.id, second.id].contains($0.sourceID) })
+        XCTAssertEqual(snapshot.folderNodes.map(\.name), [music.name])
+
+        var played = firstNew
+        played.playCount = 3
+        let patched = try snapshot.updating(updatedTracks: [played], sources: [first, second, music])
+        XCTAssertEqual(patched.tracks.map(\.id), musicTracks.map(\.id))
+        XCTAssertEqual(patched.podcastEpisodes.first { $0.id == firstNew.id }?.playCount, 3)
+        XCTAssertTrue(patched.mostPlayedTracks.isEmpty, "Podcast plays do not enter music rankings.")
     }
 
     @MainActor

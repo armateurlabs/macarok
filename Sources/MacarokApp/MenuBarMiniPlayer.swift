@@ -7,7 +7,7 @@ import SwiftUI
 /// The host retains this lightweight presentation, never AppModel. Actions resolve a weak controller.
 @MainActor @Observable
 final class MenuBarPlayerPresentation {
-    enum Action: CaseIterable { case playPause, previous, next, showWindow, quit }
+    enum Action: CaseIterable { case playPause, previous, next, previousChapter, nextChapter, showWindow, quit }
     struct State: Equatable {
         var enabled = false
         var track: TrackRecord? = nil
@@ -20,7 +20,11 @@ final class MenuBarPlayerPresentation {
         var reconnect = false
         var appearance: Appearance = .system
         var artworkRevision = 0
+        /// Chapters of the playing podcast episode; empty otherwise.
+        var chapters: [PodcastChapter] = []
+        var canSeekChapters = false
         static let disabled = State()
+        var hasChapters: Bool { chapters.count > 1 }
         var title: String { track?.title ?? "Nothing playing" }
         var playPauseTitle: String { active ? "Pause" : reconnect ? "Reconnect" : "Play" }
         var playPauseSymbol: String { active ? "pause.fill" : reconnect ? "arrow.clockwise" : "play.fill" }
@@ -48,6 +52,7 @@ final class MenuBarPlayerPresentation {
         switch action {
         case .playPause: guard state.canPlay else { return }
         case .previous, .next: guard state.hasQueue else { return }
+        case .previousChapter, .nextChapter: guard state.hasChapters, state.canSeekChapters else { return }
         case .showWindow, .quit: break
         }
         self.action?(action)
@@ -71,6 +76,8 @@ struct MenuBarMiniPlayerView: View {
                     if player.state.isRadio {
                         Label("LIVE", systemImage: "dot.radiowaves.left.and.right").font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.secondary).accessibilityIdentifier("menuBarLiveLabel")
+                    } else if player.state.hasChapters {
+                        MenuBarChapterLabel(timeline: player.timeline, chapters: player.state.chapters)
                     } else {
                         Text(player.state.track?.album ?? "").font(.system(size: 10)).foregroundStyle(.tertiary)
                             .lineLimit(1).accessibilityIdentifier("menuBarTrackAlbum")
@@ -79,7 +86,8 @@ struct MenuBarMiniPlayerView: View {
             }.frame(height: 96)
             MenuBarPlaybackProgress(timeline: player.timeline, state: player.state)
                 .frame(height: 32)
-            HStack(spacing: 25) {
+            HStack(spacing: player.state.hasChapters ? 12 : 25) {
+                if player.state.hasChapters { chapterButton(forward: false) }
                 transport("Previous", symbol: "backward.end.fill", action: .previous, enabled: player.state.hasQueue)
                 Button { player.perform(.playPause) } label: {
                     Image(systemName: player.state.playPauseSymbol).font(.system(size: 19, weight: .semibold))
@@ -90,6 +98,7 @@ struct MenuBarMiniPlayerView: View {
                 .help(player.state.playPauseTitle).accessibilityLabel(player.state.playPauseTitle)
                 .accessibilityIdentifier("menuBarPlayPause")
                 transport("Next", symbol: "forward.end.fill", action: .next, enabled: player.state.hasQueue)
+                if player.state.hasChapters { chapterButton(forward: true) }
             }.frame(maxWidth: .infinity).frame(height: 48)
             Divider()
             HStack {
@@ -107,6 +116,16 @@ struct MenuBarMiniPlayerView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(player.state.appearance.colorScheme)
         .accessibilityIdentifier("menuBarMiniPlayer")
+    }
+
+    private func chapterButton(forward: Bool) -> some View {
+        let label = forward ? "Next chapter" : "Previous chapter"
+        return Button { player.perform(forward ? .nextChapter : .previousChapter) } label: {
+            Image(systemName: forward ? "arrow.right.to.line" : "arrow.left.to.line").font(.system(size: 13, weight: .medium))
+                .frame(width: 32, height: 38).contentShape(Rectangle())
+        }.buttonStyle(.plain).foregroundStyle(.secondary).disabled(!player.state.canSeekChapters)
+            .help(label).accessibilityLabel(label)
+            .accessibilityIdentifier(forward ? "menuBarNextChapter" : "menuBarPreviousChapter")
     }
 
     private func transport(_ label: String, symbol: String, action: MenuBarPlayerPresentation.Action, enabled: Bool) -> some View {
@@ -146,6 +165,19 @@ private struct MenuBarArtwork: View {
             }
             .accessibilityLabel(player.state.isRadio ? "Station artwork" : "Album artwork")
             .accessibilityIdentifier("menuBarArtwork")
+    }
+}
+
+/// The chapter being heard; only this label follows the clock.
+private struct MenuBarChapterLabel: View {
+    @ObservedObject var timeline: PlaybackTimeline
+    let chapters: [PodcastChapter]
+    var body: some View {
+        let index = PodcastController.chapterIndex(chapters, at: timeline.position) ?? 0
+        let title = chapters[index].title.isEmpty ? "Chapter \(index + 1)" : chapters[index].title
+        Text("\(index + 1)/\(chapters.count) · \(title)").font(.system(size: 10)).foregroundStyle(.secondary)
+            .lineLimit(1).truncationMode(.tail)
+            .accessibilityLabel("Chapter \(index + 1) of \(chapters.count): \(title)").accessibilityIdentifier("menuBarChapter")
     }
 }
 

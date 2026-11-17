@@ -3,7 +3,7 @@ import MacarokCore
 
 /// The browsable lists whose direction can be reversed. Home shares the artist list.
 enum LibrarySortKey: String, Codable, CaseIterable, Sendable {
-    case artists, albums, years, folders, tags
+    case artists, albums, years, folders, tags, podcasts
 }
 
 extension LibraryView {
@@ -14,6 +14,7 @@ extension LibraryView {
         case .years: .years
         case .folders: .folders
         case .tags: .tags
+        case .podcasts: .podcasts
         }
     }
 }
@@ -24,7 +25,9 @@ struct LibrarySortOrder: Codable, Equatable, Sendable {
 
     init() {}
 
-    func isDescending(_ key: LibrarySortKey) -> Bool { descending.contains(key) }
+    /// Podcasts default to newest first, including preferences saved before the key existed,
+    /// so their membership records a reversal of that default instead of a descending order.
+    func isDescending(_ key: LibrarySortKey) -> Bool { key == .podcasts ? !descending.contains(key) : descending.contains(key) }
 
     mutating func toggle(_ key: LibrarySortKey) {
         if descending.contains(key) { descending.remove(key) } else { descending.insert(key) }

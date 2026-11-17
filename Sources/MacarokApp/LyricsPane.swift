@@ -65,7 +65,7 @@ struct LyricsPane: View {
             if controller.hasSynchronizedLyrics { SynchronizedLyricsView(model: model, controller: controller, autoScroll: $autoScroll, timeline: model.player.timeline) }
             else {
                 ScrollView {
-                    Text(controller.plainText).font(.system(size: 14)).lineSpacing(7).textSelection(.enabled)
+                    Text(controller.plainText.removingInvisibleControls).font(.system(size: 14)).lineSpacing(7).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(22)
                 }
             }
@@ -109,7 +109,7 @@ private struct SynchronizedLyricsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(controller.displayLines) { line in
-                        Text(line.text.isEmpty ? " " : line.text)
+                        Text(line.text.isEmpty ? " " : line.text.removingInvisibleControls)
                             .font(.system(size: 14, weight: activeID == line.id ? .semibold : .regular))
                             .foregroundStyle(activeID == line.id ? Color.accentColor : Color.primary)
                             .lineSpacing(5)
@@ -195,7 +195,7 @@ private struct LyricsSearchSheet: View {
             }.frame(minHeight: 150)
             GroupBox("Preview") {
                 ScrollView {
-                    Text(selectedResult?.plainText ?? "Select a result to preview its lyrics.")
+                    Text(selectedResult?.plainText.removingInvisibleControls ?? "Select a result to preview its lyrics.")
                         .font(.system(size: 12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(8)
                 }.frame(height: 100)
             }

@@ -12,6 +12,11 @@ struct PlaybackArrowKeys {
         [123, 124].contains(keyCode) && modifiers.intersection([.command, .option, .control, .shift]).isEmpty
     }
 
+    /// Option-Left / Option-Right move between podcast chapters where bare arrows would seek.
+    static func isChapterKey(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        [123, 124].contains(keyCode) && modifiers.intersection([.command, .option, .control, .shift]) == .option
+    }
+
     mutating func reset() { keyCode = nil; generation = nil; requestedPosition = nil }
 
     mutating func target(keyCode: UInt16, isRepeat: Bool, generation: UUID, position: Double, duration: Double) -> Double? {

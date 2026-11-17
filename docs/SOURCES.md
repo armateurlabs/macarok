@@ -50,6 +50,8 @@ Search only runs on submission. Requests are rate-limited and cached; a director
 
 Episodes stream by default. Choose **Download Episode** to keep an explicit local copy, then **Reveal in Finder** to locate it. The timeline distinguishes playback progress from buffered/downloaded coverage. See [podcast timelines, storage, and cleanup](PODCASTS.md) for the download folder and retention policy.
 
+Subscribed shows are browsed in the [Podcasts library tab](PODCASTS.md#library-browsing) and refresh automatically every hour by default ([automatic refresh](PODCASTS.md#automatic-refresh)).
+
 ## Internet Archive: Live Music Archive and LibriVox
 
 Select **Live Music Archive** or **LibriVox** and choose **Add Collection**. No account is needed. Each collection is a separate source backed by the same Internet Archive connector. Adding a collection that is already present selects it.

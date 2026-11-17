@@ -18,11 +18,14 @@ enum RepeatMode: String, Codable, CaseIterable {
 }
 
 enum LibraryView: String, CaseIterable, Identifiable {
-    case home, artists, albums, years, folders, tags
+    case home, artists, albums, years, folders, tags, podcasts
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
     var symbol: String {
-        switch self { case .home: "house"; case .artists: "person.2"; case .albums: "square.stack"; case .years: "calendar"; case .folders: "folder"; case .tags: "tag" }
+        switch self {
+        case .home: "house"; case .artists: "person.2"; case .albums: "square.stack"; case .years: "calendar"
+        case .folders: "folder"; case .tags: "tag"; case .podcasts: "waveform"
+        }
     }
 }
 
@@ -99,6 +102,8 @@ struct AppPreferences: Codable {
     var playlistShowsSources = true
     var similarMixFollow: SimilarMixFollow = .blend
     var archiveQuality: ArchiveAudioQuality = .high
+    /// Seconds between automatic podcast feed refreshes; 0 turns them off.
+    var podcastRefreshInterval: TimeInterval = 3600
     var buffer: Double? { customBuffer ? min(120, max(1, bufferSeconds)) : nil }
 
     init() {}
@@ -108,7 +113,7 @@ struct AppPreferences: Codable {
         // Renamed when album groups became the default, so unreleased builds' saved Off does not persist.
         case playlistAlbumGroups = "showPlaylistAlbumGroups"
         case playlistShowsSources = "showPlaylistSources"
-        case similarMixFollow, archiveQuality
+        case similarMixFollow, archiveQuality, podcastRefreshInterval
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -128,6 +133,7 @@ struct AppPreferences: Codable {
         playlistShowsSources = (try? values.decodeIfPresent(Bool.self, forKey: .playlistShowsSources)) ?? true
         similarMixFollow = (try? values.decodeIfPresent(SimilarMixFollow.self, forKey: .similarMixFollow)) ?? .blend
         archiveQuality = (try? values.decodeIfPresent(ArchiveAudioQuality.self, forKey: .archiveQuality)) ?? .high
+        podcastRefreshInterval = max(0, (try? values.decodeIfPresent(TimeInterval.self, forKey: .podcastRefreshInterval)) ?? 3600)
     }
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
@@ -145,6 +151,7 @@ struct AppPreferences: Codable {
         try values.encode(playlistShowsSources, forKey: .playlistShowsSources)
         try values.encode(similarMixFollow, forKey: .similarMixFollow)
         try values.encode(archiveQuality, forKey: .archiveQuality)
+        try values.encode(podcastRefreshInterval, forKey: .podcastRefreshInterval)
     }
 
     static func load() -> Self {

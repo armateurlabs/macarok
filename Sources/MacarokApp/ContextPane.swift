@@ -20,7 +20,10 @@ struct ContextPane: View {
         else if model.isRadioSource {
             ContentUnavailableView("Internet Radio", systemImage: "antenna.radiowaves.left.and.right", description: Text("Choose a station from your library, or browse the directory to find one."))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if model.tracks.isEmpty && (model.homeFilter != .all || !model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
+        } else if let id = model.focusedPodcastShowID, let source = model.sourcesByID[id] {
+            ScrollView { PodcastShowHome(model: model, source: source).padding(22).frame(maxWidth: .infinity, alignment: .leading) }
+                .background(Color(nsColor: .textBackgroundColor))
+        } else if model.tracks.isEmpty && !model.showsPodcastHome && (model.homeFilter != .all || !model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
             HomeView(model: model).padding(22).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor))
         } else {
@@ -30,7 +33,7 @@ struct ContextPane: View {
     }
 
     @ViewBuilder private var playingContent: some View {
-        switch model.contextMode {
+        switch model.displayedContextMode {
         case .lyrics: LyricsPane(model: model)
         case .wikipedia: WikipediaPane(model: model)
         case .editAlbumMetadata:
@@ -94,16 +97,18 @@ struct HomeView: View {
     @Bindable var model: AppModel
     private let columns = [GridItem(.adaptive(minimum: 100, maximum: 170), spacing: 14, alignment: .top)]
 
+    private var isEmpty: Bool { model.tracks.isEmpty && !model.showsPodcastHome }
+
     var body: some View {
-        VStack(alignment: model.tracks.isEmpty ? .center : .leading, spacing: 23) {
-            VStack(alignment: model.tracks.isEmpty ? .center : .leading, spacing: 5) {
+        VStack(alignment: isEmpty ? .center : .leading, spacing: 23) {
+            VStack(alignment: isEmpty ? .center : .leading, spacing: 5) {
                 Text(model.scopeTitle.uppercased()).font(.system(size: 10, weight: .medium)).tracking(1).foregroundStyle(.secondary)
                 Text(model.homeFilter == .all ? "Your Library" : model.homeFilter.title).font(.system(size: 27, weight: .semibold))
-                Text("\(model.albums.count) albums · \(model.tracks.count) tracks").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(model.homeLibrarySummary).font(.system(size: 12)).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: model.tracks.isEmpty ? .center : .leading)
-            .multilineTextAlignment(model.tracks.isEmpty ? .center : .leading)
-            if model.tracks.isEmpty && (model.homeFilter != .all || !model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
+            .frame(maxWidth: .infinity, alignment: isEmpty ? .center : .leading)
+            .multilineTextAlignment(isEmpty ? .center : .leading)
+            if isEmpty && (model.homeFilter != .all || !model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
                 Spacer(minLength: 0)
                 VStack(spacing: 16) {
                     Image(systemName: "music.note").font(.system(size: 42)).foregroundStyle(.tertiary)
@@ -143,9 +148,12 @@ struct HomeView: View {
                         }
                     }
                 }
-                if model.isAllSources && model.homeFilter == .all { RadioFavoritesSection(model: model) }
+                if model.isAllSources && model.homeFilter == .all {
+                    PodcastHomeSection(model: model)
+                    RadioFavoritesSection(model: model)
+                }
             }
-        }.frame(maxWidth: .infinity, maxHeight: model.tracks.isEmpty ? .infinity : nil)
+        }.frame(maxWidth: .infinity, maxHeight: isEmpty ? .infinity : nil)
     }
     private var emptyHistory: some View { Text("Start listening to build your listening history.").font(.system(size: 12)).foregroundStyle(.secondary).padding(.vertical, 5) }
     private func historyRow(_ track: TrackRecord, showsCount: Bool = false) -> some View {
@@ -248,12 +256,17 @@ struct TrackContextView: View {
     let track: TrackRecord
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(model.currentTrack?.id == track.id ? "NOW PLAYING" : "SELECTED TRACK").font(.system(size: 10, weight: .medium)).tracking(1).foregroundStyle(.secondary)
+            Text(model.currentTrack?.id == track.id ? "NOW PLAYING" : isPodcast ? "SELECTED EPISODE" : "SELECTED TRACK").font(.system(size: 10, weight: .medium)).tracking(1).foregroundStyle(.secondary)
             HStack(alignment: .center, spacing: 17) {
                 ArtworkView(track: track, model: model).frame(width: 126, height: 126)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(track.title).font(.system(size: 22, weight: .semibold)).textSelection(.enabled)
                         .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add to Active Playlist") { [track] }; TrackFileActions(model: model, track: track) }
+                    if isPodcast {
+                        Text(track.artist).font(.system(size: 13)).foregroundStyle(.secondary)
+                        Button(track.album) { model.openPodcastShow(track.sourceID) }.buttonStyle(.link).font(.system(size: 12))
+                            .help("Open this show")
+                    } else {
                     Button(track.artist) { model.inspectArtist(track.albumArtist) }.buttonStyle(.link).font(.system(size: 13))
                         .contextMenu {
                             if model.scopeIncludes(sourceID: track.sourceID) {
@@ -266,6 +279,7 @@ struct TrackContextView: View {
                                 LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }; AlbumMetadataAction(model: model, album: album)
                             }
                         }
+                    }
                     Text([track.year.map(String.init), track.genre].compactMap { $0 }.joined(separator: " · ")).font(.system(size: 11)).foregroundStyle(.secondary)
                     Text((track.isCUETrack ? "CUE + " : "") + track.format.uppercased()).font(.system(size: 9, weight: .medium)).padding(.horizontal, 5).padding(.vertical, 2).overlay(RoundedRectangle(cornerRadius: 3).stroke(.quaternary))
                 }
@@ -292,8 +306,14 @@ struct TrackContextView: View {
                 }
             }
             Divider()
+            if isPodcast {
+                PodcastChaptersView(model: model, timeline: model.player.timeline, track: track)
+                PodcastEpisodeNotesView(model: model, track: track)
+            }
+            else {
             HStack { Text("About this recording").font(.system(size: 13, weight: .semibold)); Spacer(); Button { model.beginMetadataEditing(track) } label: { Image(systemName: "square.and.pencil") }.buttonStyle(.borderless).help("Edit song metadata") }
             Text("\(track.title) by \(track.artist), from \(track.album).\(track.isCUETrack ? " This track is a region of a shared audio file." : "")").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
+            }
             let related = Array(model.albumsForArtist(track.albumArtist).lazy.filter { $0.id != track.albumID || $0.sourceID != track.sourceID }.prefix(4))
             if !related.isEmpty {
                 Text("More in your collection").font(.system(size: 13, weight: .semibold))
@@ -301,6 +321,7 @@ struct TrackContextView: View {
             }
         }
     }
+    private var isPodcast: Bool { model.isPodcastTrack(track) }
     private func fact(_ label: String, _ value: String) -> some View { VStack(alignment: .leading, spacing: 4) { Text(label).font(.system(size: 10)).foregroundStyle(.secondary); Text(value).font(.system(size: 12)) } }
     private var tags: some View {
         VStack(alignment: .leading, spacing: 13) {
@@ -315,7 +336,9 @@ struct TrackContextView: View {
                 if let path = track.remotePath { tag("Server path", path) }
                 if track.metadataLocked { tag("Metadata", "Personal corrections preserved") }
             }.font(.system(size: 12)).textSelection(.enabled)
-            HStack { Button { model.beginMetadataEditing(track) } label: { Label("Edit Song Metadata…", systemImage: "square.and.pencil") }; Button { model.beginArtworkEditing(track) } label: { Label("Artwork…", systemImage: "photo") } }.controlSize(.small)
+            if !isPodcast {
+                HStack { Button { model.beginMetadataEditing(track) } label: { Label("Edit Song Metadata…", systemImage: "square.and.pencil") }; Button { model.beginArtworkEditing(track) } label: { Label("Artwork…", systemImage: "photo") } }.controlSize(.small)
+            }
         }
     }
     private func tag(_ label: String, _ value: String) -> some View { GridRow(alignment: .top) { Text(label).foregroundStyle(.secondary); Text(value).frame(maxWidth: .infinity, alignment: .leading) } }

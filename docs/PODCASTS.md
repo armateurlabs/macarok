@@ -2,7 +2,44 @@
 
 Subscribe to a publisher RSS/Atom feed or find a show through Podcast Index or Apple Podcasts. See [source setup](SOURCES.md#podcasts) for discovery and subscription.
 
-Each show's library episodes appear newest first by publication date, including cached feeds and search results. Undated episodes follow dated episodes. Existing playlist entries keep their saved order.
+Episodes are listed by publication date, newest first by default, including cached feeds and search results. Undated episodes follow dated episodes in both directions. Existing playlist entries keep their saved order.
+
+## Library browsing
+
+Podcasts have their own **Podcasts** library tab, shown when the current scope contains at least one show. In All Sources, podcasts no longer appear in Artists, Albums, Years, Folders, Tags, Shuffle Library, or the music sections of Home, so a show that publishes often cannot fill Recently Added.
+
+The tab has four views:
+
+- **Shows** lists every show with its artwork, episode count, latest publication date, and unplayed count. Click a show to open it in place; the back button returns to the list.
+- **New** lists unplayed episodes from the last 30 days across every show.
+- **In Progress** lists episodes you started and have not finished, most recent first.
+- **Downloaded** lists downloaded episodes.
+
+An open show, or a podcast chosen in the source picker, shows its artwork, author, and actions: **Resume** (the most recently heard unfinished episode), **Play Latest**, **Add Unplayed** (oldest first), and a menu with Mark All as Played, Refresh Show, Copy Feed URL, Open Website, and Unsubscribe…. Its episodes can be filtered by **All**, **Unplayed**, or **Downloaded**. The central Home shows the show's description, Continue Listening, and Latest Episodes; the Home filters (Recently added, Recently played, Most played) apply to music only and are hidden there.
+
+Each episode row shows an unplayed dot, the title, its publication date (Today, Yesterday, the weekday within a week, then the date), and the remaining time with a progress bar once started. A trailing symbol shows, in order of priority, playback, download progress, a failed download, presence in the active playlist, or a completed download. Hover a row for the start of its notes. Rows support the usual selection, Return or double-click, dragging into the playlist, and a context menu with Mark as Played / Unplayed, Play from Beginning, Go to Show, and download actions.
+
+The arrow beside a podcast list heading reverses the date order, and the Shows list by latest episode. Searching filters shows and episodes with the library search.
+
+In **Playing**, an episode always shows its context: its notes from the feed, its show (click to open it), and download actions. Notes keep the publisher's paragraphs and lists; long notes collapse behind **More**. Web addresses open in the browser, and chapter times such as `03:12` or `1:02:03` are links that jump to that moment, starting the episode if needed. Lyrics, Wikipedia, and the metadata editors do not apply to episodes, so their menu is hidden; your chosen view returns with the next music track.
+
+All Sources Home adds **Continue Listening** and **New Episodes** (the latest unplayed episode of each show). Click a tile to open its show; double-click to play it.
+
+## Chapters
+
+Episodes with chapters show them on the playback timeline as small gaps in the bar. Hover the bar to see the time and chapter under the pointer; while dragging, the same label shows where playback will jump. The title row shows the chapter being heard, such as “3/12 · Interview” (hover it for the author), and two small buttons beside the times move to the previous or next chapter. **Option-Left** and **Option-Right**, or **Playback → Previous Chapter / Next Chapter**, do the same. Like Previous Track, Previous Chapter first returns to the start of the current chapter when more than three seconds into it. Text fields keep Option-arrows for moving by word. The menu bar mini player shows the same current chapter below the author, with chapter buttons on each side of the track buttons.
+
+In **Playing → Context**, the episode's chapters are listed with the current one highlighted; click one to jump there, or to start the episode at that chapter.
+
+Macarok uses, in order: the publisher's Podcasting 2.0 chapters file (`podcast:chapters`), Podlove Simple Chapters in the feed (`psc:chapters`), then a chapter list written in the episode notes (at least three lines starting with increasing times, the first within five minutes). A chapters file is downloaded only when an episode is played or shown in Context, then kept with the library and removed with its show. Chapters embedded in the audio file are not read yet. When a stream cannot seek, chapter navigation is unavailable like the timeline.
+
+## Listening progress
+
+Macarok saves where you stop in each episode. Starting an unfinished episode again continues two seconds before that point; **Play from Beginning** starts over. An episode counts as played when you reach its last 30 seconds, it plays to the end, or you choose **Mark as Played**. Positions under 30 seconds are treated as a preview. Episodes heard before this version count as played until marked unplayed. Progress is removed with its show.
+
+## Automatic refresh
+
+**Settings → Podcasts → Check for new episodes** refreshes shows every hour by default; choose every 15 minutes, 6 hours, a day, or Off. Refresh happens quietly while Macarok is open and does not interrupt a refresh you started. Macarok sends the feed's cache validators, so an unchanged feed is not downloaded or parsed again. A failed refresh keeps the existing episodes and shows a warning on the show and in Settings. **Refresh All Now** checks every show immediately; the library footer's Refresh still refreshes the selected scope.
 
 ## Read the timeline
 

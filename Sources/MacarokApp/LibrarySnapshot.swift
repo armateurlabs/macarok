@@ -73,6 +73,9 @@ struct LibrarySnapshot: Sendable {
     let tracksByFolder: [String: [TrackRecord]]
     let folderTitles: [String: String]
     let stations: [TrackRecord]
+    /// Episodes of podcast sources in scope, newest first. All Sources keeps them out of the music
+    /// lists above; lookups by track or album identity still resolve them.
+    let podcastEpisodes: [TrackRecord]
     /// Browsing lists in the user's chosen direction; the fields above keep canonical order.
     let presentation: LibraryPresentation
 
@@ -80,7 +83,7 @@ struct LibrarySnapshot: Sendable {
                                        artists: [], artistsByName: [:], yearGroups: [], genreGroups: [], formatGroups: [],
                                        recentlyAdded: [], mostPlayedAlbums: [], recentlyPlayed: [], mostPlayedTracks: [],
                                        mostPlayedArtists: [], folderNodes: [], tracksByFolder: [:], folderTitles: [:], stations: [],
-                                       presentation: .empty)
+                                       podcastEpisodes: [], presentation: .empty)
 
     static func build(sourceID: String, tracks: [TrackRecord], sources: [SourceRecord]) throws -> LibrarySnapshot {
         try build(scope: .source(sourceID), tracks: tracks, sources: sources)
@@ -104,7 +107,7 @@ struct LibrarySnapshot: Sendable {
             formatGroups: formatGroups, recentlyAdded: recentlyAdded, mostPlayedAlbums: mostPlayedAlbums,
             recentlyPlayed: recentlyPlayed, mostPlayedTracks: mostPlayedTracks, mostPlayedArtists: mostPlayedArtists,
             folderNodes: folderNodes, tracksByFolder: tracksByFolder, folderTitles: folderTitles, stations: stations,
-            presentation: presentation)
+            podcastEpisodes: podcastEpisodes, presentation: presentation)
     }
 
     static func build(scope: LibraryScope, tracks input: [TrackRecord], sources: [SourceRecord],
@@ -113,23 +116,30 @@ struct LibrarySnapshot: Sendable {
         let visibleSources = sources.filter { scope.includes(sourceID: $0.id) }
         let registeredIDs = Set(visibleSources.map(\.id))
         let radioIDs = Set(visibleSources.filter { $0.kind == .radio }.map(\.id))
-        let musicSources = visibleSources.filter { $0.kind != .radio }
+        let podcastIDs = Set(visibleSources.filter { $0.kind == .podcasts }.map(\.id))
+        // All Sources browses music only; podcasts have their own library tab and Home sections.
+        let separatesPodcasts = scope == .all && !podcastIDs.isEmpty
+        let musicSources = visibleSources.filter { $0.kind != .radio && !(separatesPodcasts && $0.kind == .podcasts) }
         var seen: Set<String> = []
         var tracks: [TrackRecord] = []
         var stations: [TrackRecord] = []
+        var separatedEpisodes: [TrackRecord] = []
         tracks.reserveCapacity(input.count)
         for (index, track) in input.enumerated() {
             if index.isMultiple(of: 256) { try Task.checkCancellation() }
             guard scope.includes(sourceID: track.sourceID), registeredIDs.contains(track.sourceID),
                   track.isAvailable, seen.insert(track.id).inserted else { continue }
             if radioIDs.contains(track.sourceID) { stations.append(track) }
+            else if separatesPodcasts && podcastIDs.contains(track.sourceID) { separatedEpisodes.append(track) }
             else { tracks.append(track) }
         }
         tracks = try tracks.sorted { try Task.checkCancellation(); return TrackRecord.libraryOrder($0, $1) }
-        let podcastIDs = Set(visibleSources.filter { $0.kind == .podcasts }.map(\.id))
         try orderPodcastEpisodes(&tracks, sourceIDs: podcastIDs)
+        try Task.checkCancellation()
+        let podcastEpisodes = PodcastLibrary.ordered(separatesPodcasts ? separatedEpisodes : tracks.filter { podcastIDs.contains($0.sourceID) })
 
         var tracksByID = Dictionary(uniqueKeysWithValues: stations.map { ($0.id, $0) })
+        for episode in separatedEpisodes { tracksByID[episode.id] = episode }
         var albumTracks: [LibraryAlbumKey: [TrackRecord]] = [:]
         var genres: [String: [TrackRecord]] = [:]
         var formats: [String: [TrackRecord]] = [:]
@@ -174,6 +184,12 @@ struct LibrarySnapshot: Sendable {
         var artistAlbums: [String: [AlbumRecord]] = [:]
         var artistNames: [String: Set<String>] = [:]
         var albumsByYear: [Int: [AlbumRecord]] = [:]
+        if separatesPodcasts {
+            for values in Dictionary(grouping: podcastEpisodes, by: { LibraryAlbumKey(sourceID: $0.sourceID, albumID: $0.albumID) }).values {
+                let album = AlbumRecord(orderedTracks: values)
+                albumsByID[album.presentationID] = album
+            }
+        }
         for album in albums {
             try Task.checkCancellation()
             albumsByID[album.presentationID] = album
@@ -236,7 +252,7 @@ struct LibrarySnapshot: Sendable {
                                mostPlayedAlbums: mostPlayedAlbums, recentlyPlayed: recentlyPlayed, mostPlayedTracks: mostPlayedTracks,
                                mostPlayedArtists: mostPlayedArtists, folderNodes: folderNodes, tracksByFolder: tracksByFolder,
                                folderTitles: folderNames, stations: stations.sorted { stringOrder($0.title, $1.title) },
-                               presentation: presentation)
+                               podcastEpisodes: podcastEpisodes, presentation: presentation)
     }
 
     /// Patch frequently changing values without SQL reads, regrouping, or localized sorting.
@@ -247,12 +263,15 @@ struct LibrarySnapshot: Sendable {
         let visibleSources = sources.filter { scope.includes(sourceID: $0.id) }
         let registered = Set(visibleSources.map(\.id))
         let radioSources = Set(visibleSources.filter { $0.kind == .radio }.map(\.id))
+        let podcastSources = Set(visibleSources.filter { $0.kind == .podcasts }.map(\.id))
         var updates: [String: TrackRecord] = [:]
         var radioUpdates: [TrackRecord] = []
         var structural = false
         for track in updatedTracks where registered.contains(track.sourceID) {
             try Task.checkCancellation()
             if radioSources.contains(track.sourceID) { radioUpdates.append(track); continue }
+            // Separated episodes live outside the music arrays patched below.
+            if scope == .all, podcastSources.contains(track.sourceID) { structural = true }
             // Stored track identities belong to one origin, including duplicated albums/titles.
             if let previous = tracksByID[track.id], previous.sourceID != track.sourceID { continue }
             if let previous = tracksByID[track.id] {
@@ -346,7 +365,7 @@ struct LibrarySnapshot: Sendable {
             mostPlayedTracks: try Self.topRanked(tracks, eligible: { $0.playCount > 0 }, before: { $0.playCount > $1.playCount }),
             mostPlayedArtists: try Self.topRanked(artists, eligible: { $0.playCount > 0 }, before: { $0.playCount > $1.playCount }),
             folderNodes: folderNodes, tracksByFolder: folders, folderTitles: folderTitles, stations: stations,
-            presentation: presentation)
+            podcastEpisodes: try patchedTracks(podcastEpisodes), presentation: presentation)
         return try updated.updatingStations(radioUpdates, sources: sources)
     }
 
@@ -377,7 +396,7 @@ struct LibrarySnapshot: Sendable {
             recentlyAdded: recentlyAdded, mostPlayedAlbums: mostPlayedAlbums, recentlyPlayed: recentlyPlayed,
             mostPlayedTracks: mostPlayedTracks, mostPlayedArtists: mostPlayedArtists,
             folderNodes: folderNodes, tracksByFolder: tracksByFolder, folderTitles: folderTitles, stations: stations,
-            presentation: presentation)
+            podcastEpisodes: podcastEpisodes, presentation: presentation)
     }
 
     /// Input is already in the library's deterministic display order, which supplies every tie break.

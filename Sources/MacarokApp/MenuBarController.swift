@@ -81,7 +81,9 @@ final class MenuBarController {
             active: [.playing, .opening, .buffering].contains(playbackState) || model.playbackIntentQueueID != nil,
             canPlay: !model.queue.isEmpty || model.selectedTrack != nil,
             hasQueue: !model.queue.isEmpty, isRadio: radio, reconnect: radio && model.radioDisconnected,
-            appearance: model.settings.appearance, artworkRevision: model.artworkRevision)
+            appearance: model.settings.appearance, artworkRevision: model.artworkRevision,
+            chapters: model.isPodcastTrack(track) ? model.podcasts.currentChapters : [],
+            canSeekChapters: model.isPodcastTrack(track) && !radio)
     }
 
     private func render(_ value: MenuBarPlayerPresentation.State) {
@@ -104,6 +106,8 @@ final class MenuBarController {
         case .playPause: model.togglePlayback()
         case .previous: model.previous()
         case .next: model.advance()
+        case .previousChapter: model.seekChapter(forward: false)
+        case .nextChapter: model.seekChapter(forward: true)
         case .showWindow: model.showMainWindow()
         case .quit: NSApp.terminate(nil)
         }

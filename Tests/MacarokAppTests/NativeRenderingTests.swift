@@ -387,6 +387,101 @@ final class NativeRenderingTests: XCTestCase {
         XCTAssertEqual(model.player.state, .stopped)
     }
 
+    /// Podcast browsing rendered from a seeded library; no feed is fetched.
+    func testRenderPodcastLibraryInLightAndDarkAppearance() async throws {
+        guard let outputPath = ProcessInfo.processInfo.environment["MACAROK_SNAPSHOT_DIRECTORY"], !outputPath.isEmpty else {
+            throw XCTSkip("Set MACAROK_SNAPSHOT_DIRECTORY to opt in to offscreen native component rendering.")
+        }
+        let output = URL(fileURLWithPath: outputPath, isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let demo = packageRoot.appendingPathComponent(".build/demo-library", isDirectory: true)
+        let covers = ["Meridian Atlas/2005 - Afterlight", "Paper Satellites/2013 - Field Notes", "North Window/2026 - Continuous Album"]
+            .map { demo.appendingPathComponent($0).appendingPathComponent("cover.png").path }
+        guard covers.allSatisfy(FileManager.default.fileExists(atPath:)) else {
+            XCTFail("Generate synthetic fixtures first: python3 scripts/create-demo-library.py .build/demo-library")
+            return
+        }
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokPodcastRender-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let store = try LibraryStore(url: temporary.appendingPathComponent("podcasts.sqlite"))
+        let now = Date()
+        // Fictional shows with synthetic episodes.
+        let shows: [(id: String, title: String, author: String, cover: String, about: String, episodes: [String])] = [
+            ("render-field-notes", "Field Notes Weekly", "Paper Satellites", covers[1],
+             "Conversations about field recording, tape loops, and the places sounds come from. A new episode every week.",
+             ["Recording the Tide", "Microphones in the Snow", "The Quietest Room", "Night Trains", "Listening to Bridges", "Wind on Wire"]),
+            ("render-afterlight", "Afterlight Radio", "Meridian Atlas", covers[0],
+             "A monthly hour of ambient and electronic music with the stories behind each track.",
+             ["Episode 12: Long Shadows", "Episode 11: Harbour Glow", "Episode 10: Blue Hour"]),
+            ("render-window", "The Continuous Album", "North Window", covers[2],
+             "A serial documentary about making one album over a year.", ["Part 3: Mixing", "Part 2: Takes", "Part 1: Songs"]),
+        ]
+        var allTracks: [String: [TrackRecord]] = [:]
+        for (index, show) in shows.enumerated() {
+            let source = SourceRecord(id: show.id, kind: .podcasts, name: show.title, location: "https://podcasts.invalid/\(show.id).xml",
+                                      createdAt: Date(timeIntervalSince1970: Double(index + 1)))
+            let feed = PodcastFeed(url: source.url!, title: show.title, author: show.author, description: show.about, episodes: show.episodes.enumerated().map { offset, title in
+                PodcastEpisode(id: "\(show.id)-\(offset)", title: title, description: PodcastClient.plainText(fromHTML: offset == 1 ? """
+                    <p>We take three microphones up a frozen valley and record what the snow does to sound.</p>
+                    <p><strong>IN THIS EPISODE</strong><br>▪️ Why snow absorbs high frequencies<br>▪️ Keeping batteries warm</p>
+                    <p>CHAPTERS<br>00:00 Introduction<br>03:12 The valley<br>17:45 Night recording</p>
+                    <p>Show notes: <a href="https://podcasts.invalid/notes">https://podcasts.invalid/notes</a></p>
+                    """ : "Notes for \(title)."),
+                               audioURL: URL(string: "https://podcasts.invalid/\(show.id)/\(offset).mp3")!,
+                               publicationDate: now.addingTimeInterval(-Double(index * 2 + offset * 6) * 86_400 - 3_600),
+                               duration: Double(1_800 + offset * 420))
+            })
+            let tracks = feed.episodes.map { $0.asTrackRecord(sourceID: source.id, feed: feed, artworkPath: show.cover) }
+            try store.saveSource(source, tracks: tracks)
+            try store.savePodcastFeed(sourceID: source.id, feed: feed, validators: PodcastFeedValidators(), now: now.addingTimeInterval(-900))
+            allTracks[source.id] = tracks
+        }
+        let fieldNotes = try XCTUnwrap(allTracks["render-field-notes"]), afterlight = try XCTUnwrap(allTracks["render-afterlight"])
+        try store.savePodcastProgress([
+            PodcastProgressRecord(trackID: fieldNotes[1].id, sourceID: "render-field-notes", position: 1_020, duration: fieldNotes[1].duration, isFinished: false),
+            PodcastProgressRecord(trackID: afterlight[0].id, sourceID: "render-afterlight", position: 640, duration: afterlight[0].duration, isFinished: false),
+            PodcastProgressRecord(trackID: fieldNotes[3].id, sourceID: "render-field-notes", position: fieldNotes[3].duration, duration: fieldNotes[3].duration, isFinished: true),
+            PodcastProgressRecord(trackID: fieldNotes[4].id, sourceID: "render-field-notes", position: fieldNotes[4].duration, duration: fieldNotes[4].duration, isFinished: true),
+        ])
+
+        var preferences = AppPreferences()
+        preferences.volume = 0
+        let model = AppModel(store: store, preferences: preferences, registerSystemControls: false)
+        await model.start()
+        model.libraryScope = .all
+        await model.waitForLibraryLoad()
+        _ = NSApplication.shared
+        for scheme in [ColorScheme.light, .dark] {
+            let suffix = scheme == .light ? "light" : "dark"
+            model.settings.appearance = scheme == .light ? .light : .dark
+            model.clearQueue(); model.add([afterlight[0], fieldNotes[0]])
+            model.podcasts.openShowID = nil; model.podcasts.hubSegment = .shows
+            model.libraryView = .podcasts; model.contextPage = .home
+            try await render(MainWindow(model: model), size: NSSize(width: 1380, height: 860), scheme: scheme,
+                             destination: output.appendingPathComponent("podcasts-shows-\(suffix).png"))
+
+            model.podcasts.hubSegment = .new
+            try await render(MainWindow(model: model), size: NSSize(width: 1380, height: 860), scheme: scheme,
+                             destination: output.appendingPathComponent("podcasts-new-\(suffix).png"))
+
+            model.openPodcastShow("render-field-notes")
+            try await render(MainWindow(model: model), size: NSSize(width: 1380, height: 860), scheme: scheme,
+                             destination: output.appendingPathComponent("podcasts-show-\(suffix).png"))
+
+            model.add([fieldNotes[1]])
+            model.currentQueueID = model.queue.last?.id
+            model.restorePosition = 1_020
+            _ = await model.podcasts.chapters(for: fieldNotes[1])
+            model.podcasts.loadCurrentChapters()
+            model.centerPage = .playing; model.inspect(fieldNotes[1]); model.contextMode = .lyrics
+            try await render(MainWindow(model: model), size: NSSize(width: 1380, height: 860), scheme: scheme,
+                             destination: output.appendingPathComponent("podcasts-playing-\(suffix).png"))
+            model.contextMode = .context; model.currentQueueID = nil; model.restorePosition = 0
+        }
+        XCTAssertEqual(model.player.state, .stopped)
+    }
+
     private func segmentedControls(in view: NSView) -> [NSSegmentedControl] {
         if let control = view as? NSSegmentedControl { return [control] }
         return view.subviews.flatMap { segmentedControls(in: $0) }

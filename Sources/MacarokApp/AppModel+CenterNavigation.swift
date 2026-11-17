@@ -112,14 +112,14 @@ extension AppModel {
     }
 
     func ensureMetadataEditingSession() {
-        guard metadataEditingSession == nil, let track = playingContextTrack, !isRadioTrack(track) else { return }
+        guard metadataEditingSession == nil, let track = playingContextTrack, !isRadioTrack(track), !isPodcastTrack(track) else { return }
         metadataEditingSession = MetadataEditingSession(track: track)
     }
 
     func beginMetadataEditing(_ track: TrackRecord? = nil) {
         recordUserCenterNavigation()
         if metadataEditingSession == nil {
-            guard let target = track ?? playingContextTrack, !isRadioTrack(target) else { return }
+            guard let target = track ?? playingContextTrack, !isRadioTrack(target), !isPodcastTrack(target) else { return }
             metadataEditingSession = MetadataEditingSession(track: target)
         }
         contextPage = .track
@@ -140,14 +140,14 @@ extension AppModel {
     }
 
     func ensureAlbumMetadataEditingSession() {
-        guard albumMetadataEditingSession == nil, let track = playingContextTrack, !isRadioTrack(track) else { return }
+        guard albumMetadataEditingSession == nil, let track = playingContextTrack, !isRadioTrack(track), !isPodcastTrack(track) else { return }
         albumMetadataEditingSession = AlbumMetadataEditingSession(track: track)
     }
 
     func beginAlbumMetadataEditing(_ track: TrackRecord? = nil) {
         recordUserCenterNavigation()
         if albumMetadataEditingSession == nil {
-            guard let target = track ?? playingContextTrack, !isRadioTrack(target) else { return }
+            guard let target = track ?? playingContextTrack, !isRadioTrack(target), !isPodcastTrack(target) else { return }
             albumMetadataEditingSession = AlbumMetadataEditingSession(track: target)
         }
         contextPage = .track; contextMode = .editAlbumMetadata

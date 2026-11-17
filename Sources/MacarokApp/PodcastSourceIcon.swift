@@ -1,9 +1,18 @@
 import AppKit
+import SwiftUI
 
 /// A monochrome person-and-waves template that follows native menu and control appearances.
 enum PodcastSourceIcon {
-    static let image: NSImage = {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+    static let image = make(size: 18)
+    /// Matches the visual size of the SF Symbols in the Settings toolbar.
+    static let settingsImage = make(size: 22)
+
+    /// Drawn on an 18-point grid and scaled, so every size keeps the same proportions.
+    static func make(size: CGFloat) -> NSImage {
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
+            let scale = NSAffineTransform()
+            scale.scale(by: size / 18)
+            scale.concat()
             NSColor.labelColor.setStroke()
             NSColor.labelColor.setFill()
             let center = NSPoint(x: 9, y: 10)
@@ -31,5 +40,11 @@ enum PodcastSourceIcon {
         image.isTemplate = true
         image.accessibilityDescription = "Podcasts"
         return image
-    }()
+    }
+}
+
+extension Image {
+    static var podcast: Image { Image(nsImage: PodcastSourceIcon.image).renderingMode(.template) }
+    /// Empty states draw their icon at a fixed size instead of scaling with the font.
+    static var podcastLarge: Image { Image(nsImage: PodcastSourceIcon.make(size: 40)).renderingMode(.template) }
 }

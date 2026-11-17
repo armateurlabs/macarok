@@ -34,6 +34,12 @@ final class LyricsTests: XCTestCase {
         XCTAssertEqual(LyricsLookupQuery(track: track).duration, 5)
     }
 
+    func testDisplayTextDropsInvisibleControlsButKeepsLayoutAndEmoji() {
+        let text = "Men\u{AD}tion\nemo\u{1F}tion\tand\u{96} more 👩‍🎤"
+        XCTAssertEqual(text.removingInvisibleControls, "Mention\nemotion\tand more 👩‍🎤")
+        XCTAssertEqual("Plain".removingInvisibleControls, "Plain")
+    }
+
     func testUntimedLyricsKeepParagraphsAndMalformedTimestampsDoNotInventTiming() {
         let plain = LRCParser.parse("First test line\n\nSecond test line")
         XCTAssertFalse(plain.isSynced)

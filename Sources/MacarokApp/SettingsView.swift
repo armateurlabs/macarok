@@ -3,7 +3,7 @@ import KeyboardShortcuts
 import MacarokCore
 import SwiftUI
 
-enum SettingsTab: Hashable { case general, playback, shortcuts, sources, scrobbling }
+enum SettingsTab: Hashable { case general, playback, shortcuts, sources, podcasts, scrobbling }
 
 struct SettingsView: View {
     @Bindable var model: AppModel
@@ -25,6 +25,7 @@ struct SettingsView: View {
             playback.tag(SettingsTab.playback).tabItem { Label("Playback", systemImage: "play.circle") }
             shortcuts.tag(SettingsTab.shortcuts).tabItem { Label("Shortcuts", systemImage: "keyboard") }
             sources.tag(SettingsTab.sources).tabItem { Label("Sources", systemImage: "externaldrive.connected.to.line.below") }
+            PodcastSettingsView(model: model, podcasts: model.podcasts).tag(SettingsTab.podcasts).tabItem { Label { Text("Podcasts") } icon: { Image(nsImage: PodcastSourceIcon.settingsImage).renderingMode(.template) } }
             Group {
                 if let controller = model.scrobbling { ScrobblingSettingsView(controller: controller, sources: model.sources) }
                 else { ContentUnavailableView("Scrobbling", systemImage: "waveform", description: Text("Open a library to configure Last.fm.")) }
@@ -205,7 +206,7 @@ struct SettingsView: View {
                     Section {
                         HStack(alignment: .top, spacing: 12) {
                             Group {
-                                if source.kind == .podcasts { Image(nsImage: PodcastSourceIcon.image).renderingMode(.template) }
+                                if source.kind == .podcasts { Image.podcast }
                                 else { Image(systemName: source.kind.librarySymbol) }
                             }
                             .font(.title3).foregroundStyle(source.kind == .podcasts ? Color.primary : Color.accentColor).frame(width: 25)

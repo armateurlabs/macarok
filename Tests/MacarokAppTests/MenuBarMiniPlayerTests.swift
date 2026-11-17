@@ -77,6 +77,27 @@ final class MenuBarMiniPlayerTests: XCTestCase {
         XCTAssertEqual(player.state.track?.id, "same")
     }
 
+    func testPodcastChaptersShowTheCurrentChapterAndChapterButtons() async throws {
+        _ = NSApplication.shared
+        let player = MenuBarPlayerPresentation(timeline: VLCPlaybackEngine().timeline)
+        var actions: [MenuBarPlayerPresentation.Action] = []
+        player.action = { actions.append($0) }
+        player.state = .init(enabled: true, track: TrackRecord(id: "episode", sourceID: "show", title: "Microphones in the Snow", artist: "Paper Satellites",
+                             album: "Field Notes Weekly", duration: 2_220), artist: "Paper Satellites", phase: .paused, canPlay: true, hasQueue: true)
+        player.perform(.nextChapter)
+        XCTAssertTrue(actions.isEmpty, "Without chapters there is nothing to move to.")
+        player.state.chapters = [PodcastChapter(start: 0, title: "Introduction"), PodcastChapter(start: 192, title: "The valley")]
+        player.state.canSeekChapters = true
+        player.perform(.previousChapter); player.perform(.nextChapter)
+        XCTAssertEqual(actions, [.previousChapter, .nextChapter])
+        for appearance in [Appearance.light, .dark] {
+            player.state.appearance = appearance
+            let rendered = try await render(player, name: "menu-bar-mini-player-chapters-\(appearance.rawValue)")
+            defer { rendered.close() }
+            XCTAssertEqual(rendered.hosting.bounds.width, 320, accuracy: 0.5, "Chapter buttons must fit the compact popover.")
+        }
+    }
+
     func testRadioAndEmptyStatesRenderWithoutArtworkOrSeekAssumptions() async throws {
         _ = NSApplication.shared
         for appearance in [Appearance.light, .dark] {

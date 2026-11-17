@@ -31,7 +31,7 @@ enum SourceCatalogKind: String, CaseIterable, Identifiable {
     }
     var isServer: Bool { self == .openSubsonic || self == .bandcamp }
     var image: Image {
-        self == .podcasts ? Image(nsImage: PodcastSourceIcon.image).renderingMode(.template) : Image(systemName: symbol)
+        self == .podcasts ? Image.podcast : Image(systemName: symbol)
     }
 }
 

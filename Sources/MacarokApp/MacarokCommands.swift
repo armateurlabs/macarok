@@ -27,6 +27,9 @@ struct MacarokCommands: Commands {
             Button("Play / Pause", action: model.togglePlayback).keyboardShortcut(model.menuShortcut("playPause"))
             Button("Previous Track", action: model.previous).keyboardShortcut(model.menuShortcut("previousTrack"))
             Button("Next Track") { model.advance() }.keyboardShortcut(model.menuShortcut("nextTrack"))
+            // ⌥← / ⌥→ are handled by the arrow monitor, so text fields keep moving by word.
+            Button("Previous Chapter") { model.seekChapter(forward: false) }.disabled(!model.canSeekChapters)
+            Button("Next Chapter") { model.seekChapter(forward: true) }.disabled(!model.canSeekChapters)
             Divider()
             Button("Shuffle Selected Library") { model.shuffle(model.displayedTracks) }.disabled(model.tracks.isEmpty)
             Picker("Repeat", selection: $model.settings.repeatMode) {
@@ -57,8 +60,8 @@ struct MacarokCommands: Commands {
         }
         CommandMenu("Track") {
             Button("Add to Active Playlist") { if let track = model.selectedTrack { model.add([track]) } }.keyboardShortcut(model.menuShortcut("addToPlaylist")).disabled(model.selectedTrack == nil)
-            Button("Edit Song Metadata…") { model.beginMetadataEditing(model.selectedTrack) }.keyboardShortcut("i").disabled(model.selectedTrack == nil || model.isRadioTrack(model.selectedTrack))
-            Button("Edit Album Metadata…") { model.beginAlbumMetadataEditing(model.selectedTrack) }.disabled(model.selectedTrack == nil || model.isRadioTrack(model.selectedTrack))
+            Button("Edit Song Metadata…") { model.beginMetadataEditing(model.selectedTrack) }.keyboardShortcut("i").disabled(model.selectedTrack == nil || model.isRadioTrack(model.selectedTrack) || model.isPodcastTrack(model.selectedTrack))
+            Button("Edit Album Metadata…") { model.beginAlbumMetadataEditing(model.selectedTrack) }.disabled(model.selectedTrack == nil || model.isRadioTrack(model.selectedTrack) || model.isPodcastTrack(model.selectedTrack))
             Button("Choose Artwork…") { model.beginArtworkEditing(model.selectedTrack) }.keyboardShortcut("i", modifiers: [.command, .shift]).disabled(model.selectedTrack == nil)
         }
         CommandGroup(replacing: .help) {
