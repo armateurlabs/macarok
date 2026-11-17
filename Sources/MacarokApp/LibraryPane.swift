@@ -43,7 +43,7 @@ struct LibraryPane: View {
                 if model.isSearching { ProgressView().controlSize(.mini) }
                 Spacer()
                 Button(action: model.toggleLibrarySort) {
-                    Image(systemName: model.librarySortIsDescending ? "arrow.down" : "arrow.up").frame(width: 18, height: 16).contentShape(Rectangle())
+                    Image(systemName: model.librarySortIsDescending ? "chevron.down" : "chevron.up").frame(width: 18, height: 16).contentShape(Rectangle())
                 }.buttonStyle(.borderless).help(sortHelp).accessibilityLabel(sortHelp)
                     .accessibilityIdentifier("librarySortDirection").disabled(model.tracks.isEmpty)
             }.padding(.horizontal, 15).padding(.bottom, 5).contentShape(Rectangle())
