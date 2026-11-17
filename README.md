@@ -78,7 +78,7 @@ The wolf-and-apple icon is generated from the checked-in artwork at every build.
 
 Open `Package.swift` in Xcode for development, or use `swift build` and `swift test` from the command line. The app bundle is the recommended way to run the application with its resources and macOS integration.
 
-To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.4.0 3`. Tags such as `v0.4.0` trigger the GitHub Actions release workflow. See [release procedures](docs/RELEASING.md).
+To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.5.0 3`. Tags such as `v0.5.0` trigger the GitHub Actions release workflow. See [release procedures](docs/RELEASING.md).
 
 ## Native application
 
