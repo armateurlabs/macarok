@@ -70,6 +70,34 @@ final class VLCPlaybackEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testReplacedNativePlayerIsReleasedOffTheMainThread() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokTeardownTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("teardown.wav")
+        try wave(duration: 4).write(to: url)
+        let player = VLCPlaybackEngine()
+        player.volume = 0
+        defer { player.stop() }
+        autoreleasepool { player.load(url: url) }
+        try await eventually(player: player) { player.state == .playing }
+        let released = expectation(description: "replaced player released")
+        // Hold no strong reference here: only the replaced player owns the probe.
+        let replacedID: ObjectIdentifier = try autoreleasepool {
+            let replaced = try XCTUnwrap(player.nativePlayerObject)
+            let probe = ReleaseProbe { isMain in
+                XCTAssertFalse(isMain, "libVLC teardown joins network threads and must not block the main thread.")
+                released.fulfill()
+            }
+            objc_setAssociatedObject(replaced, &ReleaseProbe.key, probe, .OBJC_ASSOCIATION_RETAIN)
+            return ObjectIdentifier(replaced)
+        }
+        autoreleasepool { player.load(url: url) }
+        XCTAssertNotEqual(player.nativePlayerObject.map(ObjectIdentifier.init), replacedID)
+        await fulfillment(of: [released], timeout: NativePlayerReaper.delay + 10)
+    }
+
+    @MainActor
     func testAutomaticTransitionsRecordBoundedGapsWhileBackgroundSortingRuns() async throws {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "silence.flac", withExtension: nil, subdirectory: "Fixtures"))
         let player = VLCPlaybackEngine()
@@ -315,4 +343,11 @@ final class VLCPlaybackEngineTests: XCTestCase {
     }
 
     private enum TestFailure: Error { case playback(String) }
+}
+
+private final class ReleaseProbe: NSObject {
+    nonisolated(unsafe) static var key: UInt8 = 0
+    private let released: (Bool) -> Void
+    init(_ released: @escaping (Bool) -> Void) { self.released = released }
+    deinit { released(Thread.isMainThread) }
 }

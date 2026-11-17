@@ -124,6 +124,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     // Exposed internally for regressions without leaking VLCKit through the public application API.
     var libraryIdentity: ObjectIdentifier? { player.map { ObjectIdentifier($0.libraryInstance) } }
+    var nativePlayerObject: AnyObject? { player }
     nonisolated var nativePlaybackToken: UUID? { handoff.current()?.backend.token }
     nonisolated var nativePlayedAudioBuffers: UInt64? {
         guard let current = handoff.current(), current.hasStarted else { return nil }
@@ -140,6 +141,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     deinit {
         timelineTimer?.invalidate()
         handoff.stopAll()
+        NativePlayerReaper.release(player)
     }
 
     public var isPlaying: Bool { state == .playing || state == .buffering }
@@ -415,7 +417,9 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             diagnostics.lastTransitionSeconds = nil
         }
         generation = backend.generation
+        let replaced = player
         player = backend.player
+        NativePlayerReaper.release(replaced)
         proxy = backend.delegate
         heldStream = backend.stream
         streamSupportsSeeking = backend.supportsSeeking
@@ -607,10 +611,32 @@ private final class PlaybackBackend: @unchecked Sendable {
         self.segmentStart = segmentStart; self.segmentEnd = segmentEnd; self.durationHint = durationHint; self.live = live
     }
 
+    deinit { NativePlayerReaper.release(player) }
+
     func retire() {
         player.delegate = nil
         player.stop()
         stream?.close()
+    }
+}
+
+/// Releasing a VLCMediaPlayer synchronously joins its input thread. A network module that does not
+/// wake promptly, such as libVLC's HTTP/2 client blocked in poll(), must never stall the main thread,
+/// so replaced or prepared players are released here after their stop request.
+enum NativePlayerReaper {
+    private static let queue = DispatchQueue(label: "com.armateurlabs.Macarok.player-teardown", qos: .utility)
+    /// Long enough for callers to drop their transient references, so the reaper holds the last one.
+    static let delay: TimeInterval = 1
+
+    private final class Holder: @unchecked Sendable {
+        var value: AnyObject?
+        init(_ value: AnyObject) { self.value = value }
+    }
+
+    static func release(_ player: VLCMediaPlayer?) {
+        guard let player else { return }
+        let holder = Holder(player)
+        queue.asyncAfter(deadline: .now() + delay) { holder.value = nil }
     }
 }
 
