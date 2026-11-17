@@ -5,3 +5,8 @@ DerivedData/
 xcuserdata/
 .swiftpm/
 dist/
+
+# Signing certificates and private keys
+*.p12
+*.cer
+*.pem

@@ -31,7 +31,33 @@ shasum -a 256 -c Macarok-0.2.1-arm64.dmg.sha256
 
 The script builds and signs the app, embeds its MIT license and dependency notices, creates the disk image, verifies it, then mounts it read-only to check the app signature, versions, licenses, and Applications link. The tracked `Support/Info.plist` is not changed. An existing DMG or checksum with the same name is never overwritten automatically.
 
-The application is ad-hoc signed, without Apple notarization. No Developer ID certificate or Apple credentials are currently configured. Signing and notarization can be added later with dedicated credentials. State this distribution status in release notes.
+The application is ad-hoc signed by default, without Apple notarization. No Developer ID certificate or Apple credentials are currently configured. Signing and notarization can be added later with dedicated credentials. State this distribution status in release notes.
+
+## Sign with a personal certificate
+
+An ad-hoc signature identifies the app by its code hash, so macOS treats every build as a new app: Keychain asks again for access to saved source credentials, and privacy permissions can be requested again. Signing with one stable certificate keeps that identity across updates (`identifier "com.armateurlabs.Macarok" and certificate leaf = …`). It does not satisfy Gatekeeper for downloaded disk images; that requires an Apple Developer ID and notarization.
+
+1. Create the certificate once: **Keychain Access → Certificate Assistant → Create a Certificate…**, name it (for example `Macarok Personal Signing`), identity type **Self-Signed Root**, certificate type **Code Signing**.
+2. Export it with its private key as a `.p12` file with a password, and import that file on your other Macs.
+3. Sign local builds with it: `MACAROK_SIGNING_IDENTITY="Macarok Personal Signing" ./scripts/build-app.sh release` (or `package-dmg.sh`). `MACAROK_SIGNING_KEYCHAIN` can name a specific keychain. Without the variable, builds stay ad-hoc signed.
+4. Let the release workflow use it by adding two repository secrets:
+
+   ```sh
+   base64 -i Macarok-Signing.p12 | gh secret set MACAROK_SIGNING_P12_BASE64
+   gh secret set MACAROK_SIGNING_P12_PASSWORD
+   ```
+
+   The workflow imports the certificate into a temporary keychain, signs the app, and deletes the keychain. Without these secrets it keeps ad-hoc signing.
+
+The first launch after switching from ad-hoc to the certificate asks once more for Keychain access; choose **Always Allow**. Later releases signed with the same certificate keep it.
+
+A downloaded disk image is still quarantined, so Gatekeeper blocks each new version once. On your own Macs, either approve it in **System Settings → Privacy & Security → Open Anyway**, or remove the quarantine after copying the app:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Macarok.app
+```
+
+Building on the Mac itself with `./scripts/build-app.sh` produces an app without quarantine.
 
 To inspect a workflow run, use `gh run list --workflow release.yml` and `gh run view RUN_ID --log-failed`. Failed builds do not publish a release. If asset upload fails, a draft may remain; rerunning the publishing job can reuse a draft only for the same tag. Published releases are never overwritten. The workflow checks that the tag still resolves to the built commit before publishing; never move a published tag.
 

@@ -12,6 +12,11 @@ if [[ -n "$release_version" || -n "$build_number" ]]; then
     validate_release_version "$release_version" "$build_number"
 fi
 cd "$project_root"
+# A stable signing identity keeps Keychain and privacy permissions across updates; ad-hoc signing
+# ("-") gives every build a new identity. MACAROK_SIGNING_KEYCHAIN optionally names the keychain.
+signing_identity="${MACAROK_SIGNING_IDENTITY:--}"
+signing_options=(--force --sign "$signing_identity")
+if [[ -n "${MACAROK_SIGNING_KEYCHAIN:-}" ]]; then signing_options+=(--keychain "$MACAROK_SIGNING_KEYCHAIN"); fi
 swift build --configuration "$configuration" --product Macarok
 binary_directory="$(swift build --configuration "$configuration" --show-bin-path)"
 app_path="$project_root/dist/Macarok.app"
@@ -43,7 +48,7 @@ if [[ "${MACAROK_INCLUDE_FPCALC:-1}" == "1" ]]; then
     mkdir -p "$staged_app/Contents/SharedSupport/Helpers"
     cp "$helper_path" "$staged_app/Contents/SharedSupport/Helpers/fpcalc"
     cp Support/Chromaprint-LICENSE.md Support/FFmpeg-LGPL-2.1.txt "$staged_app/Contents/Resources/Licenses/"
-    codesign --force --sign - "$staged_app/Contents/SharedSupport/Helpers/fpcalc"
+    codesign "${signing_options[@]}" "$staged_app/Contents/SharedSupport/Helpers/fpcalc"
 fi
 framework_path="$(find .build/artifacts -type d -name VLCKit.framework -path '*macos*' -print -quit)"
 if [[ -z "$framework_path" ]]; then
@@ -55,8 +60,11 @@ for resource_bundle in "$binary_directory"/*.bundle; do
     [[ -d "$resource_bundle" ]] || continue
     ditto "$resource_bundle" "$staged_app/Contents/Resources/$(basename "$resource_bundle")"
 done
-codesign --force --deep --sign - "$staged_app"
+codesign "${signing_options[@]}" --deep "$staged_app"
 codesign --verify --deep --strict "$staged_app"
+if [[ "$signing_identity" != "-" ]]; then
+    codesign --display --verbose=2 "$staged_app" 2>&1 | grep -E '^(Authority|Identifier|TeamIdentifier)=' >&2 || true
+fi
 rm -rf "$app_path"
 mv "$staged_app" "$app_path"
 echo "$app_path"

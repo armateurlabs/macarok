@@ -83,10 +83,42 @@ jobs:
           MACAROK_SNAPSHOT_DIRECTORY="$RUNNER_TEMP/native-snapshots" \
             swift test
 
+      - name: Import the optional signing certificate
+        env:
+          SIGNING_P12_BASE64: ${{ secrets.MACAROK_SIGNING_P12_BASE64 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.MACAROK_SIGNING_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SIGNING_P12_BASE64" ]]; then
+            echo "No signing certificate is configured; the app is ad-hoc signed."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/macarok-signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          certificate="$RUNNER_TEMP/macarok-signing.p12"
+          printf '%s' "$SIGNING_P12_BASE64" | base64 --decode > "$certificate"
+          security import "$certificate" -k "$keychain" -f pkcs12 -P "$SIGNING_P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$certificate"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+          identity="$(security find-identity -p codesigning "$keychain" | awk '/[0-9A-F]{40}/ { print $2; exit }')"
+          [[ -n "$identity" ]]
+          {
+            echo "MACAROK_SIGNING_IDENTITY=$identity"
+            echo "MACAROK_SIGNING_KEYCHAIN=$keychain"
+          } >> "$GITHUB_ENV"
+
       - name: Build and verify the disk image
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: ./scripts/package-dmg.sh "$RELEASE_VERSION" "$GITHUB_RUN_NUMBER"
+
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          if [[ -n "${MACAROK_SIGNING_KEYCHAIN:-}" ]]; then security delete-keychain "$MACAROK_SIGNING_KEYCHAIN" || true; fi
 
       - name: Retain verified release files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
