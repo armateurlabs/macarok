@@ -56,7 +56,7 @@ extension AppModel {
     /// A retained draft is available when returning to its editor; only a visible editor or
     /// presented sheet pins the central target while playback advances.
     var isEditingContext: Bool {
-        editingTrack != nil || artworkTrack != nil ||
+        editingTrack != nil || artworkTrack != nil || artistArtworkTarget != nil ||
             (contextMode == .editMetadata && metadataEditingSession != nil) ||
             (contextMode == .editAlbumMetadata && albumMetadataEditingSession != nil)
     }

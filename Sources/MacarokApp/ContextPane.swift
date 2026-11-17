@@ -255,12 +255,11 @@ struct TrackContextView: View {
     @Bindable var model: AppModel
     let track: TrackRecord
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(model.currentTrack?.id == track.id ? "NOW PLAYING" : isPodcast ? "SELECTED EPISODE" : "SELECTED TRACK").font(.system(size: 10, weight: .medium)).tracking(1).foregroundStyle(.secondary)
-            HStack(alignment: .center, spacing: 17) {
-                ArtworkView(track: track, model: model).frame(width: 126, height: 126)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(track.title).font(.system(size: 22, weight: .semibold)).textSelection(.enabled)
+        VStack(alignment: .leading, spacing: ContextLayout.sectionSpacing) {
+            ContextHeader(eyebrow: model.currentTrack?.id == track.id ? "Now Playing" : isPodcast ? "Selected Episode" : "Selected Track") {
+                ArtworkView(track: track, model: model)
+            } details: {
+                    Text(track.title).font(ContextLayout.titleFont).textSelection(.enabled)
                         .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add to Active Playlist") { [track] }; TrackFileActions(model: model, track: track) }
                     if isPodcast {
                         Text(track.artist).font(.system(size: 13)).foregroundStyle(.secondary)
@@ -282,15 +281,18 @@ struct TrackContextView: View {
                     }
                     Text([track.year.map(String.init), track.genre].compactMap { $0 }.joined(separator: " · ")).font(.system(size: 11)).foregroundStyle(.secondary)
                     Text((track.isCUETrack ? "CUE + " : "") + track.format.uppercased()).font(.system(size: 9, weight: .medium)).padding(.horizontal, 5).padding(.vertical, 2).overlay(RoundedRectangle(cornerRadius: 3).stroke(.quaternary))
-                }
             }
+            ContextPlaybackBar(model: model, allowsShuffle: false) { [track] } trailing: {
+                if !isPodcast { Button { model.beginArtworkEditing(track) } label: { Image(systemName: "photo") }.help("Choose artwork") }
+            }
+            Divider()
             Picker("Track details", selection: Binding(get: { model.contextTab }, set: model.selectContextTab)) { Text("Overview").tag("Overview"); Text("Tags").tag("Tags") }
                 .pickerStyle(.segmented).labelsHidden().frame(width: 185).frame(maxWidth: .infinity)
             PodcastEpisodeActions(model: model, track: track)
             if model.contextTab == "Overview" { overview }
             else { tags }
             Divider()
-            HStack { Label(model.sources.first { $0.id == track.sourceID }?.name ?? "Unavailable source", systemImage: track.url?.isFileURL == true ? "externaldrive" : "network"); Spacer(); Button("Add to Playlist") { model.add([track]) } }.font(.system(size: 10)).foregroundStyle(.secondary)
+            HStack { Label(model.sources.first { $0.id == track.sourceID }?.name ?? "Unavailable source", systemImage: track.url?.isFileURL == true ? "externaldrive" : "network"); Spacer() }.font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }
     private var overview: some View {
@@ -348,24 +350,24 @@ struct AlbumContextView: View {
     @Bindable var model: AppModel
     let album: AlbumRecord
     var body: some View {
-        VStack(alignment: .leading, spacing: 17) {
-            Text("ALBUM · \(album.year.map(String.init) ?? "UNKNOWN YEAR")").font(.system(size: 10)).tracking(1).foregroundStyle(.secondary)
-            HStack(spacing: 16) {
-                ArtworkView(track: album.tracks.first, model: model).frame(width: 118, height: 118)
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(album.title).font(.system(size: 23, weight: .semibold))
+        VStack(alignment: .leading, spacing: ContextLayout.sectionSpacing) {
+            ContextHeader(eyebrow: "Album · \(album.year.map(String.init) ?? "Unknown Year")") {
+                ArtworkView(track: album.tracks.first, model: model)
+            } details: {
+                    Text(album.title).font(ContextLayout.titleFont)
                         .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add Album to Playlist") { model.tracksForAlbum(album) }; AlbumMetadataAction(model: model, album: album) }
-                    Button(album.artist) { model.inspectArtist(album.artist) }.buttonStyle(.link)
+                    Button(album.artist) { model.inspectArtist(album.artist) }.buttonStyle(.link).font(.system(size: 13))
                         .contextMenu {
                             LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") {
                                 model.albumsForArtist(album.artist).flatMap(\.tracks)
                             }
                         }
-                    Text("\(album.tracks.count) tracks · \(album.duration.playbackTime)").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("\(pluralized(album.tracks.count, "track")) · \(album.duration.playbackTime)").font(.system(size: 11)).foregroundStyle(.secondary)
                     SourceBadge(model: model, sourceID: album.sourceID)
-                }
             }
-            HStack { Button { model.add(album.tracks) } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }.buttonStyle(.borderedProminent); Button { model.shuffle(album.tracks) } label: { Label("Shuffle", systemImage: "shuffle") }; Spacer(); Button { model.beginArtworkEditing(album.tracks.first) } label: { Image(systemName: "photo") }.help("Choose album artwork") }.controlSize(.small)
+            ContextPlaybackBar(model: model) { album.tracks } trailing: {
+                Button { model.beginArtworkEditing(album.tracks.first) } label: { Image(systemName: "photo") }.help("Choose album artwork")
+            }
             Divider()
             LazyVStack(spacing: 0) { ForEach(album.tracks) { track in TrackLine(track: track, model: model).padding(.horizontal, 5).padding(.vertical, 5); Divider().opacity(0.45) } }
             if album.tracks.contains(where: \.isCUETrack) { Label("CUE tracks reference their original audio file. Each track has its own playback boundaries.", systemImage: "waveform.path").font(.system(size: 11)).foregroundStyle(.secondary).padding(10).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary, in: RoundedRectangle(cornerRadius: 6)) }
@@ -379,13 +381,16 @@ struct ArtistContextView: View {
         let name = model.selectedArtist ?? model.selectedTrack?.albumArtist ?? "Choose an Artist"
         let albums = model.albumsForArtist(name)
         let artist = model.artistSummary(named: name)
-        VStack(alignment: .leading, spacing: 18) {
-            Text("ARTIST").font(.system(size: 10)).tracking(1).foregroundStyle(.secondary)
-            Text(name).font(.system(size: 29, weight: .semibold))
-                .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") { model.albumsForArtist(name).flatMap(\.tracks) } }
-            Text("\(albums.count) albums · \(artist?.trackCount ?? 0) tracks").font(.system(size: 12)).foregroundStyle(.secondary)
-            if let artist { SourceGroupBadge(model: model, sourceIDs: artist.sourceIDs) }
-            HStack { Button { model.shuffle(albums.flatMap(\.tracks)) } label: { Label("Shuffle Artist", systemImage: "shuffle") }.buttonStyle(.borderedProminent); Button("Add to Playlist") { model.add(albums.flatMap(\.tracks)) } }.controlSize(.small)
+        VStack(alignment: .leading, spacing: ContextLayout.sectionSpacing) {
+            ContextHeader(eyebrow: "Artist") {
+                ArtistArtworkView(model: model, name: name)
+            } details: {
+                Text(name).font(ContextLayout.titleFont)
+                    .contextMenu { LibraryPlaybackActions(model: model, addTitle: "Add Artist to Playlist") { model.albumsForArtist(name).flatMap(\.tracks) } }
+                Text("\(pluralized(albums.count, "album")) · \(pluralized(artist?.trackCount ?? 0, "track"))").font(.system(size: 11)).foregroundStyle(.secondary)
+                if let artist { SourceGroupBadge(model: model, sourceIDs: artist.sourceIDs) }
+            }
+            ContextPlaybackBar(model: model) { albums.flatMap(\.tracks) }
             Divider()
             Text("Albums").font(.system(size: 14, weight: .semibold))
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 110, maximum: 180), spacing: 15, alignment: .top)], alignment: .leading, spacing: 20) { ForEach(albums, id: \.presentationID) { AlbumTile(model: model, album: $0) } }
@@ -397,11 +402,14 @@ struct FolderContextView: View {
     @Bindable var model: AppModel
     var body: some View {
         let tracks = model.folderTracks
-        VStack(alignment: .leading, spacing: 16) {
-            Text("FOLDER").font(.system(size: 10)).tracking(1).foregroundStyle(.secondary)
-            Text(model.folderTitle).font(.system(size: 25, weight: .semibold))
-            Text("\(tracks.count) tracks, including subfolders").font(.system(size: 12)).foregroundStyle(.secondary)
-            HStack { Button { model.add(tracks) } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }.buttonStyle(.borderedProminent); Button { model.shuffle(tracks) } label: { Label("Shuffle Folder", systemImage: "shuffle") } }.controlSize(.small)
+        VStack(alignment: .leading, spacing: ContextLayout.sectionSpacing) {
+            ContextHeader(eyebrow: "Folder") {
+                ContextSymbolArtwork(systemImage: "folder")
+            } details: {
+                Text(model.folderTitle).font(ContextLayout.titleFont)
+                Text("\(pluralized(tracks.count, "track")), including subfolders").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            ContextPlaybackBar(model: model) { tracks }
             Divider()
             LazyVStack(spacing: 0) { ForEach(tracks) { TrackLine(track: $0, model: model, showsArtist: true).padding(.vertical, 4); Divider().opacity(0.4) } }
         }

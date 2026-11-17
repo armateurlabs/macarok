@@ -136,6 +136,7 @@ public final class LibraryStore: @unchecked Sendable {
         SimilarityCacheStorage.registerMigration(&migrator)
         InternetArchiveStorage.registerMigration(&migrator)
         PodcastStorage.registerMigration(&migrator)
+        ArtistArtworkStorage.registerMigration(&migrator)
         try migrator.migrate(database)
     }
 

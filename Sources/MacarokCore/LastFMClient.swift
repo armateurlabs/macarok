@@ -219,6 +219,23 @@ public actor LastFMClient {
         }
     }
 
+    /// The artist's largest picture, or nil when Last.fm only has its placeholder star.
+    public func artistImage(artist: String) async throws -> ArtistImageCandidate? {
+        let value: [String: Any]
+        do { value = try await request(method: "artist.getInfo", parameters: ["artist": artist, "autocorrect": "1"]) }
+        catch LastFMError.api(code: 6, _) { return nil }
+        guard let info = value["artist"] as? [String: Any] else { return nil }
+        let images = Self.list(info["image"]).compactMap { item -> (String, URL)? in
+            guard let text = item["#text"] as? String, !text.isEmpty, !text.contains(Self.placeholderImageHash),
+                  let url = URL(string: text) else { return nil }
+            return (item["size"] as? String ?? "", url)
+        }
+        let order = ["mega", "extralarge", "large", "medium", "small"]
+        guard let best = images.min(by: { (order.firstIndex(of: $0.0) ?? 9) < (order.firstIndex(of: $1.0) ?? 9) }) else { return nil }
+        let name = info["name"] as? String ?? artist
+        return ArtistImageCandidate(title: name, detail: "Last.fm", origin: "Last.fm", thumbnailURL: images.first { $0.0 == "large" }?.1 ?? best.1, imageURL: best.1)
+    }
+
     /// Last.fm returns a lone object instead of a one-element array.
     private static func list(_ value: Any?) -> [[String: Any]] {
         if let values = value as? [[String: Any]] { return values }

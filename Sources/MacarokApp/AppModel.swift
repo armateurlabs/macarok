@@ -196,6 +196,15 @@ final class AppModel {
         didSet { if oldValue != nil && artworkTrack == nil { followPlaybackContext() } }
     }
     var certificatePrompts: [CertificatePrompt] = []
+    /// Artist pictures by `ArtistArtworkKey`, shared by every album of the artist.
+    var artistArtwork: [String: ArtistArtworkRecord] = [:]
+    var artistArtworkTarget: ArtistArtworkTarget? {
+        didSet { if oldValue != nil && artistArtworkTarget == nil { followPlaybackContext() } }
+    }
+    @ObservationIgnored var artistArtworkTasks: Set<String> = []
+    @ObservationIgnored var artistArtworkLoaded = false
+    /// Off under XCTest so rendering tests never contact Last.fm or Wikipedia.
+    @ObservationIgnored var findsArtistPicturesOnline = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
     var artworkRevision = 0
     var streamingBufferFraction: Double?
     var scanWarnings: [String] = []

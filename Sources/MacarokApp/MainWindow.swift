@@ -47,6 +47,7 @@ struct MainWindow: View {
         .sheet(item: $model.editingTrack) { MetadataEditor(model: model, track: $0) }
         .sheet(item: Binding(get: { model.similarity.request }, set: { model.similarity.request = $0 })) { SimilarPlaylistSheet(model: model, request: $0) }
         .sheet(item: $model.artworkTrack) { ArtworkChooser(model: model, track: $0) }
+        .sheet(item: $model.artistArtworkTarget) { ArtistArtworkChooser(model: model, target: $0) }
         .sheet(isPresented: Binding(get: { model.addSourcePresenter == nil && !model.radioDiscoveryOwnsCertificates && !model.certificatePrompts.isEmpty }, set: { if !$0 && model.addSourcePresenter == nil && !model.radioDiscoveryOwnsCertificates { model.answerCertificate(false) } })) {
             if let prompt = model.certificatePrompts.first { CertificateSheet(prompt: prompt, answer: model.answerCertificate) }
         }
@@ -397,7 +398,41 @@ struct ArtworkView: View {
     let track: TrackRecord?
     var model: AppModel?
     var cornerRadius: CGFloat = 5
-    @State private var image: NSImage?
+
+    var body: some View {
+        ArtworkImageView(path: track?.artworkPath, revision: model?.artworkRevision ?? 0, placeholder: "opticaldisc",
+                         cornerRadius: cornerRadius, accessibilityLabel: track.map { "Artwork for \($0.album)" } ?? "No artwork")
+            .task(id: "\(track?.artworkPath ?? track?.id ?? "")-\(model?.artworkRevision ?? 0)") {
+                if track?.artworkPath == nil, let track { await model?.ensureArtwork(track) }
+            }
+    }
+}
+
+/// Decoded artwork kept on the main actor, so a view can draw an image it has seen before
+/// in its first frame instead of flashing a placeholder or the previous item's picture.
+@MainActor
+enum ArtworkMemoryCache {
+    private static let cache: NSCache<NSString, NSImage> = { let cache = NSCache<NSString, NSImage>(); cache.countLimit = 200; return cache }()
+    static func key(path: String, revision: Int) -> String { "\(revision):\(path)" }
+    static func image(forKey key: String) -> NSImage? { cache.object(forKey: key as NSString) }
+    static func store(_ image: NSImage, forKey key: String) { cache.setObject(image, forKey: key as NSString) }
+}
+
+/// Square artwork with a symbol placeholder. Only an image loaded for the current path is ever shown.
+struct ArtworkImageView: View {
+    let path: String?
+    var revision = 0
+    var placeholder = "opticaldisc"
+    var cornerRadius: CGFloat = 5
+    var accessibilityLabel = "Artwork"
+    @State private var loaded: (key: String, image: NSImage)?
+
+    private var key: String? { path.map { ArtworkMemoryCache.key(path: $0, revision: revision) } }
+    private var image: NSImage? {
+        guard let key else { return nil }
+        if let loaded, loaded.key == key { return loaded.image }
+        return ArtworkMemoryCache.image(forKey: key)
+    }
 
     var body: some View {
         Rectangle().fill(.quaternary)
@@ -409,18 +444,24 @@ struct ArtworkView: View {
                             .clipped()
                     }
                 } else {
-                    Image(systemName: "opticaldisc").resizable().scaledToFit().foregroundStyle(.tertiary).padding(13)
+                    GeometryReader { geometry in
+                        Image(systemName: placeholder).resizable().scaledToFit().foregroundStyle(.tertiary)
+                            .padding(max(13, min(geometry.size.width, geometry.size.height) * 0.3))
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                    }
                 }
             }
             .clipped().clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .task(id: "\(track?.artworkPath ?? track?.id ?? "")-\(model?.artworkRevision ?? 0)") {
-            if let path = track?.artworkPath {
-                let thumbnail = await ArtworkThumbnailCache.shared.image(at: path, revision: model?.artworkRevision ?? 0, pixelSize: 512)
-                guard !Task.isCancelled else { return }
-                image = thumbnail.map { NSImage(cgImage: $0.cgImage, size: .zero) }
-            } else { image = nil; if let track { await model?.ensureArtwork(track) } }
-        }
-        .accessibilityLabel(track.map { "Artwork for \($0.album)" } ?? "No artwork")
+            .transaction { $0.animation = nil }
+            .task(id: key) {
+                guard let key, let path, image == nil else { return }
+                let thumbnail = await ArtworkThumbnailCache.shared.image(at: path, revision: revision, pixelSize: 512)
+                guard !Task.isCancelled, let thumbnail else { return }
+                let decoded = NSImage(cgImage: thumbnail.cgImage, size: .zero)
+                ArtworkMemoryCache.store(decoded, forKey: key)
+                loaded = (key, decoded)
+            }
+            .accessibilityLabel(accessibilityLabel)
     }
 }
 
