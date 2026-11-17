@@ -218,8 +218,7 @@ private struct ArchiveResultsList: View {
             }.font(.system(size: 12)).padding(.vertical, 2).contentShape(Rectangle())
         case .book:
             HStack(spacing: 9) {
-                AsyncImage(url: result.artworkURL) { image in image.resizable().scaledToFill() } placeholder: { Color.secondary.opacity(0.12) }
-                    .frame(width: 32, height: 32).clipShape(RoundedRectangle(cornerRadius: 4))
+                ArchiveArtwork(controller: controller, source: source, identifier: result.id, size: 32)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(result.title).lineLimit(1)
                     Text(result.creator.nonEmpty ?? "Unknown author").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
@@ -357,9 +356,7 @@ private struct ArchiveItemView: View {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .top, spacing: 10) {
-                        AsyncImage(url: InternetArchiveClient.artworkURL(identifier: item.identifier)) { image in image.resizable().scaledToFill() }
-                            placeholder: { Color.secondary.opacity(0.12) }
-                            .frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 5))
+                        ArchiveArtwork(controller: controller, source: source, identifier: item.identifier, size: 56)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(item.title).font(.system(size: 13, weight: .semibold)).lineLimit(3)
                             if !item.creator.isEmpty { Text(item.creator).font(.system(size: 11)).foregroundStyle(.secondary) }
@@ -465,12 +462,37 @@ private struct ArchiveTrackRow: View {
 
 // MARK: Shared
 
+/// Saved items use their cached cover; others load the archive.org thumbnail on demand.
+private struct ArchiveArtwork: View {
+    let controller: InternetArchiveController
+    let source: SourceRecord
+    let identifier: String
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let path = controller.artworkPath(source, identifier: identifier), let image = NSImage(contentsOfFile: path) {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else if controller.loadsRemoteArtwork {
+                AsyncImage(url: InternetArchiveClient.artworkURL(identifier: identifier)) { image in image.resizable().scaledToFill() }
+                    placeholder: { placeholder }
+            } else { placeholder }
+        }.frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: size > 40 ? 5 : 4))
+    }
+
+    private var placeholder: some View {
+        Color.secondary.opacity(0.12).overlay {
+            Image(systemName: source.archiveCollection == .librivox ? "book" : "music.mic").foregroundStyle(.tertiary)
+        }
+    }
+}
+
 private struct ArchiveRating: View {
     let value: Double
     var body: some View {
         HStack(spacing: 1) {
             Image(systemName: "star.fill").font(.system(size: 8))
-            Text(value.formatted(.number.precision(.fractionLength(1)))).font(.system(size: 10)).monospacedDigit()
+            Text(value, format: .number.precision(.fractionLength(1))).font(.system(size: 10)).monospacedDigit()
         }.foregroundStyle(.secondary).help("Average listener rating")
     }
 }

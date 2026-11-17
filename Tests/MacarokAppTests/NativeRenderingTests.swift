@@ -265,6 +265,128 @@ final class NativeRenderingTests: XCTestCase {
         XCTAssertEqual(model.player.state, .stopped)
     }
 
+    /// Internet Archive browsing rendered from seeded response caches; no request reaches archive.org.
+    func testRenderInternetArchiveSourcesInLightAndDarkAppearance() async throws {
+        guard let outputPath = ProcessInfo.processInfo.environment["MACAROK_SNAPSHOT_DIRECTORY"], !outputPath.isEmpty else {
+            throw XCTSkip("Set MACAROK_SNAPSHOT_DIRECTORY to opt in to offscreen native component rendering.")
+        }
+        let output = URL(fileURLWithPath: outputPath, isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let demo = packageRoot.appendingPathComponent(".build/demo-library", isDirectory: true)
+        let covers = ["Meridian Atlas/2005 - Afterlight", "Paper Satellites/2013 - Field Notes", "North Window/2026 - Continuous Album"]
+            .map { demo.appendingPathComponent($0).appendingPathComponent("cover.png").path }
+        guard covers.allSatisfy(FileManager.default.fileExists(atPath:)) else {
+            XCTFail("Generate synthetic fixtures first: python3 scripts/create-demo-library.py .build/demo-library")
+            return
+        }
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokArchiveRender-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let store = try LibraryStore(url: temporary.appendingPathComponent("archive.sqlite"))
+        let live = SourceRecord(id: "native-render-live", kind: .internetArchive, name: "Live Music Archive",
+                                location: ArchiveCollection.liveMusic.location, createdAt: Date(timeIntervalSince1970: 1))
+        let books = SourceRecord(id: "native-render-librivox", kind: .internetArchive, name: "LibriVox",
+                                 location: ArchiveCollection.librivox.location, createdAt: Date(timeIntervalSince1970: 2))
+        try store.saveSource(live); try store.saveSource(books)
+
+        // Synthetic recordings of fictional bands; LibriVox uses a public-domain novel.
+        let venues = [("03-04", "Riverside Ballroom", "Portland, OR", "Soundboard", 4.7), ("03-05", "The Lantern Hall", "Seattle, WA", "Audience (Schoeps MK4 > DAT)", 4.2),
+                      ("03-08", "Granite Street Theatre", "Boise, ID", "Soundboard > DAT", 4.5), ("03-11", "Juniper Pavilion", "Denver, CO", "Matrix (SBD + AUD)", 4.9),
+                      ("03-12", "Juniper Pavilion", "Denver, CO", "Audience", 4.1), ("03-15", "Old Mill Auditorium", "Lawrence, KS", "Soundboard", 4.6),
+                      ("03-18", "Harborfront Hall", "Chicago, IL", "Soundboard > DAT", 4.8), ("03-19", "The Velvet Room", "Madison, WI", "Audience (AKG C460)", 4.0),
+                      ("03-22", "Lakeshore Music Hall", "Cleveland, OH", "Soundboard", 4.4), ("03-25", "Elm Street Armory", "Ann Arbor, MI", "Matrix", 4.6)]
+        let shows = venues.map { day, venue, city, recording, rating in
+            ["identifier": "harborlights1994-\(day)", "title": "Harbor Lights Live at \(venue) on 1994-\(day)", "creator": "Harbor Lights",
+             "date": "1994-\(day)T00:00:00Z", "year": 1994, "venue": venue, "coverage": city, "source": recording, "avg_rating": rating] as [String: Any]
+        }
+        func save(_ object: Any, url: URL) throws {
+            try store.saveArchiveResponse(JSONSerialization.data(withJSONObject: object), key: url.absoluteString, now: Date())
+        }
+        try save(["response": ["numFound": shows.count, "docs": shows]],
+                 url: InternetArchiveClient.searchURL(.shows(artist: "HarborLights", year: 1994), collection: .liveMusic, page: 1, pageSize: 50))
+
+        func item(_ identifier: String, metadata: [String: Any], titles: [String], lengths: [Double], format: String = "Flac") -> ArchiveItem {
+            let files: [[String: Any]] = titles.enumerated().map { index, title in
+                ["name": "\(identifier)-t\(index + 1).\(format == "Flac" ? "flac" : "mp3")", "format": format, "source": "original",
+                 "title": title, "track": String(index + 1), "length": String(lengths[index % lengths.count])]
+            }
+            let data = try! JSONSerialization.data(withJSONObject: ["metadata": metadata.merging(["identifier": identifier]) { $1 }, "files": files])
+            return try! InternetArchiveClient.parseItem(data: data, identifier: identifier)
+        }
+        let setList = ["Northbound", "Lantern Song", "Copper Tide", "The Long Way Round", "Signal Fires", "Harbor Lights Theme", "Undertow", "Last Ferry Home"]
+        let lengths: [Double] = [412.6, 295.3, 538.1, 361.8, 744.2, 289.5, 503.7, 466.0]
+        let liveItems = [
+            (item("harborlights1994-03-18", metadata: ["title": "Harbor Lights Live at Harborfront Hall on 1994-03-18", "creator": "Harbor Lights", "date": "1994-03-18",
+                                                       "venue": "Harborfront Hall", "coverage": "Chicago, IL", "source": "Soundboard > DAT"],
+                   titles: setList, lengths: lengths), covers[0]),
+            (item("harborlights1994-03-11", metadata: ["title": "Harbor Lights Live at Juniper Pavilion on 1994-03-11", "creator": "Harbor Lights", "date": "1994-03-11",
+                                                       "venue": "Juniper Pavilion", "coverage": "Denver, CO", "source": "Matrix (SBD + AUD)"],
+                   titles: Array(setList.reversed()), lengths: lengths), covers[0]),
+            (item("juniperstatic2002-07-04", metadata: ["title": "Juniper Static Live at Clearwater Park on 2002-07-04", "creator": "Juniper Static", "date": "2002-07-04",
+                                                        "venue": "Clearwater Park", "coverage": "Asheville, NC", "source": "Audience"],
+                   titles: ["Morning Static", "Red Clay", "Blue Hour Jam", "Fireflies"], lengths: lengths), covers[1]),
+        ]
+        var liveQueue: [TrackRecord] = []
+        for (value, cover) in liveItems {
+            let tracks = value.trackRecords(sourceID: live.id, collection: .liveMusic, quality: .high, artworkPath: cover)
+            try store.materializeArchiveItem(ArchiveItemRecord(sourceID: live.id, identifier: value.identifier, title: value.albumTitle(for: .liveMusic),
+                                                               creator: value.creator, subtitle: [value.date, value.recordingSource].compactMap { $0 }.joined(separator: " · ")),
+                                             tracks: tracks, saved: true)
+            if liveQueue.isEmpty { liveQueue = tracks }
+            for (index, track) in tracks.prefix(3).enumerated() {
+                try store.recordPlay(trackID: track.id, at: Date().addingTimeInterval(-Double(index + 1) * 5_400))
+            }
+        }
+
+        let chapters = ["Marseilles—The Arrival", "Father and Son", "The Catalans", "Conspiracy", "The Marriage Feast", "The Deputy Procureur du Roi",
+                        "The Examination", "The Château d’If", "The Evening of the Betrothal", "The King’s Closet at the Tuileries", "The Corsican Ogre", "Father and Son"]
+        let book = item("count_monte_cristo_demo_librivox", metadata: [
+            "title": "The Count of Monte Cristo", "creator": "Alexandre Dumas", "date": "2010-05-14", "language": "eng",
+            "description": "Edmond Dantès, a young sailor falsely accused of treason, is imprisoned in the Château d’If. After a daring escape, he returns as the wealthy Count of Monte Cristo to reward those who helped him and to take revenge on those who betrayed him. Read by LibriVox volunteers."],
+            titles: chapters.enumerated().map { String(format: "%03d - Chapter %d: %@", $0.offset + 1, $0.offset + 1, $0.element) },
+            lengths: [1_382, 1_046, 1_571, 1_204, 1_918, 1_457], format: "128Kbps MP3")
+        try save(["metadata": ["identifier": book.identifier, "title": book.title, "creator": book.creator, "date": book.date!, "language": "eng", "description": book.description],
+                  "files": book.files.map { ["name": $0.name, "format": $0.format, "source": "original", "title": $0.title!, "track": $0.track!, "length": String($0.length!)] }],
+                 url: URL(string: "https://archive.org/metadata/")!.appendingPathComponent(book.identifier))
+        let bookTracks = book.trackRecords(sourceID: books.id, collection: .librivox, quality: .high, artworkPath: covers[2])
+        try store.materializeArchiveItem(ArchiveItemRecord(sourceID: books.id, identifier: book.identifier, title: book.title, creator: book.creator,
+                                                           subtitle: book.creator), tracks: bookTracks, saved: true)
+        try store.saveArchiveResume(sourceID: books.id, identifier: book.identifier, trackID: bookTracks[2].id, position: 754)
+
+        var preferences = AppPreferences()
+        preferences.volume = 0
+        let model = AppModel(store: store, preferences: preferences, registerSystemControls: false)
+        await model.start()
+        let controller = try XCTUnwrap(model.archive)
+        controller.loadsRemoteArtwork = false
+        _ = NSApplication.shared
+        for scheme in [ColorScheme.light, .dark] {
+            let suffix = scheme == .light ? "light" : "dark"
+            model.settings.appearance = scheme == .light ? .light : .dark
+            model.contextMode = .context
+
+            model.sourceID = live.id
+            await model.waitForLibraryLoad(); await controller.reload(sourceID: live.id)
+            model.clearQueue(); model.add(liveQueue); model.currentQueueID = model.queue.dropFirst().first?.id
+            controller.tabs[live.id] = .browse
+            controller.paths[live.id] = [.browse: [.artist(id: "HarborLights", name: "Harbor Lights"),
+                                                   .shows(artistID: "HarborLights", artistName: "Harbor Lights", year: 1994)]]
+            model.centerPage = .home; model.libraryView = .home; model.contextPage = .home
+            try await render(MainWindow(model: model), size: NSSize(width: 1380, height: 860), scheme: scheme,
+                             destination: output.appendingPathComponent("archive-live-\(suffix).png"))
+
+            model.sourceID = books.id
+            await model.waitForLibraryLoad(); await controller.reload(sourceID: books.id)
+            model.clearQueue(); model.add(Array(bookTracks[2...7])); model.currentQueueID = model.queue.first?.id
+            controller.tabs[books.id] = .browse
+            controller.paths[books.id] = [.browse: [.item(id: book.identifier, title: book.title)]]
+            model.centerPage = .playing
+            try await render(MainWindow(model: model), size: NSSize(width: 1380, height: 860), scheme: scheme,
+                             destination: output.appendingPathComponent("archive-librivox-\(suffix).png"))
+        }
+        XCTAssertEqual(model.player.state, .stopped)
+    }
+
     private func segmentedControls(in view: NSView) -> [NSSegmentedControl] {
         if let control = view as? NSSegmentedControl { return [control] }
         return view.subviews.flatMap { segmentedControls(in: $0) }

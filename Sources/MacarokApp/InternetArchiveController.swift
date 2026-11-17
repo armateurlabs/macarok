@@ -38,6 +38,9 @@ final class InternetArchiveController {
     var bookSort: ArchiveSort = .popular
     var errorMessage: String?
     private(set) var busyItems: Set<String> = []
+    private(set) var artworkPaths: [String: [String: String]] = [:]
+    /// Cover thumbnails for items not yet in the library are requested from archive.org.
+    var loadsRemoteArtwork = true
     @ObservationIgnored private var lastResume: [String: (trackID: String, position: Double)] = [:]
 
     init(model: AppModel) { self.model = model }
@@ -50,8 +53,10 @@ final class InternetArchiveController {
 
     func reload(sourceID: String) async {
         guard let model else { return }
-        do { items[sourceID] = try await model.performLibraryWork { try $0.archiveItems(sourceID: sourceID) } }
-        catch { errorMessage = error.localizedDescription }
+        do {
+            let values = try await model.performLibraryWork { (try $0.archiveItems(sourceID: sourceID), try $0.archiveArtworkPaths(sourceID: sourceID)) }
+            items[sourceID] = values.0; artworkPaths[sourceID] = values.1
+        } catch { errorMessage = error.localizedDescription }
     }
 
     func tab(for source: SourceRecord) -> ArchiveTab { tabs[source.id] ?? .browse }
@@ -68,6 +73,7 @@ final class InternetArchiveController {
         items[source.id]?.first { $0.identifier == identifier }
     }
     func isBusy(_ identifier: String) -> Bool { busyItems.contains(identifier) }
+    func artworkPath(_ source: SourceRecord, identifier: String) -> String? { artworkPaths[source.id]?[identifier] }
 
     // MARK: Loading
 

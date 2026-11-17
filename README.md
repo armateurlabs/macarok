@@ -26,6 +26,16 @@ Native SwiftUI views rendered from the current application with a synthetic musi
 
 The same views are available in [Home · Dark](design/native/home-dark.png) and [Playing · Light](design/native/cue-album-light.png).
 
+**Live Music Archive · Dark** — an artist's recordings for one year, with date, venue, recording source, and listener rating; saved shows appear in Home.
+
+![Browsing the Live Music Archive in Dark appearance](design/native/archive-live-dark.png)
+
+**LibriVox · Light** — a saved audiobook with its resume point, chapters, and the current chapter playing.
+
+![A LibriVox audiobook in Light appearance](design/native/archive-librivox-light.png)
+
+Internet Archive views are also available in [Live Music Archive · Light](design/native/archive-live-light.png) and [LibriVox · Dark](design/native/archive-librivox-dark.png). They are rendered from synthetic recordings and cached responses, without contacting archive.org.
+
 <details>
 <summary>Lyrics, metadata editors, and more native views</summary>
 

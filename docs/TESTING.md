@@ -90,6 +90,8 @@ MACAROK_SNAPSHOT_DIRECTORY="$PWD/.build/native-snapshots" swift test --filter Na
 
 This renders Home and its three focused filters, All Sources with duplicate names, narrow/wide layouts, artist albums, synchronized/empty Lyrics, a CUE album, track tags, Settings, the metadata editor, source catalog, podcast discovery, Internet Radio library, and minimum-width playlist controls in all repeat states. Inline metadata renders cover 370- and 590-point panels and a queue change while a draft remains pinned. Header geometry checks exercise the real native segmented controls in both appearances, with both navigation rows centered at a stable height. `AlbumTileGeometryTests` measures mixed title lengths and square/portrait/landscape artwork before and after loading. These checks do not capture the screen or verify physical keyboard, file-picker, or media-key interaction.
 
+The same command renders `archive-live-` and `archive-librivox-` views of the Internet Archive sources. A separate isolated index holds saved items with the demo covers, and the browse and item responses are written to the archive response cache beforehand, so no request reaches archive.org.
+
 Generate the additional album-editor previews independently:
 
 ```sh

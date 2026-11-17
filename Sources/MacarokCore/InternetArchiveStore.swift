@@ -87,6 +87,17 @@ extension LibraryStore: ArchiveResponseCache {
         }
     }
 
+    /// Cached cover paths of items whose tracks are in the library, keyed by item identifier.
+    public func archiveArtworkPaths(sourceID: String) throws -> [String: String] {
+        try database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT remoteID, MAX(artworkPath) AS artworkPath FROM tracks
+                WHERE sourceID = ? AND remoteID IS NOT NULL AND artworkPath IS NOT NULL GROUP BY remoteID
+                """, arguments: [sourceID])
+            return Dictionary(rows.map { ($0["remoteID"] as String, $0["artworkPath"] as String) }, uniquingKeysWith: { first, _ in first })
+        }
+    }
+
     public func archiveItem(sourceID: String, identifier: String) throws -> ArchiveItemRecord? {
         try database.read { db in
             try ArchiveItemRecord.fetchOne(db, sql: "SELECT * FROM archiveItems WHERE sourceID = ? AND identifier = ?", arguments: [sourceID, identifier])
