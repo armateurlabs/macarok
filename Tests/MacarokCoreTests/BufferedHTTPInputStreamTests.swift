@@ -283,13 +283,34 @@ final class BufferedHTTPInputStreamTests: XCTestCase {
 
     func testTruncatedRangeIsAnErrorInsteadOfTheEndOfATrack() async throws {
         let fixture = ProgressiveFixture(size: 128 * 1024, delay: 0, truncateAt: 16 * 1024)
-        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport)
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport, resumeDelays: [0.01, 0.01])
         defer { stream.close(); fixture.transport.invalidate() }
         stream.open()
         let result = try await read(stream, count: 4096)
-        XCTAssertEqual(result.count, -1)
+        XCTAssertEqual(result.count, -1, "A server that keeps cutting the transfer short ends in an error, never a clean end of track.")
         XCTAssertNotNil(stream.streamError)
         XCTAssertEqual(stream.streamStatus, .error)
+        XCTAssertEqual(fixture.offsets, [0, 16 * 1024, 16 * 1024], "Each retry resumes from the first missing byte.")
+    }
+
+    func testADroppedConnectionResumesFromTheFirstMissingByteWithoutLosingAudio() async throws {
+        let fixture = ProgressiveFixture(size: 256 * 1024, delay: 0, truncateAt: 80 * 1024, truncatesOnce: true)
+        let stream = BufferedHTTPInputStream(url: fixture.url, transport: fixture.transport, resumeDelays: [0.01])
+        defer { stream.close(); fixture.transport.invalidate() }
+        stream.open()
+        var received = Data()
+        while received.count < fixture.data.count {
+            let result = try await read(stream, count: 32 * 1024)
+            XCTAssertGreaterThan(result.count, 0, "The decoder must not see the end of the stream at the dropped connection.")
+            guard result.count > 0 else { break }
+            received.append(result.data)
+        }
+        XCTAssertEqual(received, fixture.data)
+        XCTAssertEqual(fixture.offsets, [0, 80 * 1024])
+        XCTAssertEqual(stream.snapshot.resumeCount, 1)
+        XCTAssertNil(stream.streamError)
+        XCTAssertTrue(BufferedHTTPInputStream.isTransient(URLError(.networkConnectionLost)))
+        XCTAssertFalse(BufferedHTTPInputStream.isTransient(BufferedHTTPInputStream.StreamFailure.invalidRange))
     }
 
     func testCompressedRepresentationIsRejectedBeforeDecoding() async throws {
@@ -366,6 +387,8 @@ private final class ProgressiveFixture: @unchecked Sendable {
     let contentEncoding: String?
     let status: Int?
     let pauseAfterFirstChunk: Bool
+    /// Only the first request is cut short, like a single network drop.
+    let truncatesOnce: Bool
     private let remainderGate = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var completed = false
@@ -373,7 +396,9 @@ private final class ProgressiveFixture: @unchecked Sendable {
     private var requestedOffsets: [UInt64] = []
 
     init(size: Int, delay: Double, supportsRange: Bool = true, invalidRange: Bool = false,
-         truncateAt: Int? = nil, contentEncoding: String? = nil, status: Int? = nil, pauseAfterFirstChunk: Bool = false) {
+         truncateAt: Int? = nil, contentEncoding: String? = nil, status: Int? = nil, pauseAfterFirstChunk: Bool = false,
+         truncatesOnce: Bool = false) {
+        self.truncatesOnce = truncatesOnce
         let host = "buffer-\(UUID().uuidString.lowercased()).invalid"
         url = URL(string: "https://\(host)/audio.flac")!
         data = Data((0..<size).map { UInt8($0 % 251) })
@@ -402,6 +427,7 @@ private final class ProgressiveURLProtocol: URLProtocol, @unchecked Sendable {
     private let stateLock = NSLock()
     private var stopped = false
     private var fixture: ProgressiveFixture?
+    private var requestStart = 0
 
     static func register(host: String, fixture: ProgressiveFixture) {
         lock.lock(); fixtures[host] = fixture; lock.unlock()
@@ -418,6 +444,7 @@ private final class ProgressiveURLProtocol: URLProtocol, @unchecked Sendable {
         let offset = UInt64(raw.replacingOccurrences(of: "bytes=", with: "").split(separator: "-").first ?? "0") ?? 0
         fixture.didRequest(offset)
         let start = fixture.supportsRange ? Int(offset) : 0
+        requestStart = start
         guard start < fixture.data.count else {
             let response = HTTPURLResponse(url: url, statusCode: 416, httpVersion: "HTTP/1.1", headerFields: ["Content-Range": "bytes */\(fixture.data.count)"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed); client?.urlProtocolDidFinishLoading(self); return
@@ -434,7 +461,8 @@ private final class ProgressiveURLProtocol: URLProtocol, @unchecked Sendable {
             guard let self, let fixture = self.fixture else { return }
             self.stateLock.lock(); let stopped = self.stopped; self.stateLock.unlock()
             guard !stopped else { return }
-            let limit = min(fixture.truncateAt ?? fixture.data.count, fixture.data.count)
+            let truncation = fixture.truncatesOnce && self.requestStart > 0 ? nil : fixture.truncateAt
+            let limit = min(truncation ?? fixture.data.count, fixture.data.count)
             let end = min(offset + 64 * 1024, limit)
             self.client?.urlProtocol(self, didLoad: fixture.data.subdata(in: offset..<end))
             if offset == 0 { fixture.waitForRemainderIfRequested() }

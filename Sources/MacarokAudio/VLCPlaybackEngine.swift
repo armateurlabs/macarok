@@ -73,6 +73,8 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     public var onCompletion: (() -> Void)?
     public var onError: ((String) -> Void)?
+    /// Network media stopped before its end, with the position reached. Without a handler it is reported as an error.
+    public var onInterrupted: ((Double) -> Void)?
     public var onHandoff: ((UUID) -> Void)?
     /// When the successor was submitted to VLC, rather than when the main actor adopted it.
     public private(set) var lastHandoffStartedAt: Date?
@@ -487,7 +489,15 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             stopTimelineUpdates()
             setState(.paused)
         case .stopped:
-            if hasStarted && !explicitlyStopped && !didComplete { finish() }
+            if hasStarted && !explicitlyStopped && !didComplete {
+                // A lost connection reaches VLC as the end of the stream; it must not skip to the next track.
+                let mediaLength = max(0, (player?.media?.length.value?.doubleValue ?? 0) / 1_000)
+                let reached = handoff.current().flatMap { $0.backend.generation == generation ? $0.lastPlayingPosition : nil } ?? position
+                if Self.endedPrematurely(stream: heldStream, mediaURL: player?.media?.url, position: reached, mediaLength: mediaLength,
+                                         durationHint: durationHint, segmentEnd: segmentEnd, live: live) {
+                    reportInterruption()
+                } else { finish() }
+            }
             else if !didComplete { stopTimelineUpdates(); setState(.stopped) }
         case .error:
             reportError("VLC could not play this audio resource. Check the file or server connection.")
@@ -551,9 +561,43 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         }
         position = reportedPosition
         if duration > 0 { position = min(position, duration) }
+        if state == .playing { handoff.recordPlayingPosition(position, generation: generation) }
         if hasStarted, let end = segmentEnd, absolute >= end - 0.015, !didComplete {
             finish()
         }
+    }
+
+    /// True when network media stopped before its end: a Macarok stream whose transfer failed, a stream of
+    /// unknown length (such as a server transcode) well short of the library's duration, or remote media that
+    /// VLC reads directly (FLAC, Ogg) well short of the exact length VLC decoded from its header.
+    /// Local files and CUE segments always end normally.
+    public nonisolated static func endedPrematurely(stream: InputStream?, mediaURL: URL?, position: Double, mediaLength: Double,
+                                                    durationHint: Double?, segmentEnd: Double?, live: Bool) -> Bool {
+        guard !live, segmentEnd == nil, position.isFinite else { return false }
+        if let stream {
+            if stream.streamError != nil { return true }
+            guard stream.property(forKey: Stream.PropertyKey("NSStreamFileSizeKey")) == nil,
+                  let hint = durationHint, hint > 60 else { return false }
+            return position < hint - 15 && position < hint * 0.9
+        }
+        guard let scheme = mediaURL?.scheme?.lowercased(), ["http", "https"].contains(scheme), mediaLength > 30 else { return false }
+        return position < mediaLength - 10 && position < mediaLength * 0.98
+    }
+
+    private func reportInterruption() {
+        let reached = handoff.current().flatMap { $0.backend.generation == generation ? $0.lastPlayingPosition : nil } ?? position
+        guard let onInterrupted else {
+            reportError("The connection to the server was lost before the end of this track. Press Play to continue where it stopped.")
+            return
+        }
+        endTransition()
+        stopTimelineUpdates()
+        explicitlyStopped = true
+        pendingSeek = nil; inFlightSeek = nil; isSeekable = false
+        handoff.stopAll()
+        player?.stop()
+        setState(.stopped)
+        onInterrupted(reached)
     }
 
     private func finish() {
@@ -647,6 +691,9 @@ private struct NativePlaybackSnapshot: Sendable {
     let startedUptime: TimeInterval?
     var firstPlayingAt: Date?
     var firstPlayingUptime: TimeInterval?
+    /// Last position sampled while playing. VLC may reset its clock when it stops, so an early stop
+    /// is judged from where audio was actually heard.
+    var lastPlayingPosition: Double = 0
 }
 
 /// Keep VLCKit's notification creation and autorelease pools outside libVLC's locked callbacks.
@@ -666,6 +713,11 @@ private final class NativePlaybackHandoff: @unchecked Sendable {
     private let lock = NSLock()
     private var active: NativePlaybackSnapshot?
     private var upcoming: PlaybackBackend?
+
+    func recordPlayingPosition(_ position: Double, generation: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        if active?.backend.generation == generation { active?.lastPlayingPosition = position }
+    }
 
     func current() -> NativePlaybackSnapshot? {
         lock.lock(); defer { lock.unlock() }
@@ -744,7 +796,15 @@ private final class NativePlaybackHandoff: @unchecked Sendable {
         guard let current = active, let next = upcoming,
               token.map({ next.token == $0 }) ?? true else { lock.unlock(); return false }
         if let generation {
+            // A failed transfer is not a completed track; the main actor reports it instead of advancing.
             guard current.backend.generation == generation, current.hasStarted, !current.backend.live else {
+                lock.unlock(); return false
+            }
+            let backend = current.backend
+            let position = current.lastPlayingPosition
+            let length = max(0, (backend.media.length.value?.doubleValue ?? 0) / 1_000)
+            if VLCPlaybackEngine.endedPrematurely(stream: backend.stream, mediaURL: backend.media.url, position: position, mediaLength: length,
+                                                  durationHint: backend.durationHint, segmentEnd: backend.segmentEnd, live: backend.live) {
                 lock.unlock(); return false
             }
         }

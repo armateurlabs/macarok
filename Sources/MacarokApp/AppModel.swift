@@ -165,6 +165,8 @@ final class AppModel {
     var isRefreshing = false
     /// A library scan running on an OpenSubsonic server, started from Macarok.
     var serverScan: ServerScanProgress?
+    /// Automatic resumes of the current entry after its connection dropped.
+    @ObservationIgnored var interruptionRecovery: (queueID: UUID, attempts: Int, position: Double)?
     @ObservationIgnored var serverScanTask: Task<Void, Never>?
     var isStoppingRefresh = false
     var refreshProgress = ""
@@ -251,8 +253,8 @@ final class AppModel {
     @ObservationIgnored private var connectionPresentationID: UUID?
     @ObservationIgnored private var pendingSourceConnections: [String: UUID] = [:]
     @ObservationIgnored private var artworkTasks: Set<String> = []
-    @ObservationIgnored private var heardSeconds: Double = 0
-    @ObservationIgnored private var playRecorded = false
+    @ObservationIgnored var heardSeconds: Double = 0
+    @ObservationIgnored var playRecorded = false
     /// Where the current entry starts when VLC has not loaded it; the stopped timeline displays and edits it.
     var restorePosition: Double = 0
     @ObservationIgnored weak var activePlaylistTable: NSTableView?
@@ -451,6 +453,7 @@ final class AppModel {
                 }
             }
             player.onHandoff = { [weak self] id in self?.adoptUpcomingPlayback(id) }
+            player.onInterrupted = { [weak self] position in self?.recoverInterruptedPlayback(at: position) }
             player.onError = { [weak self] error in
                 guard let self else { return }
                 self.playbackIntentQueueID = nil

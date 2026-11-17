@@ -13,14 +13,16 @@ public struct StreamBufferSnapshot: Sendable {
     public let capacityBytes: Int
     public let underrunCount: Int
     public let readerWaitDuration: TimeInterval
+    /// Automatic reconnections after transient network failures during this stream.
+    public let resumeCount: Int
 
     public init(bufferedBytes: Int, targetBytes: Int, totalBytes: Int64?, offset: UInt64,
                 isBuffering: Bool, isFinished: Bool, retainedRanges: [Range<UInt64>] = [],
-                capacityBytes: Int = 0, underrunCount: Int = 0, readerWaitDuration: TimeInterval = 0) {
+                capacityBytes: Int = 0, underrunCount: Int = 0, readerWaitDuration: TimeInterval = 0, resumeCount: Int = 0) {
         self.bufferedBytes = bufferedBytes; self.targetBytes = targetBytes; self.totalBytes = totalBytes
         self.offset = offset; self.isBuffering = isBuffering; self.isFinished = isFinished
         self.retainedRanges = retainedRanges; self.capacityBytes = capacityBytes
-        self.underrunCount = underrunCount; self.readerWaitDuration = readerWaitDuration
+        self.underrunCount = underrunCount; self.readerWaitDuration = readerWaitDuration; self.resumeCount = resumeCount
     }
 }
 
@@ -51,13 +53,21 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     private var seekSupported: Bool?
     private var hasRead = false
     private var underruns = 0
+    /// Consecutive reconnections without new audio; reset once bytes arrive again.
+    private var resumeAttempts = 0
+    private var resumes = 0
+    /// Delay before each reconnection after a transient network failure.
+    public static let defaultResumeDelays: [TimeInterval] = [0.5, 1, 2, 4]
+    private let resumeDelays: [TimeInterval]
     private var readerWaitDuration: TimeInterval = 0
     private let signposter = OSSignposter(subsystem: "labs.armateur.Macarok", category: "Playback HTTP")
 
     public init(url: URL, transport: SourceTransport, bufferBytes: Int = 4 * 1024 * 1024,
                 bufferSeconds: Double? = nil, durationHint: Double? = nil, live: Bool = false,
+                resumeDelays: [TimeInterval] = BufferedHTTPInputStream.defaultResumeDelays,
                 onTitle: (@Sendable (String) -> Void)? = nil) {
         remoteURL = url
+        self.resumeDelays = resumeDelays
         self.transport = transport
         self.live = live; self.onTitle = onTitle
         requestedBufferSeconds = bufferSeconds.flatMap { $0.isFinite ? min(120, max(1, $0)) : nil }
@@ -73,7 +83,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
             totalBytes: length, offset: offset, isBuffering: priming && !ended && !closed && failure == nil,
             isFinished: ended && available == 0,
             retainedRanges: buffer.count > 0 ? [buffer.startOffset..<buffer.endOffset] : [],
-            capacityBytes: capacity, underrunCount: underruns, readerWaitDuration: readerWaitDuration)
+            capacityBytes: capacity, underrunCount: underruns, readerWaitDuration: readerWaitDuration, resumeCount: resumes)
     }
 
     /// Nil until the server response establishes whether byte-range requests are supported.
@@ -182,7 +192,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         let current = generation
         offset = newOffset; buffer.reset(at: newOffset)
         ended = length.map { newOffset == UInt64($0) } ?? false
-        failure = nil; priming = true
+        failure = nil; priming = true; resumeAttempts = 0
         let atEnd = ended
         condition.broadcast(); condition.unlock()
         oldProducer?.cancel()
@@ -261,6 +271,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
             buffer.makeSpace(for: chunk.count, before: offset, capacity: capacity)
             if buffer.count + chunk.count <= capacity {
                 buffer.append(chunk)
+                resumeAttempts = 0
                 titleUpdates.append(contentsOf: updates)
                 if titleUpdates.count > 512 { titleUpdates.removeFirst(titleUpdates.count - 512) }
                 condition.broadcast()
@@ -275,6 +286,20 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     private func finish(error: Error?, generation expected: Int) {
         condition.lock(); defer { condition.unlock() }
         guard generation == expected && !closed else { return }
+        // A dropped connection resumes from the first missing byte instead of ending the track early.
+        // The decoder keeps waiting on the condition meanwhile, exactly as during ordinary buffering.
+        let resumeAt = buffer.count > 0 ? buffer.endOffset : offset
+        if let error, !live, seekSupported == true, Self.isTransient(error), resumeAttempts < resumeDelays.count,
+           length.map({ resumeAt < UInt64($0) }) ?? true {
+            let delay = resumeDelays[resumeAttempts]
+            resumeAttempts += 1; resumes += 1
+            generation += 1; producer = nil
+            let next = generation
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.begin(offset: resumeAt, generation: next)
+            }
+            return
+        }
         failure = error; ended = true; producer = nil
         if error != nil && priming { buffer.reset(at: offset) }
         condition.broadcast()
@@ -320,6 +345,17 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         capacity = max(fallbackCapacity, min(256 * 1024 * 1024 + 64 * 1024, targetBytes + 64 * 1024))
         condition.broadcast()
         return live ? nil : expectedBytes
+    }
+
+    /// Failures worth retrying: the connection dropped or stalled, or the server cut the transfer short.
+    static func isTransient(_ error: Error) -> Bool {
+        if case StreamFailure.truncatedResponse = error { return true }
+        if case SourceNetworkError.httpStatus(let status) = error { return [408, 429, 500, 502, 503, 504].contains(status) }
+        let error = error as NSError
+        guard error.domain == NSURLErrorDomain else { return false }
+        return [NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut, NSURLErrorNotConnectedToInternet,
+                NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed,
+                NSURLErrorDataNotAllowed, NSURLErrorInternationalRoamingOff].contains(error.code)
     }
 
     /// VLCKit reports an unknown size for every NSInputStream. libVLC's FLAC and Ogg demuxers need the

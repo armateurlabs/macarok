@@ -12,6 +12,14 @@ Each prepared remote item owns an isolated playback transport, including its own
 
 Retained byte ranges describe reusable RAM, not a cumulative download. Evicted bytes are no longer shown as buffered. CBR/VBR files use the same decoder; timeline coverage derived from byte offsets is approximate for variable bitrate. Unknown total lengths do not invent a percentage.
 
+### Dropped connections
+
+A network drop, server restart, or proxy timeout used to look like the end of the file: VLC stopped and Macarok advanced to the next track. Now:
+
+- Macarok's own HTTP stream retries a transient failure (lost connection, timeout, truncated transfer, HTTP 408/429/5xx) up to four times, after 0.5, 1, 2, and 4 seconds, with a `Range` request from the first missing byte. The decoder waits as during ordinary buffering, so playback continues without a gap in the audio. Retries need byte-range support; the count appears in the stream snapshot.
+- When playback still stops early, it is recognized as an interruption, not a completed track: a failed Macarok stream; a stream of unknown size (such as a server transcode) more than 15 seconds and 10% short of the library duration; or remote media that VLC reads directly, such as FLAC and Ogg from OpenSubsonic, more than 10 seconds and 2% short of the exact length VLC decoded. The judgment uses the last position sampled while playing, because VLC may reset its clock when it stops. Local files and CUE segments always end normally, and gapless handoff never promotes the next track after an interruption.
+- Macarok then plays the same entry again from where it stopped, up to three times (waiting 1, 2, then 3 seconds), without counting the play twice. Progress of more than 30 seconds after a resume restores the full budget. After repeated drops it stops on that entry with an explanation; **Play** continues from the same position.
+
 ## VLC and the UI
 
 A shared `VLCLibrary` avoids constructing a libVLC context for every track. Each item retains its own lightweight player/delegate identity, so callbacks cannot complete a replacement item. Local files and mounted shares receive file caching as well as network caching for streams.
