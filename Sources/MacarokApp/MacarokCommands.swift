@@ -45,6 +45,7 @@ struct MacarokCommands: Commands {
             Button("Show Current Track", action: model.showCurrentTrack).keyboardShortcut(model.menuShortcut("showCurrentTrack"))
             Button(model.isStoppingRefresh ? "Stopping Refresh…" : model.isRefreshing ? "Stop Refresh" : model.isAllSources ? "Refresh All Sources" : "Refresh Source", action: model.toggleRefresh)
                 .keyboardShortcut("r").disabled(model.sources.isEmpty || model.isStoppingRefresh)
+            ServerScanMenuItems(model: model)
             Divider()
             Button("Home") { model.selectLibraryView(.home) }.keyboardShortcut("1")
             Button("Artists") { model.selectLibraryView(.artists) }.keyboardShortcut("2")

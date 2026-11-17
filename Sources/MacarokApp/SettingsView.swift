@@ -221,6 +221,14 @@ struct SettingsView: View {
                         if source.kind == .openSubsonic {
                             HStack {
                                 Button("Edit Credentials…") { credentialSource = source }
+                                if model.serverScan?.sourceID == source.id {
+                                    ProgressView().controlSize(.small)
+                                    Text(model.serverScan?.count.map { "\($0.formatted()) files" } ?? "Scanning…").font(.caption).foregroundStyle(.secondary)
+                                } else {
+                                    Button("Scan Library on Server") { model.scanServerLibrary([source]) }
+                                        .disabled(model.serverScan != nil || model.isRefreshing)
+                                        .help("Asks the server to look for new files, then refreshes this source. Requires an administrator account.")
+                                }
                                 Spacer()
                                 if let url = source.url, let host = url.host, url.scheme?.lowercased() == "https" {
                                     let fingerprint = CertificateTrustStore.shared.trustedFingerprint(sourceID: source.id, host: host, port: url.port ?? 443)

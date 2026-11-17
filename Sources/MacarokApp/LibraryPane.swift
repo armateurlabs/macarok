@@ -34,6 +34,7 @@ struct LibraryPane: View {
             .contextMenu {
                 Button(model.libraryView == .folders ? "Shuffle Selected Folder" : "Shuffle Library") { model.shuffle(shuffleScope) }
                     .disabled(shuffleScope.isEmpty)
+                ServerScanMenuItems(model: model)
             }
             if model.sources.isEmpty {
                 VStack(spacing: 12) { Image(systemName: "music.note.house").font(.system(size: 28)).foregroundStyle(.tertiary); Text("Bring your music.").foregroundStyle(.secondary); Button("Add Music Folder…", action: model.pickFolder); Button("Connect a Source…") { model.presentAddSource(from: .mainWindow) } }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -236,7 +237,12 @@ struct LibraryRefreshControl: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            if model.isRefreshing && !model.isStoppingRefresh {
+            if let scan = model.serverScan, !model.isRefreshing {
+                Text(scan.title).font(.system(size: 10)).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing).layoutPriority(-1)
+                    .help(scan.title).accessibilityIdentifier("serverScanProgress")
+            } else if model.isRefreshing && !model.isStoppingRefresh {
                 Text(model.refreshProgress).font(.system(size: 10)).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.tail)
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing).layoutPriority(-1)
@@ -254,8 +260,30 @@ struct LibraryRefreshControl: View {
                 .help(model.isRefreshing && !model.refreshProgress.isEmpty ? "\(title) · \(model.refreshProgress)" : title)
                 .accessibilityLabel(title)
                 .accessibilityIdentifier("libraryRefreshButton")
+                .contextMenu { ServerScanMenuItems(model: model) }
             ProgressView().controlSize(.mini).frame(width: 12, height: 12)
-                .opacity(model.isRefreshing ? 1 : 0).accessibilityHidden(!model.isRefreshing)
+                .opacity(model.isRefreshing || model.serverScan != nil ? 1 : 0).accessibilityHidden(!model.isRefreshing && model.serverScan == nil)
         }.frame(maxWidth: .infinity, alignment: .leading).frame(height: 20)
+    }
+}
+
+/// Server-side scans for OpenSubsonic sources in scope; hidden for other sources.
+struct ServerScanMenuItems: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        let servers = model.serverScanSources
+        if !servers.isEmpty {
+            Divider()
+            if model.serverScan != nil {
+                Button("Stop Following Server Scan", action: model.stopServerScanMonitoring)
+            } else {
+                Button(servers.count == 1 ? "Scan Library on Server" : "Scan Libraries on Servers") { model.scanServerLibrary() }
+                    .disabled(model.isRefreshing)
+                Button(servers.count == 1 ? "Full Scan on Server" : "Full Scan on Servers") { model.scanServerLibrary(fullScan: true) }
+                    .disabled(model.isRefreshing)
+                    .help("Re-reads every file on the server. This can take much longer.")
+            }
+        }
     }
 }

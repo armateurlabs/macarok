@@ -6,6 +6,42 @@ public struct OpenSubsonicError: LocalizedError, Sendable {
     public let message: String
     public init(code: Int, message: String) { self.code = code; self.message = message }
     public var errorDescription: String? { message }
+
+    /// Subsonic error 50: the account may not perform this operation, such as a scan by a non-administrator.
+    public static func isNotAuthorized(_ error: Error) -> Bool {
+        if let error = error as? OpenSubsonicError { return error.code == 50 }
+        if case SourceNetworkError.httpStatus(let status) = error { return status == 403 }
+        return false
+    }
+}
+
+/// The server's own library scan, which discovers files added to its music folders.
+public struct OpenSubsonicScanStatus: Sendable, Equatable {
+    public var scanning: Bool
+    /// Items the scan has processed so far (files for most servers).
+    public var count: Int?
+    public var folderCount: Int?
+    public var lastScan: Date?
+
+    public init(scanning: Bool, count: Int? = nil, folderCount: Int? = nil, lastScan: Date? = nil) {
+        self.scanning = scanning; self.count = count; self.folderCount = folderCount; self.lastScan = lastScan
+    }
+
+    /// Starts a scan, then reports progress until the server says it is finished.
+    public static func run(start: () async throws -> OpenSubsonicScanStatus, status: () async throws -> OpenSubsonicScanStatus,
+                           interval: Duration = .seconds(2), limit: Duration = .seconds(4 * 3600),
+                           progress: (OpenSubsonicScanStatus) async -> Void) async throws -> OpenSubsonicScanStatus {
+        var current = try await start()
+        await progress(current)
+        let clock = ContinuousClock(), deadline = clock.now + limit
+        while current.scanning {
+            guard clock.now < deadline else { throw SourceNetworkError.invalidResponse }
+            try await Task.sleep(for: interval)
+            current = try await status()
+            await progress(current)
+        }
+        return current
+    }
 }
 
 private actor RemoteLibraryCollection {
@@ -129,6 +165,28 @@ public struct OpenSubsonicClient: Sendable {
         let response = try await request("ping")
         return .init(version: response["version"] as? String ?? "", serverType: response["type"] as? String,
                      serverVersion: response["serverVersion"] as? String, isOpenSubsonic: response["openSubsonic"] as? Bool ?? false)
+    }
+
+    /// Asks the server to scan its music folders. Navidrome also accepts `fullScan` to re-read every file;
+    /// servers that do not know the parameter ignore it.
+    public func startScan(fullScan: Bool = false) async throws -> OpenSubsonicScanStatus {
+        parseScanStatus(try await request("startScan", parameters: fullScan ? ["fullScan": "true"] : [:]))
+    }
+
+    public func scanStatus() async throws -> OpenSubsonicScanStatus {
+        parseScanStatus(try await request("getScanStatus"))
+    }
+
+    private func parseScanStatus(_ response: [String: Any]) -> OpenSubsonicScanStatus {
+        let value = response["scanStatus"] as? [String: Any] ?? [:]
+        let lastScan = string(value["lastScan"]).flatMap { text -> Date? in
+            let formatter = ISO8601DateFormatter()
+            if let date = formatter.date(from: text) { return date }
+            formatter.formatOptions.insert(.withFractionalSeconds)
+            return formatter.date(from: text)
+        }
+        return OpenSubsonicScanStatus(scanning: value["scanning"] as? Bool ?? (string(value["scanning"]) == "true"),
+                                      count: integer(value["count"]), folderCount: integer(value["folderCount"]), lastScan: lastScan)
     }
 
     public func extensions() async throws -> [String] {

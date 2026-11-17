@@ -163,6 +163,9 @@ final class AppModel {
     var selectedQueueID: UUID?
     var playlists: [PlaylistRecord] = []
     var isRefreshing = false
+    /// A library scan running on an OpenSubsonic server, started from Macarok.
+    var serverScan: ServerScanProgress?
+    @ObservationIgnored var serverScanTask: Task<Void, Never>?
     var isStoppingRefresh = false
     var refreshProgress = ""
     var status = "Add a music folder or connect a source to get started."
@@ -1391,7 +1394,7 @@ final class AppModel {
         startRefresh(sources: [source])
     }
 
-    private func startRefresh(sources requestedSources: [SourceRecord], coverages: [String: LocalScanCoverage] = [:]) {
+    func startRefresh(sources requestedSources: [SourceRecord], coverages: [String: LocalScanCoverage] = [:]) {
         guard let store, !requestedSources.isEmpty else { return }
         refreshTask?.cancel()
         remoteCatalogProgress?.acceptingBatches = false
