@@ -18,14 +18,13 @@ struct ArchiveLibraryView: View {
             }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 8)
             if let route = path.last {
                 HStack(spacing: 6) {
+                    Button { controller.popToRoot(source: source) } label: { Image(systemName: "house").frame(width: 20, height: 18).contentShape(Rectangle()) }
+                        .buttonStyle(.borderless).help("Back to \(controller.tab(for: source).title)")
+                        .accessibilityLabel("Back to \(controller.tab(for: source).title)")
                     Button { controller.pop(source: source) } label: { Image(systemName: "chevron.left").frame(width: 20, height: 18).contentShape(Rectangle()) }
-                        .buttonStyle(.borderless).help("Back")
+                        .buttonStyle(.borderless).help("Back").accessibilityLabel("Back")
                     Text(route.title).font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 0)
-                    if path.count > 1 {
-                        Button { controller.popToRoot(source: source) } label: { Image(systemName: "house") }
-                            .buttonStyle(.borderless).help("Back to \(controller.tab(for: source).title)")
-                    }
                 }.padding(.horizontal, 12).padding(.bottom, 6)
             }
             Group {
