@@ -34,6 +34,16 @@ The same views are available in [Home · Dark](design/native/home-dark.png) and 
 
 ![A LibriVox audiobook in Light appearance](design/native/archive-librivox-light.png)
 
+**Podcasts · Light** — shows at the first level of their own library tab, an open show with dated episodes, listening progress, and the show's Home.
+
+![A podcast show in Light appearance](design/native/podcasts-show-light.png)
+
+**Podcast chapters · Dark** — chapter gaps on the timeline, the current chapter beside the title, chapter buttons, and the episode's chapter list.
+
+![Podcast chapters in Dark appearance](design/native/podcasts-playing-dark.png)
+
+Podcast views are also available as [Shows · Light](design/native/podcasts-shows-light.png), [New episodes · Dark](design/native/podcasts-new-dark.png), and [Show · Dark](design/native/podcasts-show-dark.png).
+
 Internet Archive views are also available in [Live Music Archive · Light](design/native/archive-live-light.png) and [LibriVox · Dark](design/native/archive-librivox-dark.png). They are rendered from synthetic recordings and cached responses, without contacting archive.org.
 
 <details>
@@ -53,7 +63,7 @@ Internet Archive views are also available in [Live Music Archive · Light](desig
 
 The album editor is also available in [Light](design/native/album-metadata-light.png), with compact [Light](design/native/album-metadata-narrow-light.png) and [Dark](design/native/album-metadata-narrow-dark.png) layouts.
 
-**Menu bar mini player**
+**Menu bar mini player** — also with [podcast chapters](design/native/menu-bar-mini-player-chapters-dark.png).
 
 ![Menu bar mini player in Dark appearance](design/native/menu-bar-mini-player-dark.png)
 
@@ -78,7 +88,7 @@ The wolf-and-apple icon is generated from the checked-in artwork at every build.
 
 Open `Package.swift` in Xcode for development, or use `swift build` and `swift test` from the command line. The app bundle is the recommended way to run the application with its resources and macOS integration.
 
-To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.5.0 3`. Tags such as `v0.5.0` trigger the GitHub Actions release workflow. See [release procedures](docs/RELEASING.md).
+To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.6.0 3`. Tags such as `v0.6.0` trigger the GitHub Actions release workflow. See [release procedures](docs/RELEASING.md).
 
 ## Native application
 
