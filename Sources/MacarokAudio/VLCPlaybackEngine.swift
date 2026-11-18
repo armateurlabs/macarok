@@ -118,7 +118,9 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     }()
     private static let playbackLibrary: VLCLibrary = {
         _ = eventConfiguration
-        return VLCLibrary(options: ["--no-video", "--no-osd", "--quiet", "--no-metadata-network-access"])
+        // Stream URLs carry their own authentication. VLC's Keychain keystore would otherwise look up
+        // saved internet passwords on every HTTP open, and a Keychain prompt blocks that open.
+        return VLCLibrary(options: ["--no-video", "--no-osd", "--quiet", "--no-metadata-network-access", "--keystore=none"])
     }()
     private static let signposter = OSSignposter(subsystem: "com.armateurlabs.Macarok", category: "Playback")
     private var transitionInterval: OSSignpostIntervalState?
