@@ -36,6 +36,20 @@ final class LibrarySearchPresentationTests: XCTestCase {
         XCTAssertEqual(Set(model.cachedTracksInFolder("").map(\.id)), ["a-signal", "a-orbit"])
     }
 
+    func testReassigningTheSameSearchKeepsTheDisplayedResults() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.removeFiles() }
+        let model = fixture.model
+        await model.start()
+        model.search = "signal"
+        try await expectEventually { !model.isSearching && model.displayedTracks.count == 2 }
+
+        // The search field writes its unchanged text back when it loses or regains focus.
+        model.search = "signal"
+        XCTAssertFalse(model.isSearching)
+        XCTAssertEqual(model.displayedTracks.count, 2, "An unchanged query must not clear and rebuild the library list.")
+    }
+
     func testSortArrowReversesTheCurrentListAndSearchWithoutChangingThePlaylist() async throws {
         let fixture = try makeFixture()
         defer { fixture.removeFiles() }

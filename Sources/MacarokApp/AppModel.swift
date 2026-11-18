@@ -122,7 +122,7 @@ final class AppModel {
     var albumMetadataEditingSession: AlbumMetadataEditingSession? {
         didSet { if oldValue != nil && albumMetadataEditingSession == nil && contextMode == .editAlbumMetadata { followPlaybackContext() } }
     }
-    var search = "" { didSet { searchLibrary(reset: true) } }
+    var search = "" { didSet { if search != oldValue { searchLibrary(reset: true) } } }
     private var catalog = LibrarySnapshot.empty
     private var searchCatalog = LibrarySnapshot.empty
     var tracks: [TrackRecord] { catalog.tracks }
