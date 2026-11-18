@@ -257,7 +257,7 @@ public struct InternetArchiveClient: Sendable {
     public let cache: ArchiveResponseCache?
     private let now: @Sendable () -> Date
 
-    public init(transport: SourceTransport, cache: ArchiveResponseCache? = nil, now: @escaping @Sendable () -> Date = Date.init) {
+    public init(transport: SourceTransport, cache: ArchiveResponseCache? = nil, now: @escaping @Sendable () -> Date = { Date() }) {
         self.transport = transport; self.cache = cache; self.now = now
     }
 
