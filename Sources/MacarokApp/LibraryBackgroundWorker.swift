@@ -47,11 +47,13 @@ actor LibraryBackgroundWorker {
         try store.saveRadioStation(station, favorite: true)
     }
 
+    @discardableResult
     func finishCatalog(store: LibraryStore, sourceID: String, generation: UUID,
-                       activeIDs: Set<String>, incompleteKey: String) throws {
+                       activeIDs: Set<String>, incompleteKey: String) throws -> Bool {
         try requireCurrent(sourceID: sourceID, generation: generation)
-        try store.reconcileTracks(sourceID: sourceID, activeIDs: activeIDs)
+        let changed = try store.reconcileTracks(sourceID: sourceID, activeIDs: activeIDs)
         try store.setValue(nil, forKey: incompleteKey)
+        return changed
     }
 
     func invalidateRefresh(sourceID: String, generation: UUID) {

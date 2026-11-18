@@ -280,7 +280,9 @@ public final class LibraryStore: @unchecked Sendable {
     }
 
     /// A missing file remains addressable by playlists and history, but leaves normal library views.
-    public func reconcileTracks(sourceID: String, activeIDs: Set<String>) throws {
+    /// Returns whether any track's availability changed.
+    @discardableResult
+    public func reconcileTracks(sourceID: String, activeIDs: Set<String>) throws -> Bool {
         try database.write { db in
             let rows = try Row.fetchAll(db, sql: "SELECT id, isAvailable FROM tracks WHERE sourceID = ?", arguments: [sourceID])
             var missing: [String] = []
@@ -301,10 +303,12 @@ public final class LibraryStore: @unchecked Sendable {
                                    arguments: StatementArguments([sourceID] + chunk))
                 }
             }
+            return !missing.isEmpty || !restored.isEmpty
         }
     }
 
-    public func reconcileTracks(sourceID: String, activeIDs: [String]) throws {
+    @discardableResult
+    public func reconcileTracks(sourceID: String, activeIDs: [String]) throws -> Bool {
         try reconcileTracks(sourceID: sourceID, activeIDs: Set(activeIDs))
     }
 

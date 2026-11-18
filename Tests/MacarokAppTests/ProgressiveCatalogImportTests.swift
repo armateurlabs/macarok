@@ -167,6 +167,52 @@ final class ProgressiveCatalogImportTests: XCTestCase {
         XCTAssertEqual(Set(fixture.model.tracks.map(\.id)), [fresh.id, otherFresh.id])
     }
 
+    func testAutomaticRefreshImportsAServerOnlyWhenItsFingerprintChangesAndStaysQuiet() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokAutomaticRefresh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try LibraryStore(url: directory.appendingPathComponent("test.sqlite"))
+        let source = SourceRecord(id: "auto-\(UUID().uuidString)", kind: .openSubsonic, name: "Server", location: "https://a.invalid")
+        try store.saveSource(source)
+        let cached = track("cached", sourceID: source.id), added = track("added", sourceID: source.id)
+        try store.upsertTracks([cached])
+        let runs = ImportRuns()
+        var fingerprint: String? = "scan-1"
+        let model = AppModel(store: store, preferences: AppPreferences(), registerSystemControls: false,
+                             remoteCatalog: { _, receive in await runs.record(); try await receive([cached, added], 1, 1) },
+                             remoteFingerprint: { _ in fingerprint })
+        await model.start()
+        model.sourceID = source.id
+        try await expectEventually { model.snapshotSourceID == source.id && !model.isLoadingLibrary }
+
+        // No fingerprint has been stored yet, so the first check imports the catalog.
+        await model.refreshSourcesAutomatically(includeLocal: false)
+        try await expectEventually { !model.isRefreshing }
+        let firstRuns = await runs.count
+        XCTAssertEqual(firstRuns, 1)
+        XCTAssertEqual(Set(model.tracks.map(\.id)), [cached.id, added.id])
+        XCTAssertNil(model.message, "An automatic refresh must not present alerts.")
+
+        let revision = model.libraryRevision
+        await model.refreshSourcesAutomatically(includeLocal: false)
+        XCTAssertFalse(model.isRefreshing, "An unchanged server must not be read again.")
+        let unchangedRuns = await runs.count
+        XCTAssertEqual(unchangedRuns, 1)
+
+        fingerprint = "scan-2"
+        await model.refreshSourcesAutomatically(includeLocal: false)
+        try await expectEventually { !model.isRefreshing }
+        let changedRuns = await runs.count
+        XCTAssertEqual(changedRuns, 2)
+        XCTAssertEqual(model.libraryRevision, revision, "A quiet import that changed nothing must not republish the library.")
+
+        fingerprint = nil
+        try store.setValue(Data([1]), forKey: AppModel.catalogImportKey(source.id))
+        await model.refreshSourcesAutomatically(includeLocal: false)
+        try await expectEventually { !model.isRefreshing }
+        let resumedRuns = await runs.count
+        XCTAssertEqual(resumedRuns, 3, "An interrupted import resumes even when the server cannot describe its catalog.")
+    }
+
     private func makeFixture(script: CatalogScript, seedOldTrack: Bool = false) async throws -> Fixture {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokProgressiveImport-\(UUID().uuidString)")
         let store = try LibraryStore(url: directory.appendingPathComponent("test.sqlite"))
@@ -219,6 +265,11 @@ final class ProgressiveCatalogImportTests: XCTestCase {
         let other: TrackRecord
         @MainActor func cleanup() { model.cancelRefresh(); try? FileManager.default.removeItem(at: directory) }
     }
+}
+
+private actor ImportRuns {
+    private(set) var count = 0
+    func record() { count += 1 }
 }
 
 private actor CatalogScript {

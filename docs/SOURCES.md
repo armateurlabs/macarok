@@ -10,6 +10,8 @@ Choose a music folder. Macarok indexes metadata in SQLite; the audio remains in 
 
 Use the library footer's **Scan for Changes** action to refresh. During a scan, the same control becomes **Stop Refresh**, and the window status bar shows its progress. Cancellation retains committed library data. The control shows **Stopping…** while the current operation finishes cancelling.
 
+While Macarok runs, folder watchers rescan the folders that changed. A few seconds after launch, Macarok also rescans every music folder in the background to pick up changes made while it was closed. Unchanged files are not read again, the cached library stays fully usable, and the list is updated only if something changed. A folder that cannot be reached, such as an unmounted drive, is reported in the status bar and keeps its cached tracks.
+
 ## OpenSubsonic
 
 Enter a display name, the server's base HTTP or HTTPS URL, and a username/password or supported OpenSubsonic API key. Credentials belong in their fields rather than the URL. The initial catalog is imported progressively into SQLite: completed albums can be browsed, searched, and queued before the whole import finishes. Connecting does not request a server-side filesystem scan.
@@ -17,6 +19,8 @@ Enter a display name, the server's base HTTP or HTTPS URL, and a username/passwo
 **Refresh Source** re-reads the catalog the server already knows; it does not make the server look for new files. To pick up files just added to the server's music folders, choose **Library → Scan Library on Server** (also in the refresh button's context menu and in **Settings → Sources**). Macarok asks the server to scan (`startScan`), shows its progress in the library footer, then refreshes the source automatically. **Full Scan on Server** asks Navidrome to re-read every file, which takes longer; other servers treat it as a normal scan. Most servers, including Navidrome, accept scans only from an administrator account; otherwise Macarok explains the refusal and the usual refresh remains available. **Stop Following Server Scan** stops watching the progress; the server keeps scanning.
 
 Audio is requested for playback at original quality. Cover images are retrieved on demand. Refresh repeats the metadata traversal; the library footer can stop it. All Sources refreshes its sources serially and preserves completed or partial results when another source fails or is cancelled.
+
+Server catalogs also stay current on their own. A few seconds after launch, then every hour, Macarok asks each server for its last scan date, track count, and newest album. The catalog is imported again in the background only when that changed since the last complete import, or when a previous import stopped early. During this import the cached library stays fully browsable and playable: it is updated once at the end, only if something changed, and an unreachable server is reported in the status bar instead of an alert. Starting a refresh or a server scan yourself takes precedence.
 
 Self-signed certificates require an explicit decision for that server. The same source-specific trust applies to library, artwork, and audio requests. A changed certificate requires a new decision.
 

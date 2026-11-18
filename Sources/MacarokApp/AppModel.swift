@@ -29,6 +29,8 @@ struct CertificatePrompt: Identifiable {
 
 typealias LocalScanOperation = @Sendable (SourceRecord, @escaping @Sendable (Int, Int) -> Void) async throws -> LibraryScanResult
 typealias RemoteCatalogOperation = @Sendable (SourceRecord, @escaping @Sendable ([TrackRecord], Int, Int?) async throws -> Void) async throws -> Void
+/// A cheap description of a server's catalog state; nil when the server cannot be reached.
+typealias RemoteFingerprintOperation = @MainActor (SourceRecord) async -> String?
 typealias LibrarySnapshotLoader = @Sendable (String, LibraryStore, [SourceRecord]) async throws -> LibrarySnapshot
 typealias ScopedLibrarySnapshotLoader = @Sendable (LibraryScope, LibraryStore, [SourceRecord]) async throws -> LibrarySnapshot
 
@@ -48,6 +50,8 @@ private final class RemoteCatalogProgress {
     var lastPublished: ContinuousClock.Instant?
     var publicationTask: Task<Void, Never>?
     var publicationError: Error?
+    /// Whether any batch or the final reconciliation changed stored tracks.
+    var changed = false
 }
 
 @MainActor @Observable
@@ -231,6 +235,10 @@ final class AppModel {
     @ObservationIgnored private var unpublishedSourceChanges: [String: Int] = [:]
     @ObservationIgnored private let localScan: LocalScanOperation?
     @ObservationIgnored private let remoteCatalog: RemoteCatalogOperation?
+    @ObservationIgnored let remoteFingerprintOperation: RemoteFingerprintOperation?
+    /// An automatic refresh publishes the library once at the end, only when it changed, and reports failures in the status bar.
+    @ObservationIgnored private(set) var refreshIsQuiet = false
+    @ObservationIgnored var automaticRefreshTask: Task<Void, Never>?
     @ObservationIgnored private let snapshotLoader: ScopedLibrarySnapshotLoader
     @ObservationIgnored private let selectionDefaults: UserDefaults
     @ObservationIgnored private let savesLibrarySelection: Bool
@@ -286,7 +294,8 @@ final class AppModel {
     @ObservationIgnored private var activePlaybackResource: PreparedQueuePlayback?
 
     init(store: LibraryStore? = nil, preferences: AppPreferences? = nil, registerSystemControls: Bool = true,
-         localScan: LocalScanOperation? = nil, remoteCatalog: RemoteCatalogOperation? = nil, snapshotLoader: LibrarySnapshotLoader? = nil,
+         localScan: LocalScanOperation? = nil, remoteCatalog: RemoteCatalogOperation? = nil, remoteFingerprint: RemoteFingerprintOperation? = nil,
+         snapshotLoader: LibrarySnapshotLoader? = nil,
          scopedSnapshotLoader: ScopedLibrarySnapshotLoader? = nil, selectionDefaults: UserDefaults? = nil,
          playbackPreparation: PlaybackPreparationWorker? = nil) {
         self.store = store
@@ -294,6 +303,7 @@ final class AppModel {
         self.registerSystemControls = registerSystemControls
         self.localScan = localScan
         self.remoteCatalog = remoteCatalog
+        self.remoteFingerprintOperation = remoteFingerprint
         self.selectionDefaults = selectionDefaults ?? .standard
         self.savesLibrarySelection = registerSystemControls || selectionDefaults != nil
         self.snapshotLoader = scopedSnapshotLoader ?? { scope, store, sources in
@@ -500,9 +510,10 @@ final class AppModel {
                 tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.playbackTick() }
             }
             await waitForLibraryLoad()
-            if registerSystemControls { podcasts.startAutomaticRefresh() }
+            if registerSystemControls { podcasts.startAutomaticRefresh(); startAutomaticSourceRefresh() }
             if let source = selectedSource, source.kind == .openSubsonic, initial.incomplete.contains(source.id) {
-                status = "Catalog import is incomplete. Refresh this source to load the remaining albums."
+                status = registerSystemControls ? "Catalog import is incomplete. Resuming it in the background."
+                    : "Catalog import is incomplete. Refresh this source to load the remaining albums."
             } else {
                 status = sources.isEmpty ? "Add a music folder or connect a source to get started." : "Library is up to date."
             }
@@ -1094,6 +1105,7 @@ final class AppModel {
 
     func finishPlaybackAccess() async {
         menuBarController?.stop()
+        stopAutomaticSourceRefresh()
         watcherSetupTask?.cancel(); watcherGeneration = UUID()
         for watcher in directoryWatchers.values { watcher.stop() }
         directoryWatchers.removeAll()
@@ -1424,7 +1436,7 @@ final class AppModel {
         startRefresh(sources: [source])
     }
 
-    func startRefresh(sources requestedSources: [SourceRecord], coverages: [String: LocalScanCoverage] = [:]) {
+    func startRefresh(sources requestedSources: [SourceRecord], coverages: [String: LocalScanCoverage] = [:], quiet: Bool = false) {
         guard let store, !requestedSources.isEmpty else { return }
         refreshTask?.cancel()
         remoteCatalogProgress?.acceptingBatches = false
@@ -1432,6 +1444,7 @@ final class AppModel {
         remoteCatalogProgress = nil
         let generation = UUID()
         refreshGeneration = generation
+        refreshIsQuiet = quiet
         refreshBatchCount = requestedSources.count
         refreshBatchPosition = 0
         isRefreshing = true; isStoppingRefresh = false; refreshProgress = "Connecting…"; scanWarnings = []
@@ -1481,7 +1494,8 @@ final class AppModel {
             }
             guard self.refreshGeneration == generation, !Task.isCancelled else { return }
             if !failures.isEmpty {
-                self.fail(requestedSources.count == 1 ? "Could not refresh “\(requestedSources[0].name)”" : "Some sources could not be refreshed", failures.joined(separator: "\n"))
+                if quiet { self.status = "Could not refresh: " + failures.joined(separator: " · ") }
+                else { self.fail(requestedSources.count == 1 ? "Could not refresh “\(requestedSources[0].name)”" : "Some sources could not be refreshed", failures.joined(separator: "\n")) }
             } else if requestedSources.count > 1 {
                 self.status = "All sources are up to date."
             }
@@ -1640,6 +1654,8 @@ final class AppModel {
                                             store: store, generation: generation, progress: progress)
         }
         do {
+            // Taken before reading, so changes made on the server during the import are found next time.
+            let fingerprint = await remoteFingerprint(source)
             if let remoteCatalog { try await remoteCatalog(source, receive) }
             else {
                 let client = try await subsonicClient(source)
@@ -1652,22 +1668,44 @@ final class AppModel {
             if let error = progress.publicationError { throw error }
             progress.acceptingBatches = false
             progress.publicationTask?.cancel()
-            try await backgroundWorker.finishCatalog(store: store, sourceID: source.id, generation: generation,
-                                                      activeIDs: progress.activeIDs, incompleteKey: Self.catalogImportKey(source.id))
-            try await publishRemoteSnapshot(source: source, store: store, generation: generation, progress: progress)
+            if try await backgroundWorker.finishCatalog(store: store, sourceID: source.id, generation: generation,
+                                                         activeIDs: progress.activeIDs, incompleteKey: Self.catalogImportKey(source.id)) {
+                progress.changed = true
+            }
+            if !refreshIsQuiet || progress.changed {
+                try await publishRemoteSnapshot(source: source, store: store, generation: generation, progress: progress)
+            }
             try Task.checkCancellation()
             guard refreshGeneration == generation else { throw CancellationError() }
+            if let fingerprint {
+                let key = Self.serverFingerprintKey(source.id)
+                try? await performLibraryWork { try $0.setValue(Data(fingerprint.utf8), forKey: key) }
+            }
         } catch {
             progress.acceptingBatches = false
             progress.publicationTask?.cancel()
             // Preserve and show committed batches even when the remaining import fails or is cancelled.
-            try? await publishRemoteSnapshot(source: source, store: store, generation: generation,
-                                            progress: progress, allowCancelled: true)
+            if !refreshIsQuiet || progress.changed {
+                try? await publishRemoteSnapshot(source: source, store: store, generation: generation,
+                                                progress: progress, allowCancelled: true)
+            }
             throw error
         }
     }
 
-    nonisolated private static func catalogImportKey(_ sourceID: String) -> String { "catalogImport.incomplete.\(sourceID)" }
+    nonisolated static func catalogImportKey(_ sourceID: String) -> String { "catalogImport.incomplete.\(sourceID)" }
+    nonisolated static func serverFingerprintKey(_ sourceID: String) -> String { "catalogImport.fingerprint.\(sourceID)" }
+
+    /// The server's last scan, track count, and newest album: two small requests instead of reading every album.
+    func remoteFingerprint(_ source: SourceRecord) async -> String? {
+        if let remoteFingerprintOperation { return await remoteFingerprintOperation(source) }
+        guard remoteCatalog == nil, let client = try? await subsonicClient(source) else { return nil }
+        let status = try? await client.scanStatus()
+        let newest = try? await client.albums(offset: 0, size: 1, type: "newest").first?.id
+        guard status != nil || newest != nil else { return nil }
+        return [status?.lastScan.map { String(Int($0.timeIntervalSince1970)) } ?? "-",
+                status?.count.map(String.init) ?? "-", newest ?? "-"].joined(separator: "|")
+    }
 
     private func acceptRemoteBatch(_ batch: [TrackRecord], completed: Int, total: Int?, source: SourceRecord,
                                    store: LibraryStore, generation: UUID, progress: RemoteCatalogProgress) async throws {
@@ -1677,7 +1715,7 @@ final class AppModel {
               sources.contains(where: { $0.id == source.id }) else { throw CancellationError() }
         if let error = progress.publicationError { throw error }
         guard batch.allSatisfy({ $0.sourceID == source.id }) else { throw SourceNetworkError.invalidResponse }
-        try await backgroundWorker.upsert(store: store, sourceID: source.id, generation: generation, tracks: batch)
+        if try await backgroundWorker.upsert(store: store, sourceID: source.id, generation: generation, tracks: batch) { progress.changed = true }
         guard refreshGeneration == generation, remoteCatalogProgress === progress, progress.acceptingBatches else { throw CancellationError() }
         progress.activeIDs.formUnion(batch.map(\.id))
         progress.revision &+= 1
@@ -1693,7 +1731,7 @@ final class AppModel {
 
     private func scheduleRemotePublication(source: SourceRecord, store: LibraryStore, generation: UUID,
                                            progress: RemoteCatalogProgress) {
-        guard scopeIncludes(sourceID: source.id), progress.publicationTask == nil, progress.acceptingBatches else { return }
+        guard !refreshIsQuiet, scopeIncludes(sourceID: source.id), progress.publicationTask == nil, progress.acceptingBatches else { return }
         let deadline = progress.lastPublished?.advanced(by: .milliseconds(750))
         progress.publicationTask = Task { [weak self] in
             guard let self else { return }
