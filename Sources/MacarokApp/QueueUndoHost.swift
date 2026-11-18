@@ -13,8 +13,10 @@ struct QueueUndoHost: NSViewRepresentable {
 final class QueueUndoHostingView: NSView {
     private weak var model: AppModel?
     private weak var content: NSView?
+    private weak var anchor: NSResponder?
     private let queueResponder: QueueUndoResponder
     private var resignation: NSObjectProtocol?
+    private var closing: NSObjectProtocol?
     init(model: AppModel) {
         self.model = model; queueResponder = QueueUndoResponder(model: model)
         super.init(frame: .zero)
@@ -25,19 +27,27 @@ final class QueueUndoHostingView: NSView {
         guard let window, let contentView = window.contentView, content !== contentView else { return }
         detach()
         content = contentView
-        queueResponder.nextResponder = contentView.nextResponder
-        contentView.nextResponder = queueResponder
+        // AppKit forwards a view controller's view's nextResponder setter to the controller, so splice after the controller.
+        let anchor: NSResponder = (contentView.nextResponder as? NSViewController).flatMap { $0.view === contentView ? $0 : nil } ?? contentView
+        self.anchor = anchor
+        queueResponder.nextResponder = anchor.nextResponder
+        anchor.nextResponder = queueResponder
         window.titleVisibility = .hidden
         model?.mainPlayerWindow = window
         model?.queueUndoPresentation.refresh()
         resignation = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak model] _ in
             MainActor.assumeIsolated { model?.resetArrowSeek() }
         }
+        // Showing the window again must open a fresh scene, not revive a closed one.
+        closing = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.detach() }
+        }
     }
     func detach() {
-        if let content, content.nextResponder === queueResponder { content.nextResponder = queueResponder.nextResponder }
+        if let anchor, anchor.nextResponder === queueResponder { anchor.nextResponder = queueResponder.nextResponder }
         if let resignation { NotificationCenter.default.removeObserver(resignation) }
-        resignation = nil; content = nil
+        if let closing { NotificationCenter.default.removeObserver(closing) }
+        resignation = nil; closing = nil; content = nil; anchor = nil
         if model?.mainPlayerWindow === window { model?.mainPlayerWindow = nil; model?.resetArrowSeek(); model?.queueUndoPresentation.refresh() }
     }
 }

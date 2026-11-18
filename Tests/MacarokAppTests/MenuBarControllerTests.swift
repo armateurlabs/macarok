@@ -139,6 +139,34 @@ final class MenuBarControllerTests: XCTestCase {
         XCTAssertEqual(openedWindows, 1)
     }
 
+    func testShowWindowRestoresMinimizedWindowInsteadOfOpeningAnother() async throws {
+        _ = NSApplication.shared
+        let model = AppModel(preferences: AppPreferences(), registerSystemControls: false)
+        var openedWindows = 0
+        model.openMainWindow = { openedWindows += 1 }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 120), styleMask: [.titled, .miniaturizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.orderOut(nil) }
+        model.mainPlayerWindow = window
+        window.orderFront(nil)
+        window.miniaturize(nil)
+        try await eventually { window.isMiniaturized && !window.isVisible }
+        model.showMainWindow()
+        try await eventually { !window.isMiniaturized && window.isVisible }
+        XCTAssertEqual(openedWindows, 0, "A minimized main window must be restored, not duplicated.")
+    }
+
+    func testDockReopenOpensClosedMainWindowThroughModel() {
+        _ = NSApplication.shared
+        let model = AppModel(preferences: AppPreferences(), registerSystemControls: false)
+        var openedWindows = 0
+        model.openMainWindow = { openedWindows += 1 }
+        let delegate = ApplicationDelegate()
+        delegate.model = model
+        XCTAssertFalse(delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: true))
+        XCTAssertEqual(openedWindows, 1)
+    }
+
     func testRetainedPresentationDoesNotRetainControllerOrAppModel() async throws {
         _ = NSApplication.shared
         var preferences = AppPreferences(); preferences.showMenuBar = true

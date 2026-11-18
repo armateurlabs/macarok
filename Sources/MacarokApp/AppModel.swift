@@ -1103,9 +1103,12 @@ final class AppModel {
     }
 
     func showMainWindow() {
+        NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
-        if let window = mainPlayerWindow, window.isVisible { window.makeKeyAndOrderFront(nil) }
-        else { openMainWindow?() }
+        // A minimized window reports isVisible == false; restore it rather than opening a duplicate.
+        guard let window = mainPlayerWindow else { openMainWindow?(); return }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
     }
 
     func togglePlayback() {
@@ -2031,7 +2034,7 @@ final class AppModel {
         KeyboardShortcuts.onKeyUp(for: .playPause) { [weak self] in self?.togglePlayback() }
         KeyboardShortcuts.onKeyUp(for: .nextTrack) { [weak self] in self?.advance() }
         KeyboardShortcuts.onKeyUp(for: .previousTrack) { [weak self] in self?.previous() }
-        KeyboardShortcuts.onKeyUp(for: .showMacarok) { NSApp.activate(ignoringOtherApps: true); NSApp.windows.first?.makeKeyAndOrderFront(nil) }
+        KeyboardShortcuts.onKeyUp(for: .showMacarok) { [weak self] in self?.showMainWindow() }
         if let monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp], handler: { [weak self] event in
             guard let self else { return event }
             if event.type == .keyUp {

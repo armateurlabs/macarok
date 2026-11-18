@@ -213,6 +213,32 @@ final class QueueBehaviorTests: XCTestCase {
         XCTAssertFalse(PlaybackArrowKeys.accepts(window: nil, mainWindow: window))
     }
 
+    func testUndoHostJoinsResponderChainOfViewControllerContentWithoutLooping() throws {
+        _ = NSApplication.shared
+        let model = AppModel(registerSystemControls: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 240), styleMask: [.titled, .miniaturizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        // SwiftUI windows are hosted by a content view controller, which AppKit splices after its view.
+        let controller = NSViewController(); controller.view = NSView(frame: window.contentView!.bounds)
+        window.contentViewController = controller
+        let host = QueueUndoHostingView(model: model)
+        controller.view.addSubview(host); host.attach()
+        defer { host.detach(); window.close() }
+        func chain() -> [NSResponder] {
+            var result: [NSResponder] = [], next: NSResponder? = controller.view
+            while let responder = next, result.count < 20 { result.append(responder); next = responder.nextResponder }
+            return result
+        }
+        let attached = chain()
+        XCTAssertTrue(attached.contains { $0 === window }, "Window actions such as Minimize must stay reachable: \(attached)")
+        XCTAssertLessThan(attached.count, 20, "The responder chain must not loop: \(attached)")
+        XCTAssertTrue(attached.contains { $0 === controller })
+        XCTAssertEqual(attached.filter { String(describing: type(of: $0)).contains("QueueUndoResponder") }.count, 1)
+        host.detach()
+        XCTAssertFalse(chain().contains { String(describing: type(of: $0)).contains("QueueUndoResponder") })
+        XCTAssertTrue(chain().contains { $0 === window })
+    }
+
     private func track(_ id: String) -> TrackRecord {
         TrackRecord(id: id, sourceID: "source", title: id, artist: "Artist", album: "Album", duration: 20)
     }
