@@ -248,13 +248,7 @@ struct LibraryRefreshControl: View {
                     .lineLimit(1).truncationMode(.middle)
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing).layoutPriority(-1)
                     .help(scan.title).accessibilityIdentifier("serverScanProgress")
-            } else if model.isRefreshing && !model.isStoppingRefresh {
-                Text(model.refreshProgress).font(.system(size: 10)).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.tail)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing).layoutPriority(-1)
-                    .help(model.refreshProgress)
-                    .accessibilityIdentifier("libraryRefreshProgress")
-            } else { Spacer(minLength: 0) }
+            } else { Spacer(minLength: 0) } // Refresh progress is shown in full in the window's status bar.
             Button(action: model.toggleRefresh) {
                 HStack(spacing: 7) {
                     Image(systemName: model.isRefreshing ? "stop.fill" : "arrow.clockwise")

@@ -8,7 +8,7 @@ The library header uses the native macOS source picker, including an icon and a 
 
 Choose a music folder. Macarok indexes metadata in SQLite; the audio remains in that folder. MP3, FLAC, Ogg Vorbis, Opus, and other supported TagLib/VLC formats can be played. A CUE sheet exposes its individual tracks without splitting its referenced audio file.
 
-Use the library footer's **Scan for Changes** action to refresh. During a scan, the same control becomes **Stop Refresh** and displays progress. Cancellation retains committed library data. The control shows **Stopping…** while the current operation finishes cancelling.
+Use the library footer's **Scan for Changes** action to refresh. During a scan, the same control becomes **Stop Refresh**, and the window status bar shows its progress. Cancellation retains committed library data. The control shows **Stopping…** while the current operation finishes cancelling.
 
 ## OpenSubsonic
 

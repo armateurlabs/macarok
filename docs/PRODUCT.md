@@ -82,7 +82,7 @@ Cancellation or a later request failure keeps both the previous cache and newly 
 
 Library and playlist footers share a fixed single-row height, an opaque native control background, and a top divider, distinct from the full-width status bar. Library totals and refresh controls share that row; compact widths keep the full counts and action available through accessible labels and tooltips.
 
-The library footer starts refresh, changes to Stop Refresh while active, shows progress, and waits in Stopping while cancellation completes. Cancelling clears already queued local rescans so the same operation does not immediately restart.
+The library footer starts refresh, changes to Stop Refresh while active with its progress in the window status bar, and waits in Stopping while cancellation completes. Cancelling clears already queued local rescans so the same operation does not immediately restart.
 
 All library navigation reads an immutable `LibrarySnapshot` prepared off the main thread. Albums, artists, years, tags, statistics, folder trees, and folder membership are grouped once per catalog revision. View bodies consume ready arrays and lookups; collapsed groups create their children only when opened. Each track path is resolved once and its folder prefixes are assembled in one pass.
 
