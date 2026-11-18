@@ -37,21 +37,27 @@ struct LibraryPane: View {
                 ServerScanMenuItems(model: model)
             }
             if model.sources.isEmpty {
-                VStack(spacing: 12) { Image(systemName: "music.note.house").font(.system(size: 28)).foregroundStyle(.tertiary); Text("Bring your music.").foregroundStyle(.secondary); Button("Add Music Folder…", action: model.pickFolder); Button("Connect a Source…") { model.presentAddSource(from: .mainWindow) } }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                ContentUnavailableView {
+                    Label("Bring Your Music", systemImage: "music.note.house")
+                } actions: {
+                    Button("Add Music Folder…", action: model.pickFolder)
+                    Button("Connect a Source…") { model.presentAddSource(from: .mainWindow) }
+                }.emptyPanel()
             } else if (model.isLoadingLibrary && model.tracks.isEmpty) || (model.isSearching && model.displayedTracks.isEmpty) {
                 ProgressView(model.isSearching ? "Searching library…" : "Loading library…")
-                    .controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .controlSize(.small).emptyPanel()
             } else if model.displayedTracks.isEmpty && visibleRadioStations.isEmpty && !model.podcastEpisodes.isEmpty {
                 // All Sources keeps podcasts out of the music lists; point to where they are.
-                VStack(spacing: 12) {
-                    ContentUnavailableView(model.search.isEmpty ? "No Music" : "No Matching Music", systemImage: "music.note",
-                                           description: Text(model.search.isEmpty ? "Your podcasts are in the Podcasts tab." : "Matching podcast episodes are in the Podcasts tab."))
-                        .font(.caption).fixedSize(horizontal: false, vertical: true)
+                ContentUnavailableView {
+                    Label(model.search.isEmpty ? "No Music" : "No Matching Music", systemImage: "music.note")
+                } description: {
+                    Text(model.search.isEmpty ? "Your podcasts are in the Podcasts tab." : "Matching podcast episodes are in the Podcasts tab.")
+                } actions: {
                     Button("Show Podcasts") { model.selectLibraryView(.podcasts) }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }.emptyPanel()
             } else if model.displayedTracks.isEmpty && visibleRadioStations.isEmpty {
-                ContentUnavailableView.search(text: model.search).font(.caption)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ContentUnavailableView.search(text: model.search)
+                    .emptyPanel()
             } else {
                 List(selection: Binding(get: { model.librarySelection }, set: { model.selectLibraryItem($0) })) {
                     if model.isAllSources && !visibleRadioStations.isEmpty {

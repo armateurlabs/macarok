@@ -1197,9 +1197,11 @@ final class AppModel {
     func removeQueue(_ offsets: IndexSet) {
         let before = queueEditState()
         let deletingCurrent = offsets.contains { queue[$0].id == currentQueueID }
+        let followedPlayback = playingFollowsPlayback
         queue.remove(atOffsets: offsets)
         if deletingCurrent { stopPlayback(clearCurrent: true); updateNowPlaying() }
         if let selection = selectedQueueID, !queue.contains(where: { $0.id == selection }) { selectedQueueID = nil }
+        if queue.isEmpty { leavePlayingAfterEmptyingQueue(followedPlayback) }
         registerQueueEdit(before, name: "Remove from Playlist"); saveQueue()
     }
     func clearQueue() {
@@ -1210,10 +1212,23 @@ final class AppModel {
         if active, let current = queue.first(where: { $0.id == currentQueueID }) {
             queue = [current]; selectedQueueID = current.id
         } else {
+            let followedPlayback = playingFollowsPlayback
             stopPlayback(clearCurrent: true)
             queue = []; selectedQueueID = nil; updateNowPlaying()
+            leavePlayingAfterEmptyingQueue(followedPlayback)
         }
         registerQueueEdit(before, name: "Clear Playlist"); saveQueue()
+    }
+
+    /// Playing shows the queue's track rather than something the user inspected or is editing.
+    private var playingFollowsPlayback: Bool {
+        centerPage == .playing && contextPage == .track && !isEditingContext
+            && (selectedTrackID == nil || selectedTrackID == currentTrack?.id)
+    }
+
+    /// With nothing left to play, Playing would only show an empty state, so Home takes over.
+    private func leavePlayingAfterEmptyingQueue(_ followedPlayback: Bool) {
+        if followedPlayback && currentTrack == nil { centerPage = .home }
     }
     func cycleRepeat() { settings.repeatMode = settings.repeatMode.next }
 

@@ -12,12 +12,25 @@ struct PanelFooter<Content: View>: View {
             .foregroundStyle(.secondary)
             .buttonStyle(.borderless)
             .padding(.horizontal, 13)
-            .frame(height: Self.height)
+            .panelFooterSurface()
+    }
+}
+
+extension View {
+    /// The footer's height, surface, and top separator, so bottom bars line up across the three panels.
+    func panelFooterSurface() -> some View {
+        frame(height: PanelFooter<EmptyView>.height)
             .background {
                 Color(nsColor: .controlBackgroundColor).overlay(Color.primary.opacity(0.05))
             }
             .overlay(alignment: .top) { Color(nsColor: .separatorColor).frame(height: 0.5) }
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Cancel/Save row: a panel footer when embedded in the main window, padded below a divider in a sheet.
+    @ViewBuilder func editorActionBar(embedded: Bool) -> some View {
+        if embedded { padding(.horizontal, 13).panelFooterSurface() }
+        else { VStack(spacing: 0) { Divider(); padding(16) } }
     }
 }
 

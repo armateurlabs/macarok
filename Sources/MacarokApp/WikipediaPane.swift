@@ -116,14 +116,13 @@ struct WikipediaPane: View {
             }.controlSize(.small).padding(.horizontal, 14).padding(.vertical, 10)
             Divider()
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            HStack(spacing: 8) {
-                Text("Wikipedia · English").foregroundStyle(.secondary)
+            PanelFooter {
+                Text("Wikipedia · English")
                 Spacer(minLength: 0)
                 Button("Open in Browser", systemImage: "arrow.up.right.square") {
                     if let url = browser.displayURL { NSWorkspace.shared.open(url) }
                 }.disabled(browser.displayURL == nil)
-            }.font(.system(size: 10)).controlSize(.small).padding(.horizontal, 14).frame(height: 34).background(.bar)
+            }
         }
         .background(Color(nsColor: .textBackgroundColor))
         .onAppear { followTarget() }
@@ -138,19 +137,19 @@ struct WikipediaPane: View {
             ZStack {
                 WikipediaWebView(session: browser).opacity(browser.state == .loaded ? 1 : 0)
                 switch browser.state {
-                case .loading: ProgressView("Loading Wikipedia…").controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .loading: ProgressView("Loading Wikipedia…").controlSize(.small).emptyPanel()
                 case .failed(let message):
                     ContentUnavailableView {
                         Label("Wikipedia Unavailable", systemImage: "globe")
                     } description: { Text(message) } actions: {
                         Button("Try Again") { if let url = browser.requestedURL { browser.show(url, force: true) } }
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }.emptyPanel()
                 default: EmptyView()
                 }
             }
         } else {
             ContentUnavailableView("Choose an Artist or Album", systemImage: "globe", description: Text("Play or select a track, or search Wikipedia above."))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .emptyPanel()
         }
     }
 

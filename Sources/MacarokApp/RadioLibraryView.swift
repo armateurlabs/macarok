@@ -33,7 +33,7 @@ struct RadioLibraryView: View {
             if stations.isEmpty {
                 ContentUnavailableView(favoritesOnly ? "No Favorite Stations" : "No Stations", systemImage: "antenna.radiowaves.left.and.right",
                                        description: Text(query.isEmpty ? "Browse the directory or add a stream URL." : "Try another station name."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .emptyPanel()
             } else {
                 List(stations) { station in
                     RadioStationLabel(station: station)

@@ -363,6 +363,31 @@ final class CenterNavigationTests: XCTestCase {
         XCTAssertEqual(model.centerPage, .playing)
     }
 
+    func testEmptyingTheQueueReturnsToHomeOnlyWhenPlayingFollowedPlayback() throws {
+        let following = makeFixture().model
+        following.currentQueueID = following.queue[0].id
+        following.centerPage = .playing
+        following.contextMode = .lyrics
+        following.clearQueue()
+        XCTAssertEqual(following.centerPage, .home)
+        XCTAssertEqual(following.contextMode, .lyrics, "Returning to Playing later keeps the chosen view.")
+
+        let inspecting = makeFixture()
+        inspecting.model.currentQueueID = inspecting.entries[0].id
+        inspecting.model.centerPage = .playing
+        inspecting.model.inspect(inspecting.entries[2].track)
+        inspecting.model.clearQueue()
+        XCTAssertEqual(inspecting.model.centerPage, .playing, "A manually inspected track stays in Playing.")
+
+        let removing = makeFixture().model
+        removing.currentQueueID = removing.queue[0].id
+        removing.centerPage = .playing
+        removing.removeQueue(IndexSet(integer: 2)); removing.removeQueue(IndexSet(integer: 1))
+        XCTAssertEqual(removing.centerPage, .playing)
+        removing.removeQueue(IndexSet(integer: 0))
+        XCTAssertEqual(removing.centerPage, .home)
+    }
+
     func testHomePreservesAnEditorDraftUntilTheUserFinishesEditing() throws {
         let fixture = makeFixture()
         let model = fixture.model

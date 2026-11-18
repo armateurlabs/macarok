@@ -123,7 +123,6 @@ struct AlbumMetadataEditor: View {
                     if let error = session.error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
                 }.padding(20)
             }.disabled(session.isSaving)
-            Divider()
             HStack {
                 if session.isSaving || session.isLoading { ProgressView().controlSize(.small) }
                 if session.isSaving { Text("Saving album metadata…").font(.caption).foregroundStyle(.secondary) }
@@ -132,7 +131,7 @@ struct AlbumMetadataEditor: View {
                 Button(saveLabel) { session.confirmSave = true }.keyboardShortcut(.defaultAction)
                     .disabled(!session.draft.isValid || session.isSaving || session.isLoading || !session.hasLoaded || session.tracks.isEmpty ||
                               (session.changes.isEmpty && session.protectValues == session.track.metadataLocked))
-            }.padding(16)
+            }.editorActionBar(embedded: true)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .textBackgroundColor))
             .accessibilityIdentifier("albumMetadataEditor")

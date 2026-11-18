@@ -19,7 +19,7 @@ struct ContextPane: View {
         if model.sources.isEmpty { WelcomeView(model: model) }
         else if model.isRadioSource {
             ContentUnavailableView("Internet Radio", systemImage: "antenna.radiowaves.left.and.right", description: Text("Choose a station from your library, or browse the directory to find one."))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .emptyPanel()
         } else if let id = model.focusedPodcastShowID, let source = model.sourcesByID[id] {
             ScrollView { PodcastShowHome(model: model, source: source).padding(22).frame(maxWidth: .infinity, alignment: .leading) }
                 .background(Color(nsColor: .textBackgroundColor))
@@ -41,23 +41,23 @@ struct ContextPane: View {
                 AlbumMetadataEditor(model: model, session: session, onFinish: { model.finishAlbumMetadataEditing(sessionID: session.id) })
             } else {
                 ContentUnavailableView("Choose an Album", systemImage: "square.stack", description: Text("Play or select a song to edit its album metadata."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .emptyPanel()
             }
         case .editMetadata:
             if let session = model.metadataEditingSession {
                 InlineMetadataEditor(model: model, session: session, onFinish: { model.finishMetadataEditing(sessionID: session.id) })
             } else if model.isRadioTrack(model.playingContextTrack) {
                 ContentUnavailableView("Metadata Unavailable", systemImage: "antenna.radiowaves.left.and.right", description: Text("Live radio streams do not have editable music tags."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .emptyPanel()
             } else {
                 ContentUnavailableView("Choose a Track", systemImage: "music.note", description: Text("Play or select a track to edit its metadata."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .emptyPanel()
             }
         case .context:
             if showsRadioContext { RadioNowPlayingView(model: model, track: model.playingContextTrack) }
             else if (model.contextPage == .track || model.contextPage == .home) && model.playingContextTrack == nil {
                 ContentUnavailableView("Choose a Track", systemImage: "music.note", description: Text("Play or select a track to see its context."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .emptyPanel()
             }
             else {
                 ScrollView {

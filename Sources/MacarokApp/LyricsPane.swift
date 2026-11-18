@@ -58,9 +58,9 @@ struct LyricsPane: View {
         switch controller.state {
         case .idle:
             ContentUnavailableView("Choose a Track", systemImage: "text.quote", description: Text("Play or select a track to see its lyrics."))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .emptyPanel()
         case .loading:
-            ProgressView("Loading lyrics…").controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+            ProgressView("Loading lyrics…").controlSize(.small).emptyPanel()
         case .loaded:
             if controller.hasSynchronizedLyrics { SynchronizedLyricsView(model: model, controller: controller, autoScroll: $autoScroll, timeline: model.player.timeline) }
             else {
@@ -77,10 +77,10 @@ struct LyricsPane: View {
             } actions: {
                 Button("Find Lyrics…", action: controller.openSearch)
                 Button("Paste Lyrics…", action: controller.openEditor)
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }.emptyPanel()
         case .instrumental:
             ContentUnavailableView("Instrumental", systemImage: "pianokeys", description: Text("This recording is marked as instrumental."))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .emptyPanel()
         case .failed:
             ContentUnavailableView {
                 Label(controller.errorTitle, systemImage: "exclamationmark.bubble")
@@ -91,7 +91,7 @@ struct LyricsPane: View {
                     Button("Try Again") { Task { await controller.reload() } }
                     Button("Find Lyrics…", action: controller.openSearch)
                 }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }.emptyPanel()
         }
     }
 

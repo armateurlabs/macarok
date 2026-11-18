@@ -167,14 +167,13 @@ struct MetadataEditor: View {
                     if let error { Text(error).foregroundStyle(.red).font(.callout).textSelection(.enabled) }
                 }.padding(20)
             }.disabled(isSaving)
-            Divider()
             HStack {
                 if isSaving { ProgressView().controlSize(.small); Text("Saving metadata…").foregroundStyle(.secondary) }
                 Spacer()
                 Button("Cancel", action: finish).keyboardShortcut(.cancelAction).disabled(isSaving)
                 Button(saveLabel) { confirmSave = true }.keyboardShortcut(.defaultAction)
                     .disabled(!draft.isValid || isSaving || isBusy || isPreparingIdentification || (changes.isEmpty && matchedReleaseID == nil && protectValues == track.metadataLocked))
-            }.padding(16)
+            }.editorActionBar(embedded: embedded)
         }.frame(width: embedded ? nil : 680, height: embedded ? nil : 720)
         .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
         .sheet(isPresented: $session.identifyRecording) {

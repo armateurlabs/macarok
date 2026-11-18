@@ -67,7 +67,7 @@ struct PodcastLibraryView: View {
     private func isVisible(_ track: TrackRecord) -> Bool { model.search.isEmpty || model.podcastEpisodes.contains { $0.id == track.id } }
 
     private func emptyList(_ title: String, _ detail: String) -> some View {
-        ContentUnavailableView { Label { Text(title) } icon: { Image.podcastLarge } } description: { Text(detail) }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        ContentUnavailableView { Label { Text(title) } icon: { Image.podcastLarge } } description: { Text(detail) }.emptyPanel()
     }
 }
 
@@ -273,7 +273,7 @@ struct PodcastEpisodeList: View {
     var body: some View {
         if episodes.isEmpty {
             ContentUnavailableView { Label { Text(emptyTitle) } icon: { Image.podcastLarge } } description: { Text(emptyDetail) }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .emptyPanel()
         } else {
             List(selection: Binding(get: { model.librarySelection }, set: { model.selectLibraryItem($0) })) {
                 ForEach(episodes) { episode in

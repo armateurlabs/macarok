@@ -174,6 +174,7 @@ private struct ArchiveResultsList: View {
                 ArchiveErrorView(message: error) { Task { await loader.load(request, controller: controller, source: source, reset: true) } }
             } else if loader.results.isEmpty && !loader.isLoading && loader.page > 0 {
                 ContentUnavailableView("No Results", systemImage: "magnifyingglass", description: Text("Try other words or another filter."))
+                    .emptyPanel()
             } else {
                 List {
                     if loader.isStale { ArchiveStaleNotice() }
@@ -248,6 +249,7 @@ private struct ArchiveYearsView: View {
                 ArchiveErrorView(message: error) { Task { await load() } }
             } else if years.isEmpty {
                 ContentUnavailableView("No Recordings", systemImage: "music.mic", description: Text("This collection has no audio recordings."))
+                    .emptyPanel()
             } else {
                 List {
                     if isStale { ArchiveStaleNotice() }
@@ -289,7 +291,7 @@ private struct ArchiveRecordList: View {
     var body: some View {
         if records.isEmpty {
             ContentUnavailableView(emptyTitle, systemImage: source.archiveCollection == .librivox ? "book" : "music.mic", description: Text(emptyDetail))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .emptyPanel()
         } else {
             List(records) { record in
                 Button { controller.push(.item(id: record.identifier, title: record.title), source: source) } label: {
@@ -512,7 +514,7 @@ private struct ArchiveErrorView: View {
         ContentUnavailableView {
             Label("Could Not Load", systemImage: "exclamationmark.triangle")
         } description: { Text(message) } actions: { Button("Try Again", action: retry) }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .emptyPanel()
     }
 }
 

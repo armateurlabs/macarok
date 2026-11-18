@@ -11,10 +11,13 @@ struct MainWindow: View {
         VStack(spacing: 0) {
             TransportBar(model: model, player: model.player)
             Divider()
-            HSplitView {
-                LibraryPane(model: model).frame(minWidth: 245, idealWidth: 310, maxWidth: 440, maxHeight: .infinity)
-                ContextPane(model: model).frame(minWidth: 370, idealWidth: 590, maxWidth: .infinity, maxHeight: .infinity)
-                QueuePane(model: model, player: model.player).frame(minWidth: 270, idealWidth: 330, maxWidth: 480, maxHeight: .infinity)
+            GeometryReader { panels in
+                HSplitView {
+                    LibraryPane(model: model).frame(minWidth: 245, idealWidth: 310, maxWidth: 440, maxHeight: .infinity)
+                    ContextPane(model: model).frame(minWidth: 370, idealWidth: 590, maxWidth: .infinity, maxHeight: .infinity)
+                    QueuePane(model: model, player: model.player).frame(minWidth: 270, idealWidth: 330, maxWidth: 480, maxHeight: .infinity)
+                }
+                .environment(\.emptyPanelCenterY, panels.frame(in: .global).midY)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack(spacing: 7) {
@@ -173,7 +176,7 @@ struct QueuePane: View {
             }
             if model.queue.isEmpty {
                 ContentUnavailableView { Label("Your playlist is empty", systemImage: "music.note.list") } description: { Text("Double-click or drag library items here.") }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+                    .emptyPanel().contentShape(Rectangle())
                     .onDrop(of: [.macarokLibraryItems], isTargeted: nil) { providers in
                         Task { model.insertLibraryItems(await LibraryItemID.load(from: providers), at: 0) }
                         return true

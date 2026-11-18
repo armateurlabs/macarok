@@ -19,6 +19,31 @@ struct PanelHeader<Content: View>: View {
     }
 }
 
+extension View {
+    /// Empty, loading, and error states fill their panel on the same background as list and context content.
+    func emptyPanel() -> some View { modifier(EmptyPanelLayout()) }
+}
+
+extension EnvironmentValues {
+    /// The vertical middle of the main window's panels, in global coordinates, shared by every empty state.
+    @Entry var emptyPanelCenterY: CGFloat?
+}
+
+/// Panels have headers of different heights; centering on one shared line keeps side-by-side empty states level.
+private struct EmptyPanelLayout: ViewModifier {
+    @Environment(\.emptyPanelCenterY) private var centerY
+
+    func body(content: Content) -> some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .global)
+            let limit = frame.height * 0.3
+            let shift = centerY.map { min(max($0 - frame.midY, -limit), limit) } ?? 0
+            content.frame(width: proxy.size.width, height: proxy.size.height).offset(y: shift)
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
 struct SourceBadge: View {
     @Bindable var model: AppModel
     let sourceID: String
