@@ -35,7 +35,9 @@ The application is ad-hoc signed by default, without Apple notarization. No Deve
 
 ## Sign with a personal certificate
 
-An ad-hoc signature identifies the app by its code hash, so macOS treats every build as a new app: Keychain asks again for access to saved source credentials, and privacy permissions can be requested again. Signing with one stable certificate keeps that identity across updates (`identifier "com.armateurlabs.Macarok" and certificate leaf = …`). It does not satisfy Gatekeeper for downloaded disk images; that requires an Apple Developer ID and notarization.
+An ad-hoc signature identifies the app by its code hash, so macOS treats every build as a new app: Keychain asks again for access to saved source credentials, and privacy permissions can be requested again. Signing with one stable certificate keeps the app's designated requirement across updates (`identifier "com.armateurlabs.Macarok" and certificate root = …`), so privacy permissions and a Keychain **Always Allow** carry over. It does not satisfy Gatekeeper for downloaded disk images; that requires an Apple Developer ID and notarization.
+
+Without an Apple Developer Team ID, the login keychain still records each build's code hash in the partition list of the items it reads. Every update, including one signed with the same certificate, therefore asks once per saved item (Last.fm and each server) for the login keychain password. Only a Developer ID signature, which provides a Team ID partition, avoids that prompt.
 
 1. Create the certificate once: **Keychain Access → Certificate Assistant → Create a Certificate…**, name it (for example `Macarok Personal Signing`), identity type **Self-Signed Root**, certificate type **Code Signing**.
 2. Export it with its private key as a `.p12` file with a password, and import that file on your other Macs.
@@ -49,7 +51,7 @@ An ad-hoc signature identifies the app by its code hash, so macOS treats every b
 
    The workflow imports the certificate into a temporary keychain, signs the app, and deletes the keychain. Without these secrets it keeps ad-hoc signing.
 
-The first launch after switching from ad-hoc to the certificate asks once more for Keychain access; choose **Always Allow**. Later releases signed with the same certificate keep it.
+The first launch after switching from ad-hoc to the certificate asks for Keychain access; choose **Always Allow** so the app is not asked again on each read. As described above, each later update still asks once per saved item for the login keychain password.
 
 A downloaded disk image is still quarantined, so Gatekeeper blocks each new version once. On your own Macs, either approve it in **System Settings → Privacy & Security → Open Anyway**, or remove the quarantine after copying the app:
 
