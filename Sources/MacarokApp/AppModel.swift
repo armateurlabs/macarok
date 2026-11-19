@@ -220,6 +220,7 @@ final class AppModel {
     var radio: RadioController?
     var archive: InternetArchiveController?
     var scrobbling: ScrobblingController?
+    var songLinks: SongLinksController?
     let similarity = SimilarityController()
     let podcasts = PodcastController()
     let podcastDirectory = PodcastDirectoryController()
@@ -460,7 +461,7 @@ final class AppModel {
             archive = InternetArchiveController(model: self)
             await archive?.start()
             await podcasts.start(model: self)
-            if let store { scrobbling = ScrobblingController(store: store) }
+            if let store { scrobbling = ScrobblingController(store: store); songLinks = SongLinksController(store: store) }
             await radio?.reload()
             if registerSystemControls { await scrobbling?.start() }
             let previous = selectionDefaults.string(forKey: "Macarok.selectedSource")

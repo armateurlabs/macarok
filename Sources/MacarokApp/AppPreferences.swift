@@ -57,10 +57,10 @@ enum HomeFilter: String, CaseIterable, Identifiable {
 }
 
 enum ContextMode: String, Codable, CaseIterable, Identifiable {
-    case context, lyrics, wikipedia, editMetadata, editAlbumMetadata
+    case context, lyrics, wikipedia, youtube, editMetadata, editAlbumMetadata
     var id: String { rawValue }
     var title: String {
-        switch self { case .editMetadata: "Edit song metadata"; case .editAlbumMetadata: "Edit album metadata"; default: rawValue.capitalized }
+        switch self { case .youtube: "YouTube"; case .editMetadata: "Edit song metadata"; case .editAlbumMetadata: "Edit album metadata"; default: rawValue.capitalized }
     }
 }
 

@@ -27,10 +27,7 @@ struct SettingsView: View {
             shortcuts.tag(SettingsTab.shortcuts).tabItem { Label("Shortcuts", systemImage: "keyboard") }
             sources.tag(SettingsTab.sources).tabItem { Label("Sources", systemImage: "externaldrive.connected.to.line.below") }
             PodcastSettingsView(model: model, podcasts: model.podcasts).tag(SettingsTab.podcasts).tabItem { Label { Text("Podcasts") } icon: { Image(nsImage: PodcastSourceIcon.settingsImage).renderingMode(.template) } }
-            Group {
-                if let controller = model.scrobbling { ScrobblingSettingsView(controller: controller, sources: model.sources) }
-                else { ContentUnavailableView("Scrobbling", systemImage: "waveform", description: Text("Open a library to configure Last.fm.")) }
-            }.tag(SettingsTab.scrobbling).tabItem { Label("Scrobbling", systemImage: "waveform") }
+            ServicesSettingsView(model: model).tag(SettingsTab.scrobbling).tabItem { Label("Services", systemImage: "network") }
         }
         .frame(width: 650, height: 555)
         .onAppear { model.openMainWindow = { openWindow(id: "main") } }

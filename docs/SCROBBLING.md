@@ -4,7 +4,7 @@ Last.fm scrobbling is optional and remains disabled until an account is authoriz
 
 ## Connect an account
 
-1. Open **Settings → Scrobbling**.
+1. Open **Settings → Services** and choose **Configure…** beside Last.fm.
 2. Follow **Create an API account…** to [Last.fm's API account form](https://www.last.fm/api/account/create).
 3. Enter your API key and shared secret, then choose **Save API Keys**.
 4. Choose **Connect Last.fm…**. Macarok opens Last.fm authorization in your browser.

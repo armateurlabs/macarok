@@ -52,6 +52,9 @@ struct ContextPane: View {
         switch model.displayedContextMode {
         case .lyrics: LyricsPane(model: model)
         case .wikipedia: WikipediaPane(model: model)
+        case .youtube:
+            if let links = model.songLinks { YouTubePane(model: model, links: links, player: model.player) }
+            else { ContentUnavailableView("No Video", systemImage: "play.rectangle", description: Text("Open a library to find song videos.")).emptyPanel() }
         case .editAlbumMetadata:
             if let session = model.albumMetadataEditingSession {
                 AlbumMetadataEditor(model: model, session: session, onFinish: { model.finishAlbumMetadataEditing(sessionID: session.id) })

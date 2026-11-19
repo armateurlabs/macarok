@@ -96,6 +96,9 @@ struct TransportBar: View {
                                              resumePoint: model.seeksResumePoint ? model.restorePosition : nil)
                             .frame(maxWidth: .infinity)
                     }
+                    ShareButton(help: "Share", share: { model.share(track, from: $0) }) {
+                        Image(systemName: "square.and.arrow.up").font(.system(size: 13)).frame(width: 24, height: 24).contentShape(Rectangle())
+                    }.buttonStyle(.borderless).accessibilityIdentifier("transportShare")
                 }
                 .padding(.trailing, 12).frame(height: 48)
                 .background(Color(nsColor: .controlBackgroundColor).opacity(0.75), in: RoundedRectangle(cornerRadius: 6))

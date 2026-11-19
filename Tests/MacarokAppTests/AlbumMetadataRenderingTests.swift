@@ -95,7 +95,7 @@ final class AlbumMetadataRenderingTests: XCTestCase {
         let secondary = try XCTUnwrap(controls.first { $0.segmentCount == fullTitles.count && $0.label(forSegment: 0) == "Context" })
         XCTAssertEqual(primary.selectedSegment, 1)
         XCTAssertEqual(secondary.selectedSegment, ContextMode.allCases.firstIndex(of: .editAlbumMetadata))
-        let compactTitles = ["Edit song metadata": "Song metadata", "Edit album metadata": "Album metadata"]
+        let compactTitles = ["Edit song metadata": "Edit song", "Edit album metadata": "Edit album"]
         for (index, fullTitle) in fullTitles.enumerated() {
             let displayed = try XCTUnwrap(secondary.label(forSegment: index))
             XCTAssertTrue(displayed == fullTitle || displayed == compactTitles[fullTitle], "The native segment must retain its full or readable compact English title.")

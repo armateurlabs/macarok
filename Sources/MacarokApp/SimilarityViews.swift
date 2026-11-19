@@ -138,7 +138,7 @@ struct SimilarPlaylistSheet: View {
                         if similarity.lastFMAvailable {
                             Label("Last.fm", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                         } else {
-                            Label("Last.fm: add an API key in Settings › Scrobbling", systemImage: "minus.circle").foregroundStyle(.secondary)
+                            Label("Last.fm: add an API key in Settings › Services", systemImage: "minus.circle").foregroundStyle(.secondary)
                         }
                         Label("ListenBrainz", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                     }.font(.system(size: 11))

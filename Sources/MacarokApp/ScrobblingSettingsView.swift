@@ -74,3 +74,32 @@ struct ScrobblingSettingsView: View {
         }.formStyle(.grouped).task { await controller.start() }
     }
 }
+
+/// The optional YouTube Data API key. Reading it from Keychain waits until this section is shown.
+struct YouTubeSettingsSection: View {
+    @Bindable var links: SongLinksController
+
+    var body: some View {
+        Section("YouTube") {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("API key").frame(width: 92, alignment: .leading)
+                SecureField("Optional", text: $links.apiKeyInput)
+                    .labelsHidden().textFieldStyle(.roundedBorder).frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("youtubeAPIKey")
+                if links.hasAPIKey { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).help("A key is saved in Keychain.") }
+            }
+            HStack {
+                Link("Create a key in Google Cloud Console…", destination: URL(string: "https://console.cloud.google.com/apis/library/youtube.googleapis.com")!)
+                Spacer()
+                Button(links.apiKeyInput.trimmingCharacters(in: .whitespaces).isEmpty && links.hasAPIKey ? "Remove Key" : "Save Key") {
+                    Task { await links.saveAPIKey() }
+                }.disabled(!links.hasLoadedAPIKey)
+            }
+            if let notice = links.settingsNotice { Text(notice).font(.caption).foregroundStyle(.secondary) }
+            Text("Optional. Without a key, the YouTube tab uses links from MusicBrainz, then YouTube's search page. With a key, the best match is found automatically, within YouTube's free quota of about 100 searches a day. The key is stored in macOS Keychain.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("The artist and title are sent to MusicBrainz, Wikipedia, and YouTube only while the YouTube tab is shown or when you share a song. Videos play from YouTube, which applies its own privacy policy and keeps its cookies in a store used only by Macarok.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }.task { _ = await links.loadAPIKey() }
+    }
+}

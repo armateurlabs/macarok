@@ -46,6 +46,7 @@ final class MenuBarPlayerPresentation {
     let timeline: PlaybackTimeline
     @ObservationIgnored var action: ((Action) -> Void)?
     @ObservationIgnored var prepareArtwork: (() async -> Void)?
+    @ObservationIgnored var share: ((NSView?) -> Void)?
     init(timeline: PlaybackTimeline) { self.timeline = timeline }
     func perform(_ action: Action) {
         guard state.enabled else { return }
@@ -105,6 +106,10 @@ struct MenuBarMiniPlayerView: View {
                 Button { dismiss(); player.perform(.showWindow) } label: { Label("Show Macarok", systemImage: "arrow.up.forward.app") }
                     .buttonStyle(.borderless).accessibilityIdentifier("menuBarShowWindow")
                 Spacer()
+                if player.state.enabled && player.state.track != nil {
+                    ShareButton(help: "Share", share: { player.share?($0) }) { Image(systemName: "square.and.arrow.up").font(.system(size: 13)) }
+                        .buttonStyle(.borderless).accessibilityIdentifier("menuBarShare")
+                }
                 Menu {
                     Button("Quit Macarok") { dismiss(); player.perform(.quit) }
                 } label: { Image(systemName: "ellipsis.circle").font(.system(size: 14)) }

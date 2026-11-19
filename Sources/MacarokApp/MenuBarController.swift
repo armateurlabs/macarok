@@ -30,6 +30,10 @@ final class MenuBarController {
         playbackState = model.player.state
         presentation = MenuBarPlayerPresentation(timeline: model.player.timeline)
         presentation.action = { [weak self] in self?.perform($0) }
+        presentation.share = { [weak self] view in
+            guard let model = self?.enabledModel else { return }
+            model.share(model.currentTrack, from: view)
+        }
         presentation.prepareArtwork = { [weak self] in
             guard !Task.isCancelled, let model = self?.enabledModel, let track = model.currentTrack else { return }
             await model.ensureArtwork(track)

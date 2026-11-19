@@ -36,8 +36,8 @@ struct CenterPanelHeader: View {
                                               fontSize: 10.5, proportional: true,
                                               compactLabels: ContextMode.allCases.map { mode in
                                                   switch mode {
-                                                  case .editMetadata: "Song metadata"
-                                                  case .editAlbumMetadata: "Album metadata"
+                                                  case .editMetadata: "Edit song"
+                                                  case .editAlbumMetadata: "Edit album"
                                                   default: mode.title
                                                   }
                                               })

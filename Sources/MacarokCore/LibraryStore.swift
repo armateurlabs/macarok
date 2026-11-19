@@ -137,6 +137,7 @@ public final class LibraryStore: @unchecked Sendable {
         InternetArchiveStorage.registerMigration(&migrator)
         PodcastStorage.registerMigration(&migrator)
         ArtistArtworkStorage.registerMigration(&migrator)
+        SongLinkStorage.registerMigration(&migrator)
         try migrator.migrate(database)
     }
 

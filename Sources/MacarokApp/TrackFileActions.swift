@@ -22,6 +22,8 @@ struct TrackFileActions: View {
             Divider()
             Button("Reveal in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         }
+        Divider()
+        Button("Share…", systemImage: "square.and.arrow.up") { model.share(track) }
     }
 }
 

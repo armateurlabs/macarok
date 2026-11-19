@@ -19,7 +19,7 @@ Library, Playing, and playlist menus offer **Start Similar Mix** and **Create Si
 
 ## Services and matching
 
-- **Last.fm** `track.getSimilar` and `artist.getSimilar` are used when a personal API key is configured in Settings › Scrobbling. Only the API key is needed; no scrobbling session is required.
+- **Last.fm** `track.getSimilar` and `artist.getSimilar` are used when a personal API key is configured in Settings › Services. Only the API key is needed; no scrobbling session is required.
 - **ListenBrainz** similar artists are always available without an account. The artist name is first resolved to a MusicBrainz identifier, at most one request per second.
 - Track-level similarity ranks first, then tracks by similar artists, then other tracks by the seed artist. A little weight goes to frequently played tracks. The dynamic mix picks among the best few candidates with a weighted random choice, avoiding the artist just played.
 - Provider answers are matched to library tracks by artist and title. Version suffixes, track numbers, and featured artists are tolerated; live, acoustic, demo, and remix editions are distinct recordings. All local and OpenSubsonic sources are searched; radio and podcasts are excluded.
