@@ -45,6 +45,33 @@ final class RadioAndDiscoveryTests: XCTestCase {
         XCTAssertThrowsError(try ICYMetadataDecoder(interval: 0))
     }
 
+    func testICYTitleStopsBeforeTheStreamURLField() throws {
+        func block(_ text: String) -> Data {
+            let metadata = Data(text.utf8), count = (metadata.count + 15) / 16
+            return Data([UInt8(count)]) + metadata + Data(repeating: 0, count: count * 16 - metadata.count)
+        }
+        var decoder = try ICYMetadataDecoder(interval: 1)
+        let wire = Data("a".utf8) + block("StreamTitle='';StreamUrl='';") + Data("b".utf8)
+            + block("StreamTitle='Don't Stop';StreamUrl='https://radio.invalid/';") + Data("c".utf8)
+            + block("StreamTitle='Artist - Title';")
+        XCTAssertEqual(decoder.consume(wire).updates.map(\.title), ["", "Don't Stop", "Artist - Title"])
+    }
+
+    func testStreamHeadersDescribeTheStationWithoutServerPlaceholders() throws {
+        let url = try XCTUnwrap(URL(string: "https://radio.invalid/live"))
+        let announced = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [
+            "icy-name": "Synthetic FM", "icy-genre": "Minimal, Techno", "icy-description": "Unspecified description",
+            "icy-url": "synthetic.invalid", "icy-br": "192,128", "Content-Type": "audio/mpeg; charset=binary",
+            "ice-audio-info": "ice-samplerate=44100;ice-bitrate=96;ice-channels=2"]))
+        let info = RadioStreamInfo(response: announced)
+        XCTAssertEqual(info, RadioStreamInfo(name: "Synthetic FM", genre: "Minimal, Techno", description: nil,
+                                             homepage: URL(string: "https://synthetic.invalid"), bitrate: 192,
+                                             sampleRate: 44_100, contentType: "audio/mpeg"))
+        let silent = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                                                   headerFields: ["icy-name": "no name", "icy-url": "javascript:alert(1)"]))
+        XCTAssertTrue(RadioStreamInfo(response: silent).isEmpty)
+    }
+
     func testPodcastDirectoriesNormalizeDedupeCacheAndAvoidCredentials() async throws {
         let probe = DirectoryProbe()
         let json = Data(#"{"results":[{"collectionName":"Synthetic Science","artistName":"Example Publisher","feedUrl":"https://publisher.invalid/rss"},{"trackName":"Duplicate","feedUrl":"https://publisher.invalid/rss"},{"trackName":"Invalid","feedUrl":"file:///private/test"}]}"#.utf8)

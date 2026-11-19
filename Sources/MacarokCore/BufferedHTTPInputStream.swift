@@ -33,6 +33,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     private let transport: SourceTransport
     private let live: Bool
     private let onTitle: (@Sendable (String) -> Void)?
+    private let onStationInfo: (@Sendable (RadioStreamInfo) -> Void)?
     private var titleUpdates: [ICYTitleUpdate] = []
     private let condition = NSCondition()
     private let requestedBufferSeconds: Double?
@@ -65,11 +66,12 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
     public init(url: URL, transport: SourceTransport, bufferBytes: Int = 4 * 1024 * 1024,
                 bufferSeconds: Double? = nil, durationHint: Double? = nil, live: Bool = false,
                 resumeDelays: [TimeInterval] = BufferedHTTPInputStream.defaultResumeDelays,
-                onTitle: (@Sendable (String) -> Void)? = nil) {
+                onTitle: (@Sendable (String) -> Void)? = nil,
+                onStationInfo: (@Sendable (RadioStreamInfo) -> Void)? = nil) {
         remoteURL = url
         self.resumeDelays = resumeDelays
         self.transport = transport
-        self.live = live; self.onTitle = onTitle
+        self.live = live; self.onTitle = onTitle; self.onStationInfo = onStationInfo
         requestedBufferSeconds = bufferSeconds.flatMap { $0.isFinite ? min(120, max(1, $0)) : nil }
         self.durationHint = durationHint.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         fallbackCapacity = max(256 * 1024, min(bufferBytes, 256 * 1024 * 1024))
@@ -235,6 +237,7 @@ public final class BufferedHTTPInputStream: InputStream, @unchecked Sendable {
         func accept(_ response: HTTPURLResponse) throws {
             guard let stream else { throw CancellationError() }
             expectedBytes = try stream.acceptResponse(response, requestedOffset: offset, generation: generation)
+            if stream.live { stream.onStationInfo?(RadioStreamInfo(response: response)) }
             if stream.live, let raw = response.value(forHTTPHeaderField: "icy-metaint") {
                 guard let interval = Int(raw) else { throw RadioError.invalidResponse }
                 decoder = try ICYMetadataDecoder(interval: interval)

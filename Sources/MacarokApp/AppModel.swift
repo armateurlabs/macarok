@@ -222,6 +222,8 @@ final class AppModel {
     let podcasts = PodcastController()
     var podcastDownloads: PodcastDownloadsController?
     var radioBroadcastTitle: String?
+    /// What the playing station announces in its stream headers.
+    var radioStreamInfo: RadioStreamInfo?
     var radioDisconnected = false
     var radioDiscoveryOwnsCertificates = false
     @ObservationIgnored var store: LibraryStore?
@@ -944,7 +946,7 @@ final class AppModel {
         playbackTask?.cancel(); playbackTask = nil; activeStream?.close(); activeStream = nil
         activePlaybackResource = nil
         player.stop(); restorePosition = 0; streamingBufferFraction = nil
-        if clearCurrent { currentQueueID = nil; radioBroadcastTitle = nil; radioDisconnected = false }
+        if clearCurrent { currentQueueID = nil; radioBroadcastTitle = nil; radioStreamInfo = nil; radioDisconnected = false }
     }
 
     /// A stopped entry keeps its chosen start point; an in-progress podcast episode otherwise continues where it stopped.
@@ -964,7 +966,7 @@ final class AppModel {
             return
         }
         cancelUpcomingPlayback()
-        scrobbling?.end(); radioBroadcastTitle = nil; radioDisconnected = false
+        scrobbling?.end(); radioBroadcastTitle = nil; radioStreamInfo = nil; radioDisconnected = false
         let resume = playbackStartPosition(for: item)
         // Retained while the entry is prepared, so the stopped timeline can still move the start point.
         restorePosition = resume
@@ -1097,7 +1099,7 @@ final class AppModel {
         activeStream = resource.stream; activePlaybackResource = resource
         playbackGeneration = UUID(); playbackIntentQueueID = id; resetArrowSeek()
         currentQueueID = id; restorePosition = 0; heardSeconds = 0; playRecorded = false
-        radioBroadcastTitle = nil; radioDisconnected = false
+        radioBroadcastTitle = nil; radioStreamInfo = nil; radioDisconnected = false
         scrobbling?.begin(track: queue[index].track, source: pending.source, occurrenceID: playbackGeneration,
                           startedAt: timing?.firstPlayingAt)
         scrobbling?.update(isPlaying: player.state == .playing, isBuffering: player.state == .buffering || activeStream?.snapshot.isBuffering == true,

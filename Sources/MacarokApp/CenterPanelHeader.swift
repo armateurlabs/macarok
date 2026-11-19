@@ -19,7 +19,7 @@ struct CenterPanelHeader: View {
                     // A show's Home has no recent/most-played sections; the row stays for a stable layout.
                     if model.centerPage == .home && model.focusedPodcastShowID != nil {
                         Color.clear
-                    } else if model.centerPage == .playing && model.isPodcastTrack(model.playingContextTrack) {
+                    } else if model.centerPage == .playing && (model.isPodcastTrack(model.playingContextTrack) || model.isRadioTrack(model.playingContextTrack)) {
                         Color.clear
                     } else if model.centerPage == .home {
                         CenterSegmentedPicker(selection: Binding(get: { HomeFilter.allCases.firstIndex(of: model.homeFilter) ?? 0 }, set: {

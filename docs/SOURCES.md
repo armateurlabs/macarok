@@ -44,6 +44,8 @@ The Internet Radio library has **Stations** and **Favorites** views. Saved stati
 
 Direct streams and M3U/PLS playlist wrappers are supported. HLS streams are marked unsupported and cannot be played. Live radio has no seekable timeline or fixed duration. Station-provided broadcast metadata appears in the player when available. Pausing closes the live connection; resuming reconnects to the live stream. If a station disconnects, choose **Reconnect** rather than relying on automatic retry.
 
+Playing a station shows its page in the center panel, laid out like artist and album pages; the Context, Lyrics, Wikipedia, and metadata views do not apply to radio and are hidden. The page shows the station's logo, the track currently announced, its genres, and **Play Now** or **Reconnect**, **Favorites**, and **Website** buttons. Details come from the Radio Browser listing when the station has one; what the stream announces in its `icy-*` headers (name, description, genre, website, bitrate, sample rate) fills the gaps, and the stream's host is always shown.
+
 Station and directory availability depend on their operators. Favorites and saved station details are kept locally; audio is streamed during playback.
 
 ## Podcasts

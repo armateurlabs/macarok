@@ -33,7 +33,13 @@ extension AppModel {
             Task { @MainActor in
                 guard let self, self.playbackGeneration == generation, self.currentQueueID == item.id,
                       self.currentIsRadio, !self.radioDisconnected else { return }
-                self.radioBroadcastTitle = title
+                // An empty StreamTitle means the station is not announcing a track.
+                self.radioBroadcastTitle = title.isEmpty ? nil : title
+            }
+        }, onStationInfo: { [weak self] info in
+            Task { @MainActor in
+                guard let self, self.playbackGeneration == generation, self.currentQueueID == item.id else { return }
+                self.radioStreamInfo = info.isEmpty ? nil : info
             }
         })
         activeStream = stream

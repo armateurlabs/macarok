@@ -53,9 +53,22 @@ public struct ICYMetadataDecoder: Sendable {
         var value = text[key.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
         if let quote = value.first, quote == "'" || quote == "\"" {
             value.removeFirst()
-            if let end = value.range(of: String(quote) + ";", options: .backwards) { value = String(value[..<end.lowerBound]) }
+            if let end = closingQuote(in: value, quote: quote) { value = String(value[..<end]) }
             else if value.last == quote { value.removeLast() }
         } else if let end = value.firstIndex(of: ";") { value = String(value[..<end]) }
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The value ends at the first quote and semicolon followed by the end or another `Key=`, such as
+    /// `StreamUrl=`; apostrophes inside the title, as in `Don't Stop`, are kept.
+    private static func closingQuote(in value: String, quote: Character) -> String.Index? {
+        var search = value.startIndex
+        while let match = value.range(of: String(quote) + ";", range: search..<value.endIndex) {
+            let rest = value[match.upperBound...].drop { $0.isWhitespace }
+            let key = rest.prefix { $0.isLetter || $0.isNumber || $0 == "_" }
+            if rest.isEmpty || (!key.isEmpty && rest.dropFirst(key.count).first == "=") { return match.lowerBound }
+            search = match.upperBound
+        }
+        return nil
     }
 }

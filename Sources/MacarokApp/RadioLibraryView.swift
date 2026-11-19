@@ -142,6 +142,21 @@ struct RadioFavoritesSection: View {
     }
 }
 
+/// The station's directory logo, or the same symbol placeholder as folder pages.
+private struct RadioStationArtwork: View {
+    let url: URL?
+    var body: some View {
+        AsyncImage(url: url) { phase in
+            if let image = phase.image {
+                RoundedRectangle(cornerRadius: 5).fill(.quaternary).overlay { image.resizable().scaledToFit() }
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+            } else { ContextSymbolArtwork(systemImage: "antenna.radiowaves.left.and.right") }
+        }.accessibilityHidden(true)
+    }
+}
+
+/// A station page in the same layout as artist and album pages: the station's directory listing first,
+/// then what its stream announces, then the stream's technical details.
 struct RadioNowPlayingView: View {
     @Bindable var model: AppModel
     private let inspectedTrack: TrackRecord?
@@ -156,24 +171,108 @@ struct RadioNowPlayingView: View {
         guard let track = displayedTrack, let current = model.currentTrack else { return false }
         return model.isRadioTrack(current) && track.id == current.id && track.sourceID == current.sourceID
     }
+    private var station: RadioStationRecord? {
+        guard let track = displayedTrack else { return nil }
+        return model.radio?.stations.first { $0.id == track.id && $0.sourceID == track.sourceID }
+    }
+    private var announced: RadioStreamInfo? { showsCurrentBroadcast ? model.radioStreamInfo : nil }
 
     var body: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "antenna.radiowaves.left.and.right").font(.system(size: 56)).foregroundStyle(.secondary)
-            Text(displayedTrack?.title ?? "Internet Radio").font(.title.weight(.semibold)).multilineTextAlignment(.center)
-            if showsCurrentBroadcast {
-                Label(model.radioDisconnected ? "Disconnected" : player.state == .paused ? "Paused" : "Live Radio", systemImage: model.radioDisconnected ? "wifi.slash" : player.state == .paused ? "pause.circle" : "dot.radiowaves.left.and.right")
-                    .font(.callout).foregroundStyle(.secondary)
-                if let title = model.radioBroadcastTitle, !title.isEmpty { Text(title).font(.title3).multilineTextAlignment(.center).textSelection(.enabled) }
-                if model.radioDisconnected { Button("Reconnect", action: model.reconnectRadio).buttonStyle(.borderedProminent) }
-            } else {
-                Label("Radio Station", systemImage: "antenna.radiowaves.left.and.right").font(.callout).foregroundStyle(.secondary)
-                if let track = displayedTrack,
-                   let station = model.radio?.stations.first(where: { $0.id == track.id && $0.sourceID == track.sourceID }),
-                   !station.description.isEmpty {
-                    Text(station.description).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        ScrollView {
+            VStack(alignment: .leading, spacing: ContextLayout.sectionSpacing) {
+                ContextHeader(eyebrow: eyebrow) {
+                    RadioStationArtwork(url: station?.artworkURL.flatMap(URL.init(string:)))
+                } details: {
+                    Text(displayedTrack?.title ?? announced?.name ?? "Internet Radio").font(ContextLayout.titleFont).lineLimit(2)
+                    Label(statusTitle, systemImage: statusSymbol).font(.system(size: 12)).foregroundStyle(.secondary)
+                    if showsCurrentBroadcast, let title = model.radioBroadcastTitle {
+                        Text(title).font(.system(size: 13)).lineLimit(2).textSelection(.enabled)
+                    }
+                    if let genre { Text(genre).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2) }
                 }
+                actions
+                Divider()
+                if let description = announced?.description {
+                    Text(description).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 7) {
+                    ForEach(details, id: \.label) { detail in
+                        GridRow {
+                            Text(detail.label).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                            Text(detail.value).textSelection(.enabled)
+                        }
+                    }
+                }.font(.system(size: 12))
+            }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .textBackgroundColor))
+    }
+
+    private var eyebrow: String {
+        ["Radio Station", station?.country ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+    private var statusTitle: String {
+        guard showsCurrentBroadcast else { return "Not playing" }
+        return model.radioDisconnected ? "Disconnected" : player.state == .paused ? "Paused" : "Live"
+    }
+    private var statusSymbol: String {
+        guard showsCurrentBroadcast else { return "antenna.radiowaves.left.and.right" }
+        return model.radioDisconnected ? "wifi.slash" : player.state == .paused ? "pause.circle" : "dot.radiowaves.left.and.right"
+    }
+    private var genre: String? {
+        let tags = station?.tags ?? displayedTrack?.genre ?? ""
+        let value = tags.isEmpty ? announced?.genre : tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", ")
+        return value?.isEmpty == false ? value : nil
+    }
+    private var homepage: URL? {
+        station?.homepage.flatMap { URL(string: $0) }.flatMap { ["http", "https"].contains($0.scheme?.lowercased()) ? $0 : nil } ?? announced?.homepage
+    }
+
+    @ViewBuilder private var actions: some View {
+        HStack(spacing: 8) {
+            if showsCurrentBroadcast && model.radioDisconnected {
+                Button { model.reconnectRadio() } label: { Label("Reconnect", systemImage: "arrow.clockwise") }.buttonStyle(.borderedProminent)
+            } else if !showsCurrentBroadcast, let station, let controller = model.radio {
+                Button { Task { await controller.addToPlaylist(station, playNow: true) } } label: { Label("Play Now", systemImage: "play.fill") }
+                    .buttonStyle(.borderedProminent).disabled(station.isHLS)
             }
-        }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let station, let controller = model.radio {
+                let favorite = controller.stations.first { $0.id == station.id }?.isFavorite ?? station.isFavorite
+                Button { Task { if favorite { await controller.removeFavorite(station) } else { await controller.saveFavorite(station) } } } label: {
+                    Label(favorite ? "Favorite" : "Add to Favorites", systemImage: favorite ? "star.fill" : "star")
+                }.help(favorite ? "Remove from Favorites" : "Add to Favorites")
+            }
+            if let homepage {
+                Button { NSWorkspace.shared.open(homepage) } label: { Label("Website", systemImage: "safari") }.help(homepage.absoluteString)
+            }
+            Spacer(minLength: 0)
+        }.controlSize(.small)
+    }
+
+    private struct Detail { let label: String; let value: String }
+    /// The directory listing comes first; the stream's own headers fill what it lacks.
+    private var details: [Detail] {
+        var rows: [Detail] = []
+        func add(_ label: String, _ value: String?) { if let value, !value.isEmpty { rows.append(Detail(label: label, value: value)) } }
+        if let announcedName = announced?.name, announcedName != displayedTrack?.title { add("Announced as", announcedName) }
+        add("Country", station?.country)
+        add("Language", station?.language.localizedCapitalized)
+        let codec = station?.codec.isEmpty == false ? station?.codec : announced?.contentType.map(Self.format)
+        add("Format", codec ?? (displayedTrack?.format == "RADIO" ? nil : displayedTrack?.format))
+        let bitrate = station.flatMap { $0.bitrate > 0 ? $0.bitrate : nil } ?? announced?.bitrate
+        add("Bitrate", bitrate.map { "\($0) kbps" })
+        add("Sample rate", announced?.sampleRate.map { String(format: "%.1f kHz", Double($0) / 1_000) })
+        add("Stream", (station?.streamURL ?? displayedTrack?.fileURL).flatMap { URL(string: $0)?.host })
+        add("Listed in", station?.directoryID == nil ? nil : "Radio Browser")
+        return rows
+    }
+    private static func format(_ contentType: String) -> String {
+        switch contentType {
+        case "audio/mpeg", "audio/mp3": "MP3"
+        case "audio/aac", "audio/aacp", "audio/x-aac": "AAC"
+        case "audio/ogg", "application/ogg": "Ogg"
+        case "audio/opus": "Opus"
+        case "audio/flac", "audio/x-flac": "FLAC"
+        default: contentType
+        }
     }
 }

@@ -33,6 +33,12 @@ struct ContextPane: View {
     }
 
     @ViewBuilder private var playingContent: some View {
+        // A station has no lyrics, Wikipedia page, or tags to edit: its page replaces every Playing view.
+        if showsRadioContext { RadioNowPlayingView(model: model, track: model.playingContextTrack) }
+        else { playingModeContent }
+    }
+
+    @ViewBuilder private var playingModeContent: some View {
         switch model.displayedContextMode {
         case .lyrics: LyricsPane(model: model)
         case .wikipedia: WikipediaPane(model: model)
@@ -54,8 +60,7 @@ struct ContextPane: View {
                     .emptyPanel()
             }
         case .context:
-            if showsRadioContext { RadioNowPlayingView(model: model, track: model.playingContextTrack) }
-            else if (model.contextPage == .track || model.contextPage == .home) && model.playingContextTrack == nil {
+            if (model.contextPage == .track || model.contextPage == .home) && model.playingContextTrack == nil {
                 ContentUnavailableView("Choose a Track", systemImage: "music.note", description: Text("Play or select a track to see its context."))
                     .emptyPanel()
             }
