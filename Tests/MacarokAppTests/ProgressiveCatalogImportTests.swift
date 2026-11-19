@@ -213,6 +213,28 @@ final class ProgressiveCatalogImportTests: XCTestCase {
         XCTAssertEqual(resumedRuns, 3, "An interrupted import resumes even when the server cannot describe its catalog.")
     }
 
+    func testRefreshingACachedCatalogPublishesOnceAtTheEndIncludingTheSearch() async throws {
+        let script = CatalogScript()
+        let fixture = try await makeFixture(script: script, seedOldTrack: true)
+        defer { fixture.cleanup(); Task { await script.finishAll() } }
+        let arrival = track("arrival", sourceID: fixture.sourceA.id, title: "Late Arrival")
+        fixture.model.search = "arrival"
+        try await expectEventually { !fixture.model.isSearching }
+        XCTAssertTrue(fixture.model.displayedTracks.isEmpty)
+        let revision = fixture.model.libraryRevision
+
+        fixture.model.refresh()
+        try await requireRuns(script, count: 1)
+        try await script.emit([fixture.old, arrival], completed: 1, total: 2)
+        try await Task.sleep(for: .milliseconds(900))
+        XCTAssertEqual(fixture.model.libraryRevision, revision, "A cached catalog must stay as it is while it refreshes.")
+        XCTAssertTrue(fixture.model.displayedTracks.isEmpty)
+
+        await script.finish()
+        try await expectEventually { !fixture.model.isRefreshing && fixture.model.tracks.contains { $0.id == arrival.id } }
+        try await expectEventually { fixture.model.displayedTracks.map(\.id) == [arrival.id] }
+    }
+
     private func makeFixture(script: CatalogScript, seedOldTrack: Bool = false) async throws -> Fixture {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokProgressiveImport-\(UUID().uuidString)")
         let store = try LibraryStore(url: directory.appendingPathComponent("test.sqlite"))

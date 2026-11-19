@@ -226,7 +226,7 @@ final class AllSourcesModelTests: XCTestCase {
         XCTAssertEqual(model.folderNodes.count, 3)
     }
 
-    func testRefreshAllIsSerialPublishesPartialBatchesAndContinuesAfterAFailure() async throws {
+    func testRefreshAllIsSerialKeepsPartialBatchesAndContinuesAfterAFailure() async throws {
         let script = AllCatalogScript()
         let fixture = try makeFixture(script: script)
         defer { fixture.cleanup(); Task { await script.finishAll() } }
@@ -239,7 +239,7 @@ final class AllSourcesModelTests: XCTestCase {
         var first = fixture.trackA
         first.id = "new-a"; first.title = "New A"
         try await script.emit([first], run: 0)
-        XCTAssertTrue(model.tracks.contains { $0.id == first.id })
+        XCTAssertFalse(model.tracks.contains { $0.id == first.id }, "A cached catalog stays unchanged while its source refreshes.")
         XCTAssertTrue(model.isRefreshing)
         let started = await script.sourceIDs
         XCTAssertEqual(started, [fixture.sourceA.id], "The second origin waits for the first operation to finish.")

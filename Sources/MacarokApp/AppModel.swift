@@ -52,6 +52,9 @@ private final class RemoteCatalogProgress {
     var publicationError: Error?
     /// Whether any batch or the final reconciliation changed stored tracks.
     var changed = false
+    /// Only a first import shows albums as they arrive; refreshing a cached catalog publishes once at the end,
+    /// so an expanded or searched outline list is not rebuilt every 750 ms (a SwiftUI outline assertion was seen during such churn).
+    var progressive = false
 }
 
 @MainActor @Observable
@@ -239,6 +242,7 @@ final class AppModel {
     /// An automatic refresh publishes the library once at the end, only when it changed, and reports failures in the status bar.
     @ObservationIgnored private(set) var refreshIsQuiet = false
     @ObservationIgnored var automaticRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var searchRefreshDeferred = false
     @ObservationIgnored private let snapshotLoader: ScopedLibrarySnapshotLoader
     @ObservationIgnored private let selectionDefaults: UserDefaults
     @ObservationIgnored private let savesLibrarySelection: Bool
@@ -561,7 +565,9 @@ final class AppModel {
                     self.presentationPatches = self.presentationPatches.filter { $0.value.revision > patchRevision }
                     self.updateQueuedMetadata(from: snapshot)
                     self.libraryRevision &+= 1
-                    self.searchLibrary(reset: false)
+                    // Re-running a search on every republication churns its outline list; a refresh updates it once at the end.
+                    if self.isRefreshing && !self.search.isEmpty { self.searchRefreshDeferred = true }
+                    else { self.searchLibrary(reset: false) }
                     self.signposter.endInterval("PublishSnapshot", interval)
                 } catch is CancellationError { break }
                 catch {
@@ -1454,6 +1460,7 @@ final class AppModel {
                 if self.unpublishedSourceChanges.keys.contains(where: { self.scopeIncludes(sourceID: $0) }) { self.reloadLibrary() }
                 if self.refreshGeneration == generation {
                     self.isRefreshing = false; self.isStoppingRefresh = false
+                    if self.searchRefreshDeferred { self.searchRefreshDeferred = false; self.searchLibrary(reset: false) }
                     if Task.isCancelled { self.status = "Refresh cancelled." }
                     if Task.isCancelled { self.watchSelectedSource() }
                     self.refreshSourceID = nil
@@ -1642,6 +1649,7 @@ final class AppModel {
         try Task.checkCancellation()
         guard refreshGeneration == generation, sources.contains(where: { $0.id == source.id }) else { throw CancellationError() }
         let progress = RemoteCatalogProgress()
+        progress.progressive = !refreshIsQuiet && !catalog.tracks.contains { $0.sourceID == source.id }
         remoteCatalogProgress = progress
         defer {
             progress.acceptingBatches = false
@@ -1672,7 +1680,7 @@ final class AppModel {
                                                          activeIDs: progress.activeIDs, incompleteKey: Self.catalogImportKey(source.id)) {
                 progress.changed = true
             }
-            if !refreshIsQuiet || progress.changed {
+            if progress.progressive || progress.changed {
                 try await publishRemoteSnapshot(source: source, store: store, generation: generation, progress: progress)
             }
             try Task.checkCancellation()
@@ -1685,7 +1693,7 @@ final class AppModel {
             progress.acceptingBatches = false
             progress.publicationTask?.cancel()
             // Preserve and show committed batches even when the remaining import fails or is cancelled.
-            if !refreshIsQuiet || progress.changed {
+            if progress.progressive || progress.changed {
                 try? await publishRemoteSnapshot(source: source, store: store, generation: generation,
                                                 progress: progress, allowCancelled: true)
             }
@@ -1731,7 +1739,7 @@ final class AppModel {
 
     private func scheduleRemotePublication(source: SourceRecord, store: LibraryStore, generation: UUID,
                                            progress: RemoteCatalogProgress) {
-        guard !refreshIsQuiet, scopeIncludes(sourceID: source.id), progress.publicationTask == nil, progress.acceptingBatches else { return }
+        guard progress.progressive, scopeIncludes(sourceID: source.id), progress.publicationTask == nil, progress.acceptingBatches else { return }
         let deadline = progress.lastPublished?.advanced(by: .milliseconds(750))
         progress.publicationTask = Task { [weak self] in
             guard let self else { return }
