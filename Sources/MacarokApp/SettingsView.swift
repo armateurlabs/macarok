@@ -10,6 +10,7 @@ struct SettingsView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var selectedTab: SettingsTab
     @State private var removal: SourceRecord?
+    @State private var confirmsPodcastsRemoval = false
     @State private var credentialSource: SourceRecord?
     @State private var trustVersion = 0
     @State private var rejectedShortcutKeys: Set<String> = []
@@ -190,10 +191,19 @@ struct SettingsView: View {
     }
 
     private var sources: some View {
-        VStack(spacing: 0) {
+        let music = model.sources.filter { $0.kind == .local || $0.kind == .openSubsonic }
+        let radio = model.sources.filter { $0.kind == .radio }
+        let podcasts = model.sources.filter(\.kind.isPodcast)
+        let archives = model.sources.filter { $0.kind == .internetArchive }
+        let missingDefaults = DefaultSource.allCases.filter { value in !model.sources.contains { DefaultSource($0) == value } }
+        return VStack(spacing: 0) {
             HStack {
-                Text("Music Sources").font(.headline)
+                Text("Sources").font(.headline)
                 Spacer()
+                if !missingDefaults.isEmpty {
+                    Button("Restore Default Sources") { model.restoreDefaultSources() }
+                        .help("Adds back \(missingDefaults.map(\.record.name).formatted(.list(type: .and))).")
+                }
                 Button("Add Source…", systemImage: "plus") { model.presentAddSource(from: .settings) }
                     .accessibilityIdentifier("settingsAddSource")
             }.padding(.horizontal, 20).frame(height: 48).background(.bar)
@@ -202,48 +212,108 @@ struct SettingsView: View {
                 if model.sources.isEmpty {
                     Section { ContentUnavailableView("No Sources", systemImage: "externaldrive", description: Text("Add a folder, OpenSubsonic server, podcast, or Internet Archive collection.")) }
                 }
-                ForEach(model.sources) { source in
-                    Section {
-                        HStack(alignment: .top, spacing: 12) {
-                            Group {
-                                if source.kind == .podcasts { Image.podcast }
-                                else { Image(systemName: source.kind.librarySymbol) }
-                            }
-                            .font(.title3).foregroundStyle(source.kind == .podcasts ? Color.primary : Color.accentColor).frame(width: 25)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(source.name).fontWeight(.medium)
-                                Text(source.location).font(.caption).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
-                                Text(source.kind.displayName).font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button(role: .destructive) { removal = source } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless).help("Remove source")
-                        }
-                        if source.kind == .openSubsonic {
-                            HStack {
-                                Button("Edit Credentials…") { credentialSource = source }
-                                if model.serverScan?.sourceID == source.id {
-                                    ProgressView().controlSize(.small)
-                                    Text(model.serverScan?.count.map { "\($0.formatted()) files" } ?? "Scanning…").font(.caption).foregroundStyle(.secondary)
-                                } else {
-                                    Button("Scan Library on Server") { model.scanServerLibrary([source]) }
-                                        .disabled(model.serverScan != nil || model.isRefreshing)
-                                        .help("Asks the server to look for new files, then refreshes this source. Requires an administrator account.")
-                                }
-                                Spacer()
-                                if let url = source.url, let host = url.host, url.scheme?.lowercased() == "https" {
-                                    let fingerprint = CertificateTrustStore.shared.trustedFingerprint(sourceID: source.id, host: host, port: url.port ?? 443)
-                                    if fingerprint != nil {
-                                        Button("Forget Certificate Trust") {
-                                            CertificateTrustStore.shared.revoke(sourceID: source.id, host: host, port: url.port ?? 443)
-                                            trustVersion += 1
-                                        }.help("The server will ask for trust on its next new connection.")
-                                    } else { Label("macOS certificate validation", systemImage: "checkmark.shield").font(.caption).foregroundStyle(.secondary) }
-                                }
-                            }
-                        }
-                    }
+                if !music.isEmpty {
+                    Section("Music") { ForEach(music) { sourceRow($0) } }
+                }
+                if !radio.isEmpty {
+                    Section("Internet Radio") { ForEach(radio) { sourceRow($0) } }
+                }
+                if !podcasts.isEmpty {
+                    Section("Podcasts") { podcastsRow(podcasts) }
+                }
+                if !archives.isEmpty {
+                    Section("Internet Archive") { ForEach(archives) { sourceRow($0) } }
                 }
             }.formStyle(.grouped).id(trustVersion)
+        }
+        .confirmationDialog("Remove Podcasts?", isPresented: $confirmsPodcastsRemoval, titleVisibility: .visible) {
+            Button("Remove Podcasts", role: .destructive) { model.removePodcasts() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            let shows = podcasts.filter { $0.kind == .podcasts }.count
+            Text(shows == 0 ? "The podcast directory leaves the source list. Restore Default Sources brings it back."
+                 : "This also unsubscribes from \(shows == 1 ? "1 show" : "\(shows) shows") and removes downloaded episodes from Macarok.")
+        }
+    }
+
+    private func sourceIcon(_ kind: SourceKind) -> some View {
+        Group {
+            if kind.isPodcast { Image.podcast } else { Image(systemName: kind.librarySymbol) }
+        }
+        .font(.title3).foregroundStyle(kind.isPodcast ? Color.primary : Color.accentColor).frame(width: 25)
+    }
+
+    private func sourceRow(_ source: SourceRecord) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                sourceIcon(source.kind)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(source.name).fontWeight(.medium)
+                        if DefaultSource(source) != nil {
+                            Text("Default").font(.caption2).foregroundStyle(.secondary)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(.quaternary, in: Capsule())
+                        }
+                    }
+                    if !source.location.isEmpty {
+                        Text(source.location).font(.caption).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
+                    }
+                    if source.kind == .local || source.kind == .openSubsonic {
+                        Text(source.kind.displayName).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button(role: .destructive) { removal = source } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless).help("Remove source")
+            }
+            if source.kind == .openSubsonic {
+                HStack {
+                    Button("Edit Credentials…") { credentialSource = source }
+                    if model.serverScan?.sourceID == source.id {
+                        ProgressView().controlSize(.small)
+                        Text(model.serverScan?.count.map { "\($0.formatted()) files" } ?? "Scanning…").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Button("Scan Library on Server") { model.scanServerLibrary([source]) }
+                            .disabled(model.serverScan != nil || model.isRefreshing)
+                            .help("Asks the server to look for new files, then refreshes this source. Requires an administrator account.")
+                    }
+                    Spacer()
+                    if let url = source.url, let host = url.host, url.scheme?.lowercased() == "https" {
+                        let fingerprint = CertificateTrustStore.shared.trustedFingerprint(sourceID: source.id, host: host, port: url.port ?? 443)
+                        if fingerprint != nil {
+                            Button("Forget Certificate Trust") {
+                                CertificateTrustStore.shared.revoke(sourceID: source.id, host: host, port: url.port ?? 443)
+                                trustVersion += 1
+                            }.help("The server will ask for trust on its next new connection.")
+                        } else { Label("macOS certificate validation", systemImage: "checkmark.shield").font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Subscribed shows are managed in the Podcasts tab, so they stay one readable row here.
+    private func podcastsRow(_ podcasts: [SourceRecord]) -> some View {
+        let shows = podcasts.filter { $0.kind == .podcasts }.count
+        return HStack(alignment: .top, spacing: 12) {
+            sourceIcon(.podcastDirectory)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("Podcasts").fontWeight(.medium)
+                    if podcasts.contains(where: { $0.kind == .podcastDirectory }) {
+                        Text("Default").font(.caption2).foregroundStyle(.secondary)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(.quaternary, in: Capsule())
+                    }
+                }
+                Text("Apple Podcasts directory · \(shows == 1 ? "1 subscribed show" : "\(shows) subscribed shows")")
+                    .font(.caption).foregroundStyle(.secondary)
+                if shows > 0 {
+                    Button("Manage Subscriptions…") { selectedTab = .podcasts }.font(.caption).buttonStyle(.link)
+                }
+            }
+            Spacer()
+            Button(role: .destructive) { confirmsPodcastsRemoval = true } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless).help("Remove Podcasts")
         }
     }
 }

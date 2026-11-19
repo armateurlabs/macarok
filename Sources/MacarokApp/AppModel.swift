@@ -117,6 +117,8 @@ final class AppModel {
         set { libraryScope = newValue.map(LibraryScope.source) }
     }
     var libraryView: LibraryView = .home { didSet { if libraryView == .home { contextPage = .home } } }
+    /// Which half of the Podcasts entry is shown: the directory or the shows you follow.
+    var podcastHubMode: PodcastHubMode = .subscribed
     var contextMode: ContextMode = .context {
         didSet { contextModeDidChange(from: oldValue) }
     }
@@ -220,6 +222,7 @@ final class AppModel {
     var scrobbling: ScrobblingController?
     let similarity = SimilarityController()
     let podcasts = PodcastController()
+    let podcastDirectory = PodcastDirectoryController()
     var podcastDownloads: PodcastDownloadsController?
     var radioBroadcastTitle: String?
     /// What the playing station announces in its stream headers.
@@ -330,9 +333,9 @@ final class AppModel {
     var isAllSources: Bool { libraryScope == .all }
     /// Playlist source badges appear only when browsing All Sources and the user has not hidden them.
     var playlistShowsSources: Bool { isAllSources && settings.playlistShowsSources }
-    var scopeTitle: String { isAllSources ? "All Sources" : selectedSource?.name ?? "Your Library" }
+    var scopeTitle: String { isAllSources ? "All Sources" : libraryScope == .podcasts ? "Podcasts" : selectedSource?.name ?? "Your Library" }
     func sourceName(for sourceID: String) -> String { sourcesByID[sourceID]?.name ?? "Unavailable source" }
-    func scopeIncludes(sourceID: String) -> Bool { libraryScope?.includes(sourceID: sourceID) == true }
+    func scopeIncludes(sourceID: String) -> Bool { libraryScope?.includes(sourceID: sourceID, kind: sourcesByID[sourceID]?.kind) == true }
     private func persistLibraryScope() {
         guard savesLibrarySelection else { return }
         if let libraryScope, let data = try? JSONEncoder().encode(libraryScope) {
@@ -341,8 +344,15 @@ final class AppModel {
         if let sourceID { selectionDefaults.set(sourceID, forKey: "Macarok.selectedSource") }
     }
     func selectAddedSource(_ id: String) {
-        if !isAllSources { libraryScope = .source(id) }
+        if !isAllSources { showSource(.source(id)) }
         else { reloadLibrary(); watchSelectedSource() }
+    }
+
+    /// Shows are browsed inside the single Podcasts entry rather than as separate sources.
+    func showSource(_ scope: LibraryScope) {
+        guard case .source(let id) = scope, let kind = sourcesByID[id]?.kind, kind.isPodcast else { libraryScope = scope; return }
+        libraryScope = .podcasts
+        if kind == .podcasts { podcasts.openShowID = id; podcastHubMode = .subscribed }
     }
     private var displayedCatalog: LibrarySnapshot { search.isEmpty ? catalog : searchCatalog }
     var displayedTracks: [TrackRecord] { displayedCatalog.tracks }
@@ -405,15 +415,15 @@ final class AppModel {
     }
     var currentIndex: Int? { currentQueueID.flatMap { queueIndices[$0] } }
     var currentTrack: TrackRecord? { currentIndex.flatMap { queue.indices.contains($0) ? queue[$0].track : nil } }
-    var currentIsPodcast: Bool { currentTrack.map { sourcesByID[$0.sourceID]?.kind == .podcasts } == true }
+    var currentIsPodcast: Bool { currentTrack.map { sourcesByID[$0.sourceID]?.kind.isPodcast == true } == true }
     func downloadActionTitle(_ track: TrackRecord) -> String {
-        sourcesByID[track.sourceID]?.kind == .podcasts ? "Download Episode" : "Download Chapter"
+        sourcesByID[track.sourceID]?.kind.isPodcast == true ? "Download Episode" : "Download Chapter"
     }
     var isArchiveSource: Bool { selectedSource?.kind == .internetArchive }
     /// Podcast episodes and LibriVox chapters can be kept as explicit local downloads.
     func supportsDownloads(_ track: TrackRecord) -> Bool {
         guard let source = sourcesByID[track.sourceID] else { return false }
-        return source.kind == .podcasts || source.archiveCollection == .librivox
+        return source.kind.isPodcast || source.archiveCollection == .librivox
     }
     var selectedTrack: TrackRecord? { selectedTrackID.flatMap { id in catalog.tracksByID[id] ?? queue.first { $0.track.id == id }?.track } ?? currentTrack }
     var selectedAlbum: AlbumRecord? {
@@ -432,8 +442,9 @@ final class AppModel {
         guard !started else { return }; started = true
         do {
             if store == nil { store = try await Task.detached { try LibraryStore(url: LibraryStore.defaultURL) }.value }
+            let createsDefaults = registerSystemControls
             let initial = try await performLibraryWork { store in
-                let sources = try store.sources()
+                let sources = createsDefaults ? try store.ensureDefaultSources() : try store.sources()
                 let snapshot = try store.loadQueue()
                 let restored = try (snapshot?.trackIDs ?? []).enumerated().compactMap { index, id in
                     try store.track(id: id).map { (index, $0) }
@@ -454,9 +465,14 @@ final class AppModel {
             if registerSystemControls { await scrobbling?.start() }
             let previous = selectionDefaults.string(forKey: "Macarok.selectedSource")
             let savedScope = savesLibrarySelection ? selectionDefaults.data(forKey: "Macarok.libraryScope").flatMap { try? JSONDecoder().decode(LibraryScope.self, from: $0) } : nil
-            if !sources.isEmpty, let savedScope, savedScope == .all || sources.contains(where: { $0.id == savedScope.sourceID }) {
-                libraryScope = savedScope
-            } else { sourceID = sources.first(where: { $0.id == previous })?.id ?? sources.first?.id }
+            if !sources.isEmpty, let savedScope, savedScope == .all || savedScope == .podcasts || sources.contains(where: { $0.id == savedScope.sourceID }) {
+                showSource(savedScope)
+            } else if let previous = sources.first(where: { $0.id == previous }) {
+                showSource(.source(previous.id))
+            } else if !sources.isEmpty {
+                // Built-in directories are not a library to open on; prefer the user's own music.
+                libraryScope = sources.first { [.local, .openSubsonic].contains($0.kind) }.map { .source($0.id) } ?? .all
+            }
             playlists = initial.playlists
             if let snapshot = initial.queue {
                 let restored = initial.restored.map { (originalIndex: $0.0, item: QueueItem(track: $0.1)) }
@@ -561,7 +577,7 @@ final class AppModel {
                     guard self.libraryReloadState === state, self.libraryScope == scope, self.sourceRevision == sourceRevision else { continue }
                     let interval = self.signposter.beginInterval("PublishSnapshot")
                     self.catalog = snapshot
-                    for (id, revision) in dirtyRevisions where scope.includes(sourceID: id) && self.unpublishedSourceChanges[id] == revision {
+                    for (id, revision) in dirtyRevisions where scope.includes(sourceID: id, kind: self.sourcesByID[id]?.kind) && self.unpublishedSourceChanges[id] == revision {
                         self.unpublishedSourceChanges[id] = nil
                     }
                     self.presentationPatches = self.presentationPatches.filter { $0.value.revision > patchRevision }
@@ -1015,7 +1031,7 @@ final class AppModel {
             let prepared = try await playbackPreparation.prepare(source: source, track: track)
             return PreparedQueuePlayback(url: prepared.url, renewedSource: prepared.renewedSource)
         }
-        if source.kind == .podcasts || source.archiveCollection == .librivox, let downloaded = podcastDownloads?.localURL(for: track),
+        if source.kind.isPodcast || source.archiveCollection == .librivox, let downloaded = podcastDownloads?.localURL(for: track),
            await Task.detached(priority: .utility, operation: { FileManager.default.isReadableFile(atPath: downloaded.path) }).value {
             try Task.checkCancellation()
             return PreparedQueuePlayback(url: downloaded)
@@ -1034,7 +1050,7 @@ final class AppModel {
         let isolated = sourceTransport.isolatedPlaybackTransport()
         let stream = BufferedHTTPInputStream(url: url, transport: isolated,
             bufferBytes: Int((settings.buffer ?? 20) * 192_000), bufferSeconds: settings.buffer,
-            durationHint: source.kind == .podcasts ? nil : track.duration)
+            durationHint: source.kind.isPodcast ? nil : track.duration)
         let prepared = PreparedQueuePlayback(stream: stream, transport: isolated)
         stream.open()
         return prepared
@@ -1334,6 +1350,7 @@ final class AppModel {
         let source = SourceRecord(kind: .internetArchive, name: collection.title, location: collection.location)
         let connected = try await performLibraryWork { store in
             try store.saveSource(source)
+            if let restored = DefaultSource(source) { try store.setDefaultSource(restored, dismissed: false) }
             return try store.sources()
         }
         sources = connected; selectAddedSource(source.id)
@@ -1413,29 +1430,59 @@ final class AppModel {
         return canonical(first) == canonical(second)
     }
 
-    func removeSource(_ source: SourceRecord) {
+    func removeSource(_ source: SourceRecord) { removeSources([source]) }
+
+    /// Removing the Podcasts entry also removes every subscribed show, since they live under it.
+    func removePodcasts() { removeSources(sources.filter(\.kind.isPodcast)) }
+
+    func removeSources(_ removed: [SourceRecord]) {
+        let ids = Set(removed.map(\.id))
+        guard !ids.isEmpty else { return }
         Task {
           do {
             queueUndoManager.removeAllActions()
-            queueMetadataOverrides = queueMetadataOverrides.filter { $0.value.sourceID != source.id }
-            if currentTrack?.sourceID == source.id { stopPlayback(clearCurrent: true); updateNowPlaying() }
-            queue.removeAll { $0.track.sourceID == source.id }
+            queueMetadataOverrides = queueMetadataOverrides.filter { !ids.contains($0.value.sourceID) }
+            if let current = currentTrack?.sourceID, ids.contains(current) { stopPlayback(clearCurrent: true); updateNowPlaying() }
+            queue.removeAll { ids.contains($0.track.sourceID) }
             guard let store else { throw AppFailure.missingSource }
-            try await backgroundWorker.deleteSource(store: store, sourceID: source.id, incompleteKey: Self.catalogImportKey(source.id))
-            try await Task.detached { try KeychainCredentialStore.shared.delete(sourceID: source.id) }.value
-            CertificateTrustStore.shared.revoke(sourceID: source.id)
-            await playbackPreparation.invalidate(sourceIDs: [source.id])
-            transportCache.removeValue(forKey: source.id)?.invalidate()
-            sources = try await performLibraryWork { try $0.sources() }
-            if sourceID == source.id { sourceID = sources.first?.id }
+            for source in removed {
+                try await backgroundWorker.deleteSource(store: store, sourceID: source.id, incompleteKey: Self.catalogImportKey(source.id))
+                let id = source.id
+                try await Task.detached { try KeychainCredentialStore.shared.delete(sourceID: id) }.value
+                CertificateTrustStore.shared.revoke(sourceID: id)
+                transportCache.removeValue(forKey: id)?.invalidate()
+            }
+            await playbackPreparation.invalidate(sourceIDs: ids)
+            let defaults = removed.compactMap(DefaultSource.init)
+            sources = try await performLibraryWork { store in
+                for value in defaults { try store.setDefaultSource(value, dismissed: true) }
+                return try store.sources()
+            }
+            let leftPodcasts = libraryScope == .podcasts && !sources.contains(where: \.kind.isPodcast)
+            if let sourceID, ids.contains(sourceID) { self.sourceID = sources.first?.id }
+            else if leftPodcasts { sourceID = sources.first?.id }
             reloadLibrary(); saveQueue()
           } catch { fail("Could not remove the source", error.localizedDescription) }
         }
     }
 
+    /// Brings back every default source the user removed.
+    func restoreDefaultSources() {
+        Task {
+            do {
+                sources = try await performLibraryWork { store in
+                    for value in DefaultSource.allCases { try store.setDefaultSource(value, dismissed: false) }
+                    return try store.ensureDefaultSources()
+                }
+                await radio?.reload()
+                status = "Default sources restored."
+            } catch { fail("Could not restore the default sources", error.localizedDescription) }
+        }
+    }
+
     func refresh() {
         guard let libraryScope else { return }
-        startRefresh(sources: sources.filter { libraryScope.includes(sourceID: $0.id) })
+        startRefresh(sources: sources.filter { libraryScope.includes($0) })
     }
 
     /// A newly connected source and a folder watcher can refresh their own origin without changing browsing scope.
@@ -1569,6 +1616,8 @@ final class AppModel {
             return try await refreshArchive(source, store: store, generation: generation)
         case .podcasts:
             return try await refreshPodcast(source, store: store, generation: generation)
+        case .podcastDirectory:
+            return false // Previewed episodes are not a feed; each subscribed show refreshes on its own.
         }
     }
 
@@ -1979,6 +2028,38 @@ final class AppModel {
         return try await cacheArtwork(data, key: StableID.make(source.id, "podcast-artwork"))
     }
 
+    /// Reads a directory show without subscribing. Its episodes are stored under the Podcasts source so they
+    /// can be queued, resumed, and restored with the playlist; episodes of earlier previews leave the library
+    /// unless they are queued or in progress.
+    func previewPodcast(feedURL: URL) async throws -> (feed: PodcastFeed, episodes: [TrackRecord]) {
+        let directory = try await ensurePodcastDirectorySource()
+        guard case let .feed(feed, _) = try await PodcastClient(transport: transport(for: directory))
+            .fetchFeed(url: feedURL, validators: PodcastFeedValidators()) else { throw PodcastError.invalidFeed }
+        try Task.checkCancellation()
+        var artworkPath: String?
+        if let url = feed.artworkURL, let data = try? await transport(for: directory).data(from: url) {
+            artworkPath = try? await cacheArtwork(data, key: StableID.make(directory.id, "podcast-artwork", feed.url.absoluteString)).path
+        }
+        let episodes = feed.episodes.map { $0.asTrackRecord(sourceID: directory.id, feed: feed, artworkPath: artworkPath) }
+        let previous = try await performLibraryWork { try $0.tracks(scope: .source(directory.id), ordered: false) }
+        let queued = Set(queue.map(\.track.id)), fresh = Set(episodes.map(\.id))
+        let retained = previous.filter { !fresh.contains($0.id) && (queued.contains($0.id) || !podcasts.state($0).isUnplayed) }
+        let changed = try await performLibraryWork { try $0.replaceSourceTracks(sourceID: directory.id, with: retained + episodes) }
+        if changed { unpublishedSourceChanges[directory.id, default: 0] &+= 1; reloadLibrary() }
+        return (feed, episodes)
+    }
+
+    /// The source previewed episodes belong to, created if the user removed it or the library predates it.
+    private func ensurePodcastDirectorySource() async throws -> SourceRecord {
+        if let existing = sourcesByID[PodcastDirectorySource.sourceID] { return existing }
+        let record = PodcastDirectorySource.record
+        sources = try await performLibraryWork { store in
+            if try store.sources().contains(where: { $0.id == record.id }) == false { try store.saveSource(record) }
+            return try store.sources()
+        }
+        return record
+    }
+
     func rate(_ track: TrackRecord, value: Int) {
         Task {
             do {
@@ -2006,7 +2087,7 @@ final class AppModel {
         switch kind {
         case .local: return .localFile
         case .openSubsonic: return .remoteMusic
-        case .podcasts: return .podcast
+        case .podcasts, .podcastDirectory: return .podcast
         case .radio: return .radio
         case .internetArchive: return .remoteMusic
         }

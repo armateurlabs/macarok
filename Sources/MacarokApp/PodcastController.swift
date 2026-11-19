@@ -101,7 +101,7 @@ final class PodcastController {
         Task { [weak model] in try? await model?.performLibraryWork { try $0.savePodcastProgress(records) } }
     }
 
-    private func isPodcast(_ track: TrackRecord) -> Bool { model?.sourcesByID[track.sourceID]?.kind == .podcasts }
+    private func isPodcast(_ track: TrackRecord) -> Bool { model?.sourcesByID[track.sourceID]?.kind.isPodcast == true }
 
     func notes(for track: TrackRecord) async -> String? {
         guard let model else { return nil }

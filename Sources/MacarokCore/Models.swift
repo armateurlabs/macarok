@@ -8,6 +8,8 @@ public enum SourceKind: String, Codable, Sendable, CaseIterable, DatabaseValueCo
     case podcasts
     case radio
     case internetArchive
+    /// The single Podcasts entry: directory browsing, and episodes played without subscribing.
+    case podcastDirectory
 
     public var displayName: String {
         switch self {
@@ -16,7 +18,19 @@ public enum SourceKind: String, Codable, Sendable, CaseIterable, DatabaseValueCo
         case .podcasts: "Podcasts"
         case .radio: "Internet Radio"
         case .internetArchive: "Internet Archive"
+        case .podcastDirectory: "Podcasts"
         }
+    }
+
+    /// Kinds whose tracks are podcast episodes, subscribed or not.
+    public var isPodcast: Bool { self == .podcasts || self == .podcastDirectory }
+}
+
+public enum PodcastDirectorySource {
+    public static let sourceID = "macarok-podcasts"
+    public static var record: SourceRecord {
+        SourceRecord(id: sourceID, kind: .podcastDirectory, name: "Podcasts", location: "https://podcasts.apple.com",
+                     createdAt: Date(timeIntervalSince1970: 0))
     }
 }
 

@@ -26,16 +26,19 @@ final class SourcePickerTests: XCTestCase {
             defer { window.contentView = nil; window.close() }
             for _ in 0..<10 { hosting.layoutSubtreeIfNeeded(); await Task.yield() }
             let picker = try XCTUnwrap(findPicker(in: hosting))
-            XCTAssertEqual(picker.numberOfItems, 5)
+            // All Sources, then music, radio, and one Podcasts entry for every show, in separated groups.
+            XCTAssertEqual(picker.numberOfItems, 7)
             XCTAssertEqual(picker.itemTitle(at: 0), "All Sources")
-            XCTAssertTrue(picker.itemArray.allSatisfy { $0.image != nil })
-            XCTAssertEqual(picker.item(at: 4)?.image?.isTemplate, true)
+            XCTAssertEqual(picker.itemArray.indices.filter { picker.item(at: $0)?.isSeparatorItem == true }, [1, 4])
+            XCTAssertTrue(picker.itemArray.filter { !$0.isSeparatorItem }.allSatisfy { $0.image != nil })
+            XCTAssertEqual(picker.itemTitle(at: 6), "Podcasts")
+            XCTAssertEqual(picker.item(at: 6)?.image?.isTemplate, true)
             XCTAssertTrue(picker.isEnabled)
             XCTAssertFalse(picker.pullsDown)
             XCTAssertGreaterThan(picker.frame.width, 150, "The native picker must fill the header's usable width.")
             XCTAssertLessThanOrEqual(picker.frame.height, 42)
 
-            for (index, expected) in [(0, LibraryScope.all), (2, .source(remote.id)), (3, .source(RadioLibrary.sourceID)), (4, .source(podcast.id))] {
+            for (index, expected) in [(0, LibraryScope.all), (3, .source(remote.id)), (5, .source(RadioLibrary.sourceID)), (6, .podcasts)] {
                 picker.selectItem(at: index)
                 picker.sendAction(try XCTUnwrap(picker.action), to: picker.target)
                 for _ in 0..<10 { hosting.layoutSubtreeIfNeeded(); await Task.yield() }

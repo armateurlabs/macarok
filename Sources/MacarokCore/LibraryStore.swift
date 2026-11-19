@@ -178,9 +178,14 @@ public final class LibraryStore: @unchecked Sendable {
             var arguments = StatementArguments()
             if search != nil { sql += " JOIN trackSearch ON trackSearch.rowid = tracks.rowid" }
             sql += " WHERE tracks.isAvailable = 1"
-            if case .source(let id) = scope {
+            switch scope {
+            case .all: break
+            case .source(let id):
                 sql += " AND tracks.sourceID = ?"
                 arguments += [id]
+            case .podcasts:
+                sql += " AND tracks.sourceID IN (SELECT id FROM sources WHERE kind IN (?, ?))"
+                arguments += [SourceKind.podcasts.rawValue, SourceKind.podcastDirectory.rawValue]
             }
             if let search {
                 sql += " AND trackSearch MATCH ?"

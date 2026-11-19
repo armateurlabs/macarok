@@ -17,7 +17,7 @@ struct CenterPanelHeader: View {
             PanelHeader {
                 Group {
                     // A show's Home has no recent/most-played sections; the row stays for a stable layout.
-                    if model.centerPage == .home && model.focusedPodcastShowID != nil {
+                    if model.centerPage == .home && (model.focusedPodcastShowID != nil || model.libraryScope == .podcasts) {
                         Color.clear
                     } else if model.centerPage == .playing && (model.isPodcastTrack(model.playingContextTrack) || model.isRadioTrack(model.playingContextTrack)) {
                         Color.clear

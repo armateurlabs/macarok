@@ -113,13 +113,13 @@ struct LibrarySnapshot: Sendable {
     static func build(scope: LibraryScope, tracks input: [TrackRecord], sources: [SourceRecord],
                       sortOrder: LibrarySortOrder = LibrarySortOrder()) throws -> LibrarySnapshot {
         try Task.checkCancellation()
-        let visibleSources = sources.filter { scope.includes(sourceID: $0.id) }
+        let visibleSources = sources.filter { scope.includes($0) }
         let registeredIDs = Set(visibleSources.map(\.id))
         let radioIDs = Set(visibleSources.filter { $0.kind == .radio }.map(\.id))
-        let podcastIDs = Set(visibleSources.filter { $0.kind == .podcasts }.map(\.id))
+        let podcastIDs = Set(visibleSources.filter { $0.kind.isPodcast }.map(\.id))
         // All Sources browses music only; podcasts have their own library tab and Home sections.
-        let separatesPodcasts = scope == .all && !podcastIDs.isEmpty
-        let musicSources = visibleSources.filter { $0.kind != .radio && !(separatesPodcasts && $0.kind == .podcasts) }
+        let separatesPodcasts = (scope == .all || scope == .podcasts) && !podcastIDs.isEmpty
+        let musicSources = visibleSources.filter { $0.kind != .radio && !(separatesPodcasts && $0.kind.isPodcast) }
         var seen: Set<String> = []
         var tracks: [TrackRecord] = []
         var stations: [TrackRecord] = []
@@ -127,7 +127,7 @@ struct LibrarySnapshot: Sendable {
         tracks.reserveCapacity(input.count)
         for (index, track) in input.enumerated() {
             if index.isMultiple(of: 256) { try Task.checkCancellation() }
-            guard scope.includes(sourceID: track.sourceID), registeredIDs.contains(track.sourceID),
+            guard registeredIDs.contains(track.sourceID),
                   track.isAvailable, seen.insert(track.id).inserted else { continue }
             if radioIDs.contains(track.sourceID) { stations.append(track) }
             else if separatesPodcasts && podcastIDs.contains(track.sourceID) { separatedEpisodes.append(track) }
@@ -136,7 +136,9 @@ struct LibrarySnapshot: Sendable {
         tracks = try tracks.sorted { try Task.checkCancellation(); return TrackRecord.libraryOrder($0, $1) }
         try orderPodcastEpisodes(&tracks, sourceIDs: podcastIDs)
         try Task.checkCancellation()
-        let podcastEpisodes = PodcastLibrary.ordered(separatesPodcasts ? separatedEpisodes : tracks.filter { podcastIDs.contains($0.sourceID) })
+        // Directory previews stay playable through tracksByID but are not part of the shows you follow.
+        let podcastEpisodes = PodcastLibrary.ordered((separatesPodcasts ? separatedEpisodes : tracks.filter { podcastIDs.contains($0.sourceID) })
+            .filter { $0.sourceID != PodcastDirectorySource.sourceID })
 
         var tracksByID = Dictionary(uniqueKeysWithValues: stations.map { ($0.id, $0) })
         for episode in separatedEpisodes { tracksByID[episode.id] = episode }
@@ -260,10 +262,10 @@ struct LibrarySnapshot: Sendable {
     func updating(updatedTracks: [TrackRecord], sources: [SourceRecord]) throws -> LibrarySnapshot {
         try Task.checkCancellation()
         guard let scope else { return self }
-        let visibleSources = sources.filter { scope.includes(sourceID: $0.id) }
+        let visibleSources = sources.filter { scope.includes($0) }
         let registered = Set(visibleSources.map(\.id))
         let radioSources = Set(visibleSources.filter { $0.kind == .radio }.map(\.id))
-        let podcastSources = Set(visibleSources.filter { $0.kind == .podcasts }.map(\.id))
+        let podcastSources = Set(visibleSources.filter { $0.kind.isPodcast }.map(\.id))
         var updates: [String: TrackRecord] = [:]
         var radioUpdates: [TrackRecord] = []
         var structural = false
@@ -271,7 +273,7 @@ struct LibrarySnapshot: Sendable {
             try Task.checkCancellation()
             if radioSources.contains(track.sourceID) { radioUpdates.append(track); continue }
             // Separated episodes live outside the music arrays patched below.
-            if scope == .all, podcastSources.contains(track.sourceID) { structural = true }
+            if scope == .all || scope == .podcasts, podcastSources.contains(track.sourceID) { structural = true }
             // Stored track identities belong to one origin, including duplicated albums/titles.
             if let previous = tracksByID[track.id], previous.sourceID != track.sourceID { continue }
             if let previous = tracksByID[track.id] {
@@ -373,7 +375,7 @@ struct LibrarySnapshot: Sendable {
     func updatingStations(_ updatedStations: [TrackRecord], removingIDs: Set<String> = [], sources: [SourceRecord]) throws -> LibrarySnapshot {
         try Task.checkCancellation()
         guard let scope else { return self }
-        let radioSources = Set(sources.filter { $0.kind == .radio && scope.includes(sourceID: $0.id) }.map(\.id))
+        let radioSources = Set(sources.filter { $0.kind == .radio && scope.includes($0) }.map(\.id))
         if updatedStations.isEmpty, removingIDs.isEmpty, stations.allSatisfy({ radioSources.contains($0.sourceID) }) { return self }
         var indexed = Dictionary(uniqueKeysWithValues: stations.filter {
             radioSources.contains($0.sourceID) && !removingIDs.contains($0.id)

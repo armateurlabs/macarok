@@ -98,37 +98,53 @@ struct NativeSourcePicker: NSViewRepresentable {
 
     func updateNSView(_ button: NSPopUpButton, context: Context) {
         context.coordinator.selection = $selection
-        let choices: [(LibraryScope, String, NSImage?)] = [(.all, "All Sources", NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: nil))] + sources.map {
-            (.source($0.id), $0.name, $0.kind.libraryImage)
-        }
-        context.coordinator.scopes = choices.map(\.0)
+        let choices = Self.choices(sources: sources)
+        context.coordinator.scopes = choices.map { $0?.scope }
         button.removeAllItems()
-        for (scope, title, image) in choices {
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            item.image = image
-            item.state = selection == scope ? .on : .off
+        for choice in choices {
+            guard let choice else { button.menu?.addItem(.separator()); continue }
+            let item = NSMenuItem(title: choice.title, action: nil, keyEquivalent: "")
+            item.image = choice.image
+            item.state = selection == choice.scope ? .on : .off
             button.menu?.addItem(item)
         }
-        if let index = choices.firstIndex(where: { $0.0 == selection }) { button.selectItem(at: index) }
+        if let index = choices.firstIndex(where: { $0?.scope == selection }) { button.selectItem(at: index) }
         else { button.selectItem(at: 0) }
         button.isEnabled = !sources.isEmpty
         button.setAccessibilityValue(button.titleOfSelectedItem)
     }
 
+    struct Choice { let scope: LibraryScope; let title: String; let image: NSImage? }
+
+    /// All Sources, then music origins, then the built-in directories; nil marks a separator.
+    /// Subscribed shows are reached through the single Podcasts entry.
+    static func choices(sources: [SourceRecord]) -> [Choice?] {
+        let all = Choice(scope: .all, title: "All Sources", image: NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: nil))
+        let music = sources.filter { [.local, .openSubsonic].contains($0.kind) }.map { Choice(scope: .source($0.id), title: $0.name, image: $0.kind.libraryImage) }
+        var directories = sources.filter { $0.kind == .radio }.map { Choice(scope: .source($0.id), title: $0.name, image: $0.kind.libraryImage) }
+        if sources.contains(where: { $0.kind.isPodcast }) {
+            directories.append(Choice(scope: .podcasts, title: "Podcasts", image: SourceKind.podcasts.libraryImage))
+        }
+        directories += sources.filter { $0.kind == .internetArchive }.map { Choice(scope: .source($0.id), title: $0.name, image: $0.kind.libraryImage) }
+        var result: [Choice?] = [all]
+        for group in [music, directories] where !group.isEmpty { result.append(nil); result += group }
+        return result
+    }
+
     final class Coordinator: NSObject {
         var selection: Binding<LibraryScope?>
-        var scopes: [LibraryScope] = []
+        var scopes: [LibraryScope?] = []
         init(selection: Binding<LibraryScope?>) { self.selection = selection }
         @objc func selectSource(_ sender: NSPopUpButton) {
-            guard scopes.indices.contains(sender.indexOfSelectedItem) else { return }
-            selection.wrappedValue = scopes[sender.indexOfSelectedItem]
+            guard scopes.indices.contains(sender.indexOfSelectedItem), let scope = scopes[sender.indexOfSelectedItem] else { return }
+            selection.wrappedValue = scope
         }
     }
 }
 
 extension SourceKind {
     var libraryImage: NSImage? {
-        self == .podcasts ? PodcastSourceIcon.image : NSImage(systemSymbolName: librarySymbol, accessibilityDescription: nil)
+        isPodcast ? PodcastSourceIcon.image : NSImage(systemSymbolName: librarySymbol, accessibilityDescription: nil)
     }
 
     var librarySymbol: String {

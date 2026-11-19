@@ -96,6 +96,7 @@ To build a versioned disk image locally, run `./scripts/package-dmg.sh 0.7.3 3`.
 - Browse one source or opt into All Sources; artist names group together while albums, tracks, folders, and credentials retain their origins.
 - System, Light, and Dark appearances; artist, album, year, folder, and tag browsing.
 - Local MP3, FLAC, Ogg Vorbis, Opus, and other TagLib/VLC formats; OpenSubsonic original streams; RSS/Atom podcasts.
+- Internet Radio, Podcasts, Live Music Archive, and LibriVox available from the first launch; a single Podcasts entry browses Apple Podcasts by country and genre and previews shows before subscribing.
 - Source catalog with Bandcamp setup, Podcast Index / Apple Podcasts discovery, Radio Browser search or direct station URLs, and on-demand browsing of the Live Music Archive and LibriVox audiobooks.
 - CUE sheets expose individual tracks without splitting the original audio.
 - Persistent playlists, queue, listening history, ratings, and scope-aware search through SQLite/FTS5.

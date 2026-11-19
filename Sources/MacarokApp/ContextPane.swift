@@ -16,13 +16,23 @@ struct ContextPane: View {
     }
 
     @ViewBuilder private var homeContent: some View {
-        if model.sources.isEmpty { WelcomeView(model: model) }
+        // Default sources alone are not a library yet: All Sources still welcomes the listener.
+        if model.sources.allSatisfy({ DefaultSource($0) != nil }) && (model.sources.isEmpty || model.isAllSources) { WelcomeView(model: model) }
         else if model.isRadioSource {
             ContentUnavailableView("Internet Radio", systemImage: "antenna.radiowaves.left.and.right", description: Text("Choose a station from your library, or browse the directory to find one."))
                 .emptyPanel()
         } else if let id = model.focusedPodcastShowID, let source = model.sourcesByID[id] {
             ScrollView { PodcastShowHome(model: model, source: source).padding(22).frame(maxWidth: .infinity, alignment: .leading) }
                 .background(Color(nsColor: .textBackgroundColor))
+        } else if model.libraryScope == .podcasts {
+            if model.allPodcastEpisodes.isEmpty {
+                ContentUnavailableView { Label { Text("Podcasts") } icon: { Image.podcastLarge } } description: {
+                    Text("Browse the directory to find a show. Subscribe to follow its new episodes here.")
+                }.emptyPanel()
+            } else {
+                ScrollView { PodcastsHome(model: model).padding(22).frame(maxWidth: .infinity, alignment: .leading) }
+                    .background(Color(nsColor: .textBackgroundColor))
+            }
         } else if model.tracks.isEmpty && !model.showsPodcastHome && (model.homeFilter != .all || !model.isAllSources || !model.radioStations.contains(where: \.isFavorite)) {
             HomeView(model: model).padding(22).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor))

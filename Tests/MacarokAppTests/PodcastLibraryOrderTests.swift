@@ -66,6 +66,19 @@ final class PodcastLibraryOrderTests: XCTestCase {
         XCTAssertTrue(patched.mostPlayedTracks.isEmpty, "Podcast plays do not enter music rankings.")
     }
 
+    func testDirectoryPreviewsStayPlayableWithoutJoiningFollowedShows() throws {
+        let show = podcastSource("followed")
+        let hub = PodcastDirectorySource.record
+        let followed = episode("followed-episode", source: show, date: 1_800_000_000, number: 1)
+        let preview = episode("preview-episode", source: hub, date: 1_900_000_000, number: 1)
+        for scope in [LibraryScope.all, .podcasts] {
+            let snapshot = try LibrarySnapshot.build(scope: scope, tracks: [followed, preview], sources: [show, hub])
+            XCTAssertEqual(snapshot.podcastEpisodes.map(\.id), [followed.id], "Home and the Subscribed tab list followed shows only.")
+            XCTAssertEqual(snapshot.tracksByID[preview.id]?.id, preview.id, "A previewed episode can still be queued and played.")
+            XCTAssertTrue(snapshot.tracks.isEmpty)
+        }
+    }
+
     @MainActor
     func testCachedFeedSearchAndCompleteAlbumActionsUseNewOrderWithoutReorderingQueue() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokPodcastOrder-\(UUID().uuidString)")
@@ -79,6 +92,9 @@ final class PodcastLibraryOrderTests: XCTestCase {
         try store.saveQueue(trackIDs: [old.id, new.id, old.id], currentIndex: -1, position: 0)
         let model = AppModel(store: store, registerSystemControls: false)
         await model.start()
+        // Shows live under the Podcasts entry; a single show scope still orders its own episodes.
+        model.libraryScope = .source(source.id)
+        for _ in 0..<200 where model.displayedTracks.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         let existingQueueIDs = model.queue.map(\.id)
         XCTAssertEqual(model.displayedTracks.map(\.id), [new.id, old.id, undated.id],
                        "Previously cached feeds must change order without fetching RSS again.")

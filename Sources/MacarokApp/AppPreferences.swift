@@ -31,6 +31,12 @@ enum LibraryView: String, CaseIterable, Identifiable {
 
 enum ContextPage { case home, track, album, artist, folder }
 
+enum PodcastHubMode: String, CaseIterable, Identifiable {
+    case browse, subscribed
+    var id: String { rawValue }
+    var title: String { self == .browse ? "Browse" : "Subscribed" }
+}
+
 enum CenterPage: String, CaseIterable, Identifiable {
     case home, playing
     var id: String { rawValue }

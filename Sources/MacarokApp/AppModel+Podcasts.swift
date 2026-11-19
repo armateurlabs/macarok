@@ -4,7 +4,7 @@ import MacarokCore
 
 extension AppModel {
     /// All Sources Home lists podcast episodes in their own sections, even without music.
-    var showsPodcastHome: Bool { isAllSources && homeFilter == .all && !allPodcastEpisodes.isEmpty }
+    var showsPodcastHome: Bool { (isAllSources || libraryScope == .podcasts) && homeFilter == .all && !allPodcastEpisodes.isEmpty }
 
     /// Home counts; All Sources adds its shows, which are not part of the music totals.
     var homeLibrarySummary: String {
@@ -15,7 +15,7 @@ extension AppModel {
         return tracks.isEmpty ? "\(podcasts) · \(allPodcastEpisodes.count) episodes" : "\(music) · \(podcasts)"
     }
 
-    func isPodcastTrack(_ track: TrackRecord?) -> Bool { track.map { sourcesByID[$0.sourceID]?.kind == .podcasts } == true }
+    func isPodcastTrack(_ track: TrackRecord?) -> Bool { track.map { sourcesByID[$0.sourceID]?.kind.isPodcast == true } == true }
 
     /// Episodes have no lyrics, Wikipedia article, or editable tags: Playing always shows their context,
     /// while the chosen view is kept for the next music track.
@@ -31,7 +31,7 @@ extension AppModel {
     /// The show whose episodes and Home are presented: a selected podcast source, or a show opened in the Podcasts tab.
     var focusedPodcastShowID: String? {
         if let source = selectedSource, source.kind == .podcasts { return source.id }
-        guard libraryView == .podcasts, let id = podcasts.openShowID, sourcesByID[id]?.kind == .podcasts else { return nil }
+        guard libraryView == .podcasts || libraryScope == .podcasts, let id = podcasts.openShowID, sourcesByID[id]?.kind == .podcasts else { return nil }
         return id
     }
 
@@ -39,6 +39,7 @@ extension AppModel {
         guard sourcesByID[sourceID]?.kind == .podcasts else { return }
         recordUserCenterNavigation()
         podcasts.openShowID = sourceID
+        podcastHubMode = .subscribed
         libraryView = .podcasts
         contextPage = .home
     }
@@ -65,8 +66,9 @@ extension AppModel {
                                 newestFirst: settings.librarySortOrder.isDescending(.podcasts))
     }
 
+    /// New episodes come from subscribed shows only; directory previews are not news.
     func newPodcastEpisodes(now: Date = Date()) -> [TrackRecord] {
-        PodcastLibrary.newEpisodes(podcastEpisodes, state: podcasts.state, now: now,
+        PodcastLibrary.newEpisodes(podcastEpisodes.filter { $0.sourceID != PodcastDirectorySource.sourceID }, state: podcasts.state, now: now,
                                    newestFirst: settings.librarySortOrder.isDescending(.podcasts))
     }
 

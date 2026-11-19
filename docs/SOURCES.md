@@ -2,7 +2,13 @@
 
 Open **File → Connect a Source…** or **Settings → Sources → Add Source…**. The source catalog offers Local Files, OpenSubsonic, Bandcamp, Internet Radio, Podcasts, Live Music Archive, and LibriVox. Settings can add a source while the main window is closed.
 
-The library header uses the native macOS source picker, including an icon and a checkmark for the current selection. Choose one source or **All Sources**. All Sources combines cached music for browsing while retaining separate source identities, credentials, albums, playlists, and file-write destinations. Selecting it does not start a catalog refresh.
+## Default sources
+
+Internet Radio, Podcasts, Live Music Archive, and LibriVox are present from the first launch; your own music (folders, OpenSubsonic servers, Bandcamp) is added by you. **Settings → Sources** groups sources by type (Music, Internet Radio, Podcasts, Internet Archive) and marks defaults. Remove a default source with its **−** button: it stays removed on later launches until you choose **Restore Default Sources**.
+
+Subscribed podcast shows appear as one **Podcasts** row with their count; **Manage Subscriptions…** opens the Podcasts tab of Settings. Removing Podcasts also unsubscribes from every show.
+
+The library header uses the native macOS source picker, including an icon and a checkmark for the current selection. Choose one source or **All Sources**; the menu separates music, Internet Radio, a single **Podcasts** entry, and Internet Archive collections. All Sources combines cached music for browsing while retaining separate source identities, credentials, albums, playlists, and file-write destinations. Selecting it does not start a catalog refresh.
 
 ## Local files
 
@@ -50,7 +56,9 @@ Station and directory availability depend on their operators. Favorites and save
 
 ## Podcasts
 
-Paste a publisher RSS or Atom feed URL and choose **Subscribe**, or open **Search Podcasts…**. Search defaults to [Podcast Index](https://podcastindex.org); the directory selector also offers [Apple Podcasts](https://podcasts.apple.com).
+Choose **Podcasts** in the source picker. **Browse** lists the most popular shows from [Apple Podcasts](https://podcasts.apple.com) for a country and genre, or searches by title or author; the arrow beside the list title switches between popularity, A–Z, and Z–A. Click a show to read its description and play its latest episodes without subscribing, then choose **Subscribe** to follow it. **Subscribed** shows your shows as a grid of artwork (titles appear on hover) with **New**, **In Progress**, and **Downloaded** episode lists. A show page lists its 10 latest episodes; **Show All** lists the rest. Shows that publish only inside Apple Podcasts have no public feed and cannot be played.
+
+You can also paste a publisher RSS or Atom feed URL in the source catalog and choose **Subscribe**, or open **Search Podcasts…**. Search defaults to [Podcast Index](https://podcastindex.org); the directory selector also offers [Apple Podcasts](https://podcasts.apple.com).
 
 Enter a title or author, choose **Search**, then **Use Feed** beside the desired show. Macarok returns to the source sheet with that feed URL. Choose **Subscribe** to retrieve its episodes. Playback and refresh use the publisher's feed and enclosures rather than the search directory.
 

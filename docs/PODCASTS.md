@@ -6,7 +6,9 @@ Episodes are listed by publication date, newest first by default, including cach
 
 ## Library browsing
 
-Podcasts have their own **Podcasts** library tab, shown when the current scope contains at least one show. In All Sources, podcasts no longer appear in Artists, Albums, Years, Folders, Tags, Shuffle Library, or the music sections of Home, so a show that publishes often cannot fill Recently Added.
+The **Podcasts** entry of the source picker gathers every show: **Browse** explores the Apple Podcasts directory and previews shows without subscribing, and **Subscribed** shows the shows you follow (see [Podcasts](SOURCES.md#podcasts)). Episodes heard from a preview are not added to New, Continue Listening, or Home.
+
+Podcasts also have their own **Podcasts** library tab in All Sources, shown when you follow at least one show. In All Sources, podcasts no longer appear in Artists, Albums, Years, Folders, Tags, Shuffle Library, or the music sections of Home, so a show that publishes often cannot fill Recently Added.
 
 The tab has four views:
 
@@ -15,7 +17,7 @@ The tab has four views:
 - **In Progress** lists episodes you started and have not finished, most recent first.
 - **Downloaded** lists downloaded episodes.
 
-An open show, or a podcast chosen in the source picker, shows its artwork, author, and actions: **Resume** (the most recently heard unfinished episode), **Play Latest**, **Add Unplayed** (oldest first), and a menu with Mark All as Played, Refresh Show, Copy Feed URL, Open Website, and Unsubscribe…. Its episodes can be filtered by **All**, **Unplayed**, or **Downloaded**. The central Home shows the show's description, Continue Listening, and Latest Episodes; the Home filters (Recently added, Recently played, Most played) apply to music only and are hidden there.
+An open show shows its artwork, author, description, its 10 latest episodes with **Show All**, and actions: **Resume** (the most recently heard unfinished episode), **Play Latest**, **Add Unplayed** (oldest first), and a menu with Mark All as Played, Refresh Show, Copy Feed URL, Open Website, and Unsubscribe…. Its episodes can be filtered by **All**, **Unplayed**, or **Downloaded**. The central Home shows the show's description, Continue Listening, and Latest Episodes; the Home filters (Recently added, Recently played, Most played) apply to music only and are hidden there.
 
 Each episode row shows an unplayed dot, the title, its publication date (Today, Yesterday, the weekday within a week, then the date), and the remaining time with a progress bar once started. A trailing symbol shows, in order of priority, playback, download progress, a failed download, presence in the active playlist, or a completed download. Hover a row for the start of its notes. Rows support the usual selection, Return or double-click, dragging into the playlist, and a context menu with Mark as Played / Unplayed, Play from Beginning, Go to Show, and download actions.
 

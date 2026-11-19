@@ -72,6 +72,36 @@ final class RadioAndDiscoveryTests: XCTestCase {
         XCTAssertTrue(RadioStreamInfo(response: silent).isEmpty)
     }
 
+    func testApplePodcastChartKeepsChartOrderAndShowsWithoutAFeed() async throws {
+        let requests = RequestLog()
+        let catalog = ApplePodcastCatalog(transport: { request in
+            await requests.append(request.url!)
+            let url = request.url!.absoluteString
+            let body: String
+            if url.contains("/rss/toppodcasts/") {
+                body = #"{"feed":{"entry":[{"id":{"attributes":{"im:id":"2"}}},{"id":{"attributes":{"im:id":"1"}}}]}}"#
+            } else if url.contains("/lookup") {
+                body = #"{"results":[{"collectionId":1,"collectionName":"First","artistName":"A","feedUrl":"https://feeds.invalid/1","primaryGenreName":"Science","trackCount":12},{"collectionId":2,"collectionName":"Second","artistName":"B","primaryGenreName":"Science"}]}"#
+            } else {
+                body = #"{"results":[{"collectionId":3,"collectionName":"Found","artistName":"C","feedUrl":"https://feeds.invalid/3"}]}"#
+            }
+            return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        })
+        let top = try await catalog.top(country: "FR", genreID: 1533)
+        XCTAssertEqual(top.map(\.title), ["Second", "First"], "Chart order is kept, not lookup order.")
+        XCTAssertNil(top[0].feedURL, "A show without a public feed is still listed.")
+        XCTAssertEqual(top[1].episodeCount, 12)
+        let found = try await catalog.search("science", country: "fr", genreID: 1533)
+        XCTAssertEqual(found.map(\.title), ["Found"])
+        let urls = await requests.urls.map(\.absoluteString)
+        XCTAssertTrue(urls[0].hasPrefix("https://itunes.apple.com/fr/rss/toppodcasts/limit=50/genre=1533/json"))
+        XCTAssertTrue(urls[1].contains("id=2,1") && urls[1].contains("country=fr"))
+        XCTAssertTrue(urls[2].contains("genreId=1533") && urls[2].contains("country=fr") && urls[2].contains("term=science"))
+        _ = try await catalog.top(country: "fr", genreID: 1533)
+        let count = await requests.urls.count
+        XCTAssertEqual(count, 3, "A chart is cached.")
+    }
+
     func testPodcastDirectoriesNormalizeDedupeCacheAndAvoidCredentials() async throws {
         let probe = DirectoryProbe()
         let json = Data(#"{"results":[{"collectionName":"Synthetic Science","artistName":"Example Publisher","feedUrl":"https://publisher.invalid/rss"},{"trackName":"Duplicate","feedUrl":"https://publisher.invalid/rss"},{"trackName":"Invalid","feedUrl":"file:///private/test"}]}"#.utf8)
@@ -129,4 +159,9 @@ final class RadioAndDiscoveryTests: XCTestCase {
 private actor DirectoryProbe {
     private(set) var requests: [URLRequest] = []
     func record(_ request: URLRequest) { requests.append(request) }
+}
+
+private actor RequestLog {
+    private(set) var urls: [URL] = []
+    func append(_ url: URL) { urls.append(url) }
 }

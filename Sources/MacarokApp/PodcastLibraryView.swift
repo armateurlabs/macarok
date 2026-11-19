@@ -192,24 +192,24 @@ struct PodcastShowView: View {
     @Bindable var podcasts: PodcastController
     let source: SourceRecord
     @State private var confirmsUnsubscribe = false
+    @State private var showsAll = false
 
     var body: some View {
         let episodes = model.podcastEpisodes(showID: source.id, filter: podcasts.episodeFilter)
+        // A filter or search narrows the list already; otherwise the latest episodes come first.
+        let limits = !showsAll && podcasts.episodeFilter == .all && model.search.isEmpty
+        let shown = limits ? Array(episodes.prefix(PodcastEpisodePreview.count)) : episodes
         let all = model.showEpisodes(source.id)
         let resume = model.inProgressPodcastEpisodes(showID: source.id, limit: 1).first
         let latest = PodcastLibrary.ordered(all).first
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 10) {
-                ArtworkView(track: latest, model: model).frame(width: 56, height: 56)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(podcasts.shows[source.id]?.title ?? source.name).font(.system(size: 13, weight: .semibold)).lineLimit(2)
-                    if let author = podcasts.shows[source.id]?.author ?? all.first?.artist, !author.isEmpty {
-                        Text(author).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Text(all.count == 1 ? "1 episode" : "\(all.count) episodes").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }.padding(.horizontal, 12)
+            PodcastShowHeader(title: podcasts.shows[source.id]?.title ?? source.name,
+                              author: podcasts.shows[source.id]?.author ?? all.first?.artist ?? "",
+                              details: [all.count == 1 ? "1 episode" : "\(all.count) episodes", latest.map { "latest \(PodcastDate.short($0.addedAt))" } ?? ""]
+                                .filter { !$0.isEmpty }.joined(separator: " · "),
+                              summary: podcasts.shows[source.id]?.description ?? "") {
+                ArtworkView(track: latest, model: model, cornerRadius: 0)
+            }.padding(.horizontal, 12).padding(.top, 10)
             HStack(spacing: 10) {
                 if let resume, case let .inProgress(_, remaining) = podcasts.state(resume) {
                     Button { model.add([resume], play: true) } label: { Label("Resume", systemImage: "play.fill") }
@@ -235,9 +235,14 @@ struct PodcastShowView: View {
             Picker("Episodes", selection: $podcasts.episodeFilter) {
                 ForEach(PodcastEpisodeFilter.allCases) { Text($0.title).tag($0) }
             }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 12).padding(.bottom, 8)
-            PodcastListHeader(model: model, title: model.search.isEmpty ? "Episodes" : "Search Results", count: episodes.count)
-            PodcastEpisodeList(model: model, podcasts: podcasts, episodes: episodes, showsShowName: false,
+            PodcastListHeader(model: model, title: model.search.isEmpty ? (limits ? "Latest Episodes" : "Episodes") : "Search Results", count: episodes.count)
+            PodcastEpisodeList(model: model, podcasts: podcasts, episodes: shown, showsShowName: false,
                                emptyTitle: emptyTitle, emptyDetail: emptyDetail)
+            if shown.count < episodes.count {
+                Button("Show All \(episodes.count) Episodes") { showsAll = true }
+                    .buttonStyle(.link).font(.system(size: 11)).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    .background(Color(nsColor: .textBackgroundColor))
+            }
         }
         .podcastUnsubscribeDialog(model: model, sourceID: source.id, isPresented: $confirmsUnsubscribe)
     }
@@ -400,6 +405,24 @@ struct PodcastTileSection: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Home of the Podcasts entry: the shows you follow, without the music sections.
+struct PodcastsHome: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 23) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("PODCASTS").font(.system(size: 10, weight: .medium)).tracking(1).foregroundStyle(.secondary)
+                Text("Your Podcasts").font(.system(size: 27, weight: .semibold))
+                let shows = model.podcastSourcesInScope.count
+                Text("\(shows == 1 ? "1 show" : "\(shows) shows") · \(model.allPodcastEpisodes.count) episodes")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            PodcastHomeSection(model: model)
         }
     }
 }

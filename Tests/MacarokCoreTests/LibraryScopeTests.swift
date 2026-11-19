@@ -26,6 +26,37 @@ final class LibraryScopeTests: XCTestCase {
         XCTAssertTrue(try store.tracks(scope: .source("missing")).isEmpty)
     }
 
+    func testPodcastsScopeGathersShowsAndDirectoryPreviewsOnly() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokPodcastScope-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try LibraryStore(url: directory.appendingPathComponent("test.sqlite"))
+        let music = SourceRecord(id: "music", kind: .local, name: "Local", location: directory.absoluteString)
+        let show = SourceRecord(id: "show", kind: .podcasts, name: "Show", location: "https://feed.invalid/rss")
+        try store.saveSource(music, tracks: [TrackRecord(id: "song", sourceID: music.id, title: "Song")])
+        try store.saveSource(show, tracks: [TrackRecord(id: "episode", sourceID: show.id, title: "Episode")])
+        try store.saveSource(PodcastDirectorySource.record,
+                             tracks: [TrackRecord(id: "preview", sourceID: PodcastDirectorySource.sourceID, title: "Preview")])
+        XCTAssertEqual(Set(try store.tracks(scope: .podcasts).map(\.id)), ["episode", "preview"])
+        XCTAssertTrue(LibraryScope.podcasts.includes(PodcastDirectorySource.record))
+        XCTAssertFalse(LibraryScope.podcasts.includes(music))
+    }
+
+    func testDefaultSourcesStayRemovedUntilRestored() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokDefaults-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try LibraryStore(url: directory.appendingPathComponent("test.sqlite"))
+        XCTAssertEqual(Set(try store.ensureDefaultSources().compactMap(DefaultSource.init)), Set(DefaultSource.allCases))
+        XCTAssertEqual(try store.ensureDefaultSources().count, DefaultSource.allCases.count, "Defaults are added once.")
+
+        try store.deleteSource(id: PodcastDirectorySource.sourceID)
+        try store.setDefaultSource(.podcasts, dismissed: true)
+        XCTAssertFalse(try store.ensureDefaultSources().contains { $0.id == PodcastDirectorySource.sourceID },
+                       "A removed default source does not come back on the next launch.")
+
+        try store.setDefaultSource(.podcasts, dismissed: false)
+        XCTAssertTrue(try store.ensureDefaultSources().contains { $0.id == PodcastDirectorySource.sourceID })
+    }
+
     func testInitialSourceCatalogRollsBackAsOneTransactionWhenAnEpisodeFails() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacarokConnectionCommit-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }

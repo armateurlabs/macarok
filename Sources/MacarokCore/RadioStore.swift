@@ -47,7 +47,8 @@ extension LibraryStore {
     }
 
     public func radioStations(scope: LibraryScope = .all, query: String = "") throws -> [RadioStationRecord] {
-        try database.read { db in
+        if scope == .podcasts { return [] }
+        return try database.read { db in
             var sql = "SELECT radioStations.payload FROM radioStations JOIN tracks ON tracks.id=radioStations.trackID WHERE tracks.isAvailable=1"
             var arguments = StatementArguments()
             if let sourceID = scope.sourceID { sql += " AND tracks.sourceID=?"; arguments += [sourceID] }
