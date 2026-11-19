@@ -107,12 +107,12 @@ final class PlaybackDiagnosticsController {
     }
     func record(_ kind: PlaybackEventLog.Kind, occurrenceID: UUID? = nil,
                 phase: PlaybackWatchdog.Phase? = nil, media: PlaybackEventLog.MediaKind = .unknown,
-                metrics: PlaybackEventLog.Metrics = .init()) {
+                metrics: PlaybackEventLog.Metrics = .init(), failure: Error? = nil) {
         let entry = log.append(kind, occurrenceID: occurrenceID, phase: phase, media: media, metrics: metrics)
         events = log.entries; droppedEntries = log.droppedEntries
-        // Every interpolated string is from a closed enum or numeric metrics, never caller error text.
+        // Every interpolated string is from a closed enum, numeric metrics, or an error's type, never caller error text.
         if kind == .failed || kind == .watchdog {
-            Self.logger.error("\(entry.kind.rawValue, privacy: .public) phase=\(phase?.rawValue ?? "none", privacy: .public) media=\(media.rawValue, privacy: .public) \(metrics.summary, privacy: .public)")
+            Self.logger.error("\(entry.kind.rawValue, privacy: .public) phase=\(phase?.rawValue ?? "none", privacy: .public) media=\(media.rawValue, privacy: .public) \(metrics.summary, privacy: .public)\(failure.map { " error=" + Self.errorType($0) } ?? "", privacy: .public)")
         } else if kind.isWarning {
             Self.logger.warning("\(entry.kind.rawValue, privacy: .public) phase=\(phase?.rawValue ?? "none", privacy: .public) \(metrics.summary, privacy: .public)")
         } else {
@@ -120,6 +120,12 @@ final class PlaybackDiagnosticsController {
         }
     }
     func clearEvents() { log.clear(); events = []; droppedEntries = 0 }
+
+    /// Domain and code identify a failure without its message, which can contain names or addresses.
+    static func errorType(_ error: Error) -> String {
+        let value = error as NSError
+        return "\(value.domain)#\(value.code)"
+    }
     func exportData(at date: Date = Date()) throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601

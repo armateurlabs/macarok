@@ -995,7 +995,7 @@ final class AppModel {
             } catch is CancellationError { }
             catch { if !Task.isCancelled, self.playbackGeneration == generation, self.currentQueueID == id {
                 self.playbackIntentQueueID = nil; self.cancelUpcomingPlayback()
-                self.playbackDiagnostics.record(.failed, occurrenceID: generation, media: self.playbackMediaKind)
+                self.playbackDiagnostics.record(.failed, occurrenceID: generation, media: self.playbackMediaKind, failure: error)
                 if self.currentIsRadio { self.radioDisconnected = true }
                 self.fail("Could not play the track", error.localizedDescription)
             } }
