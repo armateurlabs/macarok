@@ -292,6 +292,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
                                             durationHint: durationHint, live: live))
         }
         explicitlyStopped = false
+        clockAnchor = nil
         if didComplete {
             didComplete = false
             position = 0
@@ -613,7 +614,8 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     /// held through, and a clock that keeps disagreeing past `resyncSeconds` is adopted as truth together with
     /// its observed rate, so the line settles onto it without sawtooth. Samples that freeze just below tolerance
     /// freeze the cursor on the clock, so a stalling decoder stops the cursor instead of letting it run ahead.
-    /// Other states republish the sample and re-anchor at rate 1, so a pause or resume compares fresh samples.
+    /// Other states republish the sample at rate 1 but never rewind below the accepted line, so VLCKit's cached
+    /// pre-seek time cannot pull a paused cursor back; seeks re-anchor first and a resume compares fresh samples.
     public nonisolated static func stablePlayingPosition(reported: Double, anchor: PlaybackClockAnchor?, playing: Bool,
                                                          now: TimeInterval, leadTolerance: Double = 0.75,
                                                          lagTolerance: Double = 0.5, resyncSeconds: TimeInterval = 3,
@@ -624,7 +626,10 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
                                 lastReportedPosition: reported, lastReportedUptime: now)
         }
         guard playing, let anchor, reported.isFinite else {
-            return (max(0, reported.isFinite ? reported : 0), reanchor(line: reported, rate: 1))
+            let bounded = max(0, reported.isFinite ? reported : 0)
+            guard reported.isFinite, let anchor else { return (bounded, reanchor(line: bounded, rate: 1)) }
+            let held = max(bounded, anchor.position)
+            return (held, reanchor(line: held, rate: 1))
         }
         let reportSpan = now - anchor.lastReportedUptime
         let reportRate = reportSpan > 0.05 ? (reported - anchor.lastReportedPosition) / reportSpan : anchor.rate

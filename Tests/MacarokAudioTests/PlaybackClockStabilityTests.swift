@@ -99,6 +99,14 @@ final class PlaybackClockStabilityTests: XCTestCase {
         XCTAssertEqual(buffering.anchor.rate, 1, accuracy: 0.001, "A re-anchor starts at real-time rate.")
     }
 
+    func testPausedStaleSampleCannotRewindTheCursor() {
+        let anchor = anchor(10, at: 100)
+        let paused = VLCPlaybackEngine.stablePlayingPosition(reported: 0.6, anchor: anchor, playing: false, now: 100.2)
+        XCTAssertEqual(paused.position, 10, accuracy: 0.001,
+                       "VLCKit's cached pre-seek time must not pull a paused cursor back.")
+        XCTAssertEqual(paused.anchor.position, 10, accuracy: 0.001)
+    }
+
     func testFirstSampleWithoutAnAnchorIsAdopted() {
         let result = VLCPlaybackEngine.stablePlayingPosition(reported: 37.5, anchor: nil, playing: true, now: 200)
         XCTAssertEqual(result.position, 37.5, accuracy: 0.001)
