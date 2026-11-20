@@ -13,7 +13,7 @@ final class ClearPlaylistTests: XCTestCase {
         await model.start()
         model.add([fixture.track, fixture.other, fixture.track, fixture.other])
         let current = model.queue[2]
-        model.selectedQueueID = model.queue[1].id
+        model.selectedQueueIDs = [model.queue[1].id]
         model.playQueueItem(current.id)
 
         // The playback task has not run yet; clearing must let that same task finish opening.
@@ -21,7 +21,7 @@ final class ClearPlaylistTests: XCTestCase {
 
         XCTAssertEqual(model.queue, [current])
         XCTAssertEqual(model.currentQueueID, current.id)
-        XCTAssertEqual(model.selectedQueueID, current.id)
+        XCTAssertEqual(model.selectedQueueIDs, [current.id])
         try await eventually(model) { model.player.state == .playing && model.player.isSeekable }
         model.player.seek(to: 4)
         model.add([fixture.other, fixture.track])
@@ -147,14 +147,14 @@ final class ClearPlaylistTests: XCTestCase {
         for currentID in [UUID?.none, UUID()] {
             model.add([fixture.track, fixture.other])
             model.currentQueueID = currentID
-            model.selectedQueueID = model.queue.last?.id
+            model.selectedQueueIDs = model.queue.last.map { [$0.id] } ?? []
 
             model.clearQueue()
             await model.flushQueue()
 
             XCTAssertTrue(model.queue.isEmpty)
             XCTAssertNil(model.currentQueueID)
-            XCTAssertNil(model.selectedQueueID)
+            XCTAssertTrue(model.selectedQueueIDs.isEmpty)
             XCTAssertEqual(model.player.state, .stopped)
             let saved = try XCTUnwrap(fixture.store.loadQueue())
             XCTAssertTrue(saved.trackIDs.isEmpty)

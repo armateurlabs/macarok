@@ -121,7 +121,7 @@ final class QueueBehaviorTests: XCTestCase {
         let original = model.queue
         model.currentQueueID = original[2].id
         model.restorePosition = 7.25
-        model.selectedQueueID = original[1].id
+        model.selectedQueueIDs = [original[1].id]
         model.removeQueue(IndexSet(integer: 1))
         var edited = track("b"); edited.title = "Updated tags"
         try store.updateTrackMetadata(edited)
@@ -132,7 +132,7 @@ final class QueueBehaviorTests: XCTestCase {
         model.queueUndoManager.undo()
         XCTAssertEqual(model.queue.map(\.id), original.map(\.id))
         XCTAssertEqual(model.queue[1].track.title, "Updated tags")
-        XCTAssertEqual(model.selectedQueueID, original[1].id)
+        XCTAssertEqual(model.selectedQueueIDs, [original[1].id])
         XCTAssertEqual(model.currentQueueID, original[2].id)
         XCTAssertEqual(model.restorePosition, 7.25)
         XCTAssertEqual(model.player.state, .stopped)
@@ -166,14 +166,14 @@ final class QueueBehaviorTests: XCTestCase {
         let model = AppModel(registerSystemControls: false)
         model.add([track("a"), track("b")])
         let original = model.queue
-        model.currentQueueID = original[1].id; model.selectedQueueID = original[0].id; model.restorePosition = 8
+        model.currentQueueID = original[1].id; model.selectedQueueIDs = [original[0].id]; model.restorePosition = 8
         model.clearQueue(); model.add([track("c")])
         model.queueUndoManager.undo()
         XCTAssertTrue(model.queue.isEmpty); XCTAssertNil(model.currentQueueID)
         model.queueUndoManager.undo()
         XCTAssertEqual(model.queue, original)
         XCTAssertEqual(model.currentQueueID, original[1].id)
-        XCTAssertEqual(model.selectedQueueID, original[0].id)
+        XCTAssertEqual(model.selectedQueueIDs, [original[0].id])
         XCTAssertEqual(model.restorePosition, 8)
         XCTAssertEqual(model.player.position, 0)
         XCTAssertEqual(model.player.state, .stopped)

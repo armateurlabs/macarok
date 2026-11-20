@@ -11,9 +11,9 @@ final class AppModelPresentationPerformanceTests: XCTestCase {
         let model = fixture.model, original = fixture.trackA
         model.add([original, original, fixture.trackA2])
         model.currentQueueID = model.queue[1].id
-        model.selectedQueueID = model.queue[2].id
+        model.selectedQueueIDs = [model.queue[2].id]
         model.restorePosition = 73.5
-        let ids = model.queue.map(\.id), selected = model.selectedQueueID
+        let ids = model.queue.map(\.id), selected = model.selectedQueueIDs
         let initialLoads = await fixture.loader.loadCount
         let initialAlbums = model.albums.map(\.presentationID)
         let initialYears = model.yearGroups.map(\.id)
@@ -44,7 +44,7 @@ final class AppModelPresentationPerformanceTests: XCTestCase {
         XCTAssertEqual(model.queue.map(\.id), ids)
         XCTAssertEqual(model.currentQueueID, ids[1])
         XCTAssertEqual(model.currentIndex, 1)
-        XCTAssertEqual(model.selectedQueueID, selected)
+        XCTAssertEqual(model.selectedQueueIDs, selected)
         XCTAssertEqual(model.restorePosition, 73.5)
         XCTAssertEqual(model.player.position, 0)
         XCTAssertEqual(model.player.state, .stopped)

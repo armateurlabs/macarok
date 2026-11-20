@@ -112,7 +112,7 @@ final class RadioControllerTests: XCTestCase {
         model.add([fixture.musicTrack, fixture.musicTrack])
         let original = model.queue
         model.currentQueueID = original[0].id
-        model.selectedQueueID = original[1].id
+        model.selectedQueueIDs = [original[1].id]
         model.restorePosition = 12.5
         let favorite = station("Favorite", directoryID: "00000000-0000-0000-0000-000000000021")
 
@@ -131,7 +131,7 @@ final class RadioControllerTests: XCTestCase {
         XCTAssertEqual(model.queue[2].id, original[1].id)
         XCTAssertNotEqual(model.queue[1].id, model.queue[3].id)
         XCTAssertEqual(model.currentQueueID, original[0].id)
-        XCTAssertEqual(model.selectedQueueID, original[1].id)
+        XCTAssertEqual(model.selectedQueueIDs, [original[1].id])
         XCTAssertEqual(model.restorePosition, 12.5)
         XCTAssertEqual(model.player.state, .stopped)
         XCTAssertEqual(model.albums.count, 1, "Station persistence must not turn radio into music albums.")

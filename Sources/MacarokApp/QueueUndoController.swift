@@ -4,7 +4,7 @@ import Foundation
 struct QueueEditState {
     let items: [QueueItem]
     let currentID: UUID?
-    let selectionID: UUID?
+    let selectionIDs: Set<UUID>
     let resumePosition: Double
 }
 

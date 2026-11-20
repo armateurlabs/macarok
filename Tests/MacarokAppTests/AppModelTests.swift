@@ -114,7 +114,7 @@ final class AppModelTests: XCTestCase {
         let originalIDs = model.queue.map(\.id)
         let currentID = originalIDs[2]
         model.currentQueueID = currentID
-        model.selectedQueueID = currentID
+        model.selectedQueueIDs = [currentID]
 
         model.moveQueue(from: IndexSet(integer: 0), to: 4)
         XCTAssertEqual(model.queue.map(\.id), [originalIDs[1], originalIDs[2], originalIDs[3], originalIDs[0]])
@@ -128,7 +128,7 @@ final class AppModelTests: XCTestCase {
         model.shuffleQueue()
         XCTAssertEqual(Set(model.queue.map(\.id)), remainingIDs)
         XCTAssertEqual(model.currentQueueID, currentID)
-        XCTAssertEqual(model.selectedQueueID, currentID)
+        XCTAssertEqual(model.selectedQueueIDs, [currentID])
         XCTAssertEqual(model.queue.first?.id, currentID)
         await model.flushQueue()
         XCTAssertEqual(try fixture.store.loadQueue()?.trackIDs, model.queue.map(\.track.id))

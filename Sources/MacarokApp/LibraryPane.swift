@@ -144,7 +144,7 @@ struct LibraryPane: View {
         .onChange(of: model.selectedTrackID) { _, _ in searchFocused = false }
         .onChange(of: model.selectedAlbumID) { _, _ in searchFocused = false }
         .onChange(of: model.selectedArtist) { _, _ in searchFocused = false }
-        .onChange(of: model.selectedQueueID) { _, _ in searchFocused = false }
+        .onChange(of: model.selectedQueueIDs) { _, _ in searchFocused = false }
         .onChange(of: model.queue.count) { _, _ in searchFocused = false }
         .onChange(of: model.libraryScope) { _, _ in
             expandedArtists = []; expandedAlbums = []; expandedYears = []; expandedGenres = []; expandedFormats = []

@@ -13,7 +13,7 @@ final class QueueInsertionTests: XCTestCase {
         try fixture.store.saveQueue(trackIDs: [first.id, other.id, first.id, other.id], currentIndex: 2, position: 7.25)
         await model.start()
         let original = model.queue
-        model.selectedQueueID = original[1].id
+        model.selectedQueueIDs = [original[1].id]
         let values = [other, first, other]
 
         model.addAfterCurrent(values)
@@ -25,7 +25,7 @@ final class QueueInsertionTests: XCTestCase {
         XCTAssertEqual(Set(model.queue.map(\.id)).count, model.queue.count, "Duplicate tracks keep distinct queue-entry identities.")
         XCTAssertEqual(model.currentQueueID, original[2].id)
         XCTAssertEqual(model.currentIndex, 2)
-        XCTAssertEqual(model.selectedQueueID, original[1].id)
+        XCTAssertEqual(model.selectedQueueIDs, [original[1].id])
         XCTAssertEqual(model.player.state, .stopped, "Insertion must not autoplay a restored queue.")
         let saved = try XCTUnwrap(fixture.store.loadQueue())
         XCTAssertEqual(saved.trackIDs, [first.id, other.id, first.id, other.id, first.id, other.id, other.id])

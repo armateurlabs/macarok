@@ -186,7 +186,7 @@ struct QueuePane: View {
                     }
             } else {
                 let rows = PlaylistAlbumGrouping.rows(model.queue, grouped: model.settings.playlistAlbumGroups, isFlat: model.isRadioTrack)
-                List(selection: $model.selectedQueueID) {
+                List(selection: $model.selectedQueueIDs) {
                     ForEach(rows) { row in
                         switch row {
                         case .header(let header):
@@ -221,7 +221,10 @@ struct QueuePane: View {
                     if let id = model.queue.first(where: { ids.contains($0.id) })?.id { model.playQueueItem(id) }
                 }
                 .background(NativeListBackground(revision: Self.backgroundRevision(model.queueRevision, rows: rows)) { [weak model] table in model?.activePlaylistTable = table })
-                .onDeleteCommand { if let id = model.selectedQueueID, let index = model.queue.firstIndex(where: { $0.id == id }) { model.removeQueue(IndexSet(integer: index)) } }
+                .onDeleteCommand {
+                    let offsets = IndexSet(model.queue.indices.filter { model.selectedQueueIDs.contains(model.queue[$0].id) })
+                    if !offsets.isEmpty { model.removeQueue(offsets) }
+                }
             }
             PlaylistPanelFooter(model: model)
         }
@@ -271,7 +274,7 @@ private struct QueueEntryRow: View {
                 .fixedSize(horizontal: true, vertical: false)
         }.font(.system(size: 12)).padding(.vertical, 4).padding(.leading, layout == .grouped ? 8 : 0)
             .padding(.horizontal, isSuggestion ? 6 : 0)
-            .modifier(OptionalSuggestionFrame(active: isSuggestion, highlighted: model.selectedQueueID == item.id))
+            .modifier(OptionalSuggestionFrame(active: isSuggestion, highlighted: model.selectedQueueIDs.contains(item.id)))
             .contentShape(Rectangle())
     }
 
@@ -349,7 +352,10 @@ private struct PlaylistAlbumHeaderRow: View {
                 .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary).fixedSize()
         }.padding(.top, 8).padding(.bottom, 3).contentShape(Rectangle())
             .accessibilityElement(children: .combine).accessibilityIdentifier("playlistAlbumHeader")
-            .onTapGesture(count: 2) { model.playQueueItem(header.firstEntryID) }
+            // A click selects the whole album group; a double-click also plays it from its first entry.
+            .onTapGesture { model.selectQueueGroup(firstEntryID: header.firstEntryID, count: header.offsets.count,
+                                                   adding: NSEvent.modifierFlags.contains(.command)) }
+            .simultaneousGesture(TapGesture(count: 2).onEnded { model.playQueueItem(header.firstEntryID) })
             .contextMenu {
                 Button("Play Album") { model.playQueueItem(header.firstEntryID) }
                 Button("Show Album in Library") { model.inspectAlbum(containing: header.track) }

@@ -169,7 +169,7 @@ final class AppModel {
     var currentQueueID: UUID? {
         didSet { if oldValue != currentQueueID { followPlaybackContext(); prepareNextPlayback(); similarity.currentEntryChanged(); podcasts.loadCurrentChapters() } }
     }
-    var selectedQueueID: UUID?
+    var selectedQueueIDs: Set<UUID> = []
     var playlists: [PlaylistRecord] = []
     var isRefreshing = false
     /// A library scan running on an OpenSubsonic server, started from Macarok.
@@ -825,7 +825,7 @@ final class AppModel {
         guard !new.isEmpty else { fail("Tracks unavailable", "The selected files are no longer available. Rescan the source after reconnecting it."); return [] }
         let before = queueEditState()
         stopPlayback(clearCurrent: true)
-        queue = new; selectedQueueID = nil
+        queue = new; selectedQueueIDs = []
         registerQueueEdit(before, name: name); saveQueue()
         if play { playQueueItem(new[0].id) } else { updateNowPlaying() }
         return new.map(\.id)
@@ -838,7 +838,7 @@ final class AppModel {
 
     private func queueEditState() -> QueueEditState {
         player.synchronizeUpcomingPlayback()
-        return QueueEditState(items: queue, currentID: currentQueueID, selectionID: selectedQueueID,
+        return QueueEditState(items: queue, currentID: currentQueueID, selectionIDs: selectedQueueIDs,
                        resumePosition: player.position > 0 ? player.position : restorePosition)
     }
 
@@ -867,7 +867,7 @@ final class AppModel {
             currentQueueID = state.currentID.flatMap { id in restored.contains { $0.id == id } ? id : nil }
             restorePosition = currentQueueID == nil || currentIsRadio ? 0 : state.resumePosition
         }
-        selectedQueueID = state.selectionID.flatMap { id in restored.contains { $0.id == id } ? id : nil }
+        selectedQueueIDs = state.selectionIDs.filter { id in restored.contains { $0.id == id } }
         queueUndoController.register(model: self, state: inverse, name: name)
         saveQueue(); updateNowPlaying()
     }
@@ -1231,13 +1231,21 @@ final class AppModel {
         queue.move(fromOffsets: offsets, toOffset: destination)
         registerQueueEdit(before, name: "Move Playlist Items"); saveQueue()
     }
+    /// Selects every entry of an album group, anchored by its first queue entry's identity because
+    /// group offsets can be stale. Command-click adds the group to the current selection.
+    func selectQueueGroup(firstEntryID: UUID, count: Int, adding: Bool) {
+        guard let first = queue.firstIndex(where: { $0.id == firstEntryID }) else { return }
+        let ids = Set(queue[first..<min(queue.count, first + count)].map(\.id))
+        if adding { selectedQueueIDs.formUnion(ids) } else { selectedQueueIDs = ids }
+    }
+
     func removeQueue(_ offsets: IndexSet) {
         let before = queueEditState()
         let deletingCurrent = offsets.contains { queue[$0].id == currentQueueID }
         let followedPlayback = playingFollowsPlayback
         queue.remove(atOffsets: offsets)
         if deletingCurrent { stopPlayback(clearCurrent: true); updateNowPlaying() }
-        if let selection = selectedQueueID, !queue.contains(where: { $0.id == selection }) { selectedQueueID = nil }
+        if !selectedQueueIDs.isEmpty { selectedQueueIDs = selectedQueueIDs.filter { id in queue.contains(where: { $0.id == id }) } }
         if queue.isEmpty { leavePlayingAfterEmptyingQueue(followedPlayback) }
         registerQueueEdit(before, name: "Remove from Playlist"); saveQueue()
     }
@@ -1247,11 +1255,11 @@ final class AppModel {
         let active = [.playing, .opening, .buffering].contains(player.state)
             || (playbackTask != nil && playbackIntentQueueID == currentQueueID)
         if active, let current = queue.first(where: { $0.id == currentQueueID }) {
-            queue = [current]; selectedQueueID = current.id
+            queue = [current]; selectedQueueIDs = [current.id]
         } else {
             let followedPlayback = playingFollowsPlayback
             stopPlayback(clearCurrent: true)
-            queue = []; selectedQueueID = nil; updateNowPlaying()
+            queue = []; selectedQueueIDs = []; updateNowPlaying()
             leavePlayingAfterEmptyingQueue(followedPlayback)
         }
         registerQueueEdit(before, name: "Clear Playlist"); saveQueue()

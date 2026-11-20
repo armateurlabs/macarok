@@ -230,7 +230,7 @@ final class SimilarityController {
         editingQueue = true
         model.queue.remove(at: index)
         editingQueue = false
-        if model.selectedQueueID == id { model.selectedQueueID = nil }
+        model.selectedQueueIDs.remove(id)
         model.saveQueue()
     }
 

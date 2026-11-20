@@ -79,13 +79,13 @@ final class PlaylistAlbumGroupsTests: XCTestCase {
         model.settings.playlistAlbumGroups = true
         try await settle()
         XCTAssertEqual(try table().numberOfRows, 4, "Album A gains one header; the lone album B entry stays a single row.")
-        model.selectedQueueID = model.queue[1].id
+        model.selectedQueueIDs = [model.queue[1].id]
         try await settle()
         XCTAssertEqual(try table().selectedRow, 2, "Selection follows queue UUIDs past the header row.")
         model.settings.playlistAlbumGroups = false
         try await settle()
         XCTAssertEqual(try table().numberOfRows, 3)
-        XCTAssertEqual(model.selectedQueueID, model.queue[1].id)
+        XCTAssertEqual(model.selectedQueueIDs, [model.queue[1].id])
     }
 
     @MainActor
@@ -122,6 +122,22 @@ final class PlaylistAlbumGroupsTests: XCTestCase {
         model.libraryScope = .source("source")
         model.settings.playlistShowsSources = true
         XCTAssertFalse(model.playlistShowsSources, "Badges appear only when browsing All Sources.")
+    }
+
+    @MainActor
+    func testSelectQueueGroupSelectsEveryTrackOfTheAlbum() {
+        let model = AppModel(registerSystemControls: false)
+        let a1 = entry("a1", album: "A"), a2 = entry("a2", album: "A"), b1 = entry("b1", album: "B")
+        model.queue = [a1, a2, b1]
+        model.selectQueueGroup(firstEntryID: a1.id, count: 2, adding: false)
+        XCTAssertEqual(model.selectedQueueIDs, [a1.id, a2.id])
+        // Offsets are re-resolved by entry identity, and a stale count is bounded by the queue's end.
+        model.selectQueueGroup(firstEntryID: a2.id, count: 9, adding: false)
+        XCTAssertEqual(model.selectedQueueIDs, [a2.id, b1.id])
+        model.selectQueueGroup(firstEntryID: a1.id, count: 2, adding: true)
+        XCTAssertEqual(model.selectedQueueIDs, [a1.id, a2.id, b1.id], "Command-click adds the group.")
+        model.selectQueueGroup(firstEntryID: UUID(), count: 2, adding: false)
+        XCTAssertEqual(model.selectedQueueIDs, [a1.id, a2.id, b1.id], "A stale anchor selects nothing rather than the wrong rows.")
     }
 
     private func entry(_ id: String, album: String, source: String = "source") -> QueueItem {
