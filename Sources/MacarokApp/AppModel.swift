@@ -1231,11 +1231,24 @@ final class AppModel {
         queue.move(fromOffsets: offsets, toOffset: destination)
         registerQueueEdit(before, name: "Move Playlist Items"); saveQueue()
     }
+    /// Queue entry identities of an album group, re-resolved by the first entry because group
+    /// offsets can be stale.
+    func queueGroupIDs(firstEntryID: UUID, count: Int) -> [UUID] {
+        guard let first = queue.firstIndex(where: { $0.id == firstEntryID }) else { return [] }
+        return Array(queue[first..<min(queue.count, first + count)].map(\.id))
+    }
+
+    /// The header reads as selected only while every entry of its group is selected.
+    func isQueueGroupSelected(firstEntryID: UUID, count: Int) -> Bool {
+        let ids = Set(queueGroupIDs(firstEntryID: firstEntryID, count: count))
+        return !ids.isEmpty && selectedQueueIDs.isSuperset(of: ids)
+    }
+
     /// Selects every entry of an album group, anchored by its first queue entry's identity because
     /// group offsets can be stale. Command-click adds the group to the current selection.
     func selectQueueGroup(firstEntryID: UUID, count: Int, adding: Bool) {
-        guard let first = queue.firstIndex(where: { $0.id == firstEntryID }) else { return }
-        let ids = Set(queue[first..<min(queue.count, first + count)].map(\.id))
+        let ids = Set(queueGroupIDs(firstEntryID: firstEntryID, count: count))
+        guard !ids.isEmpty else { return }
         if adding { selectedQueueIDs.formUnion(ids) } else { selectedQueueIDs = ids }
     }
 

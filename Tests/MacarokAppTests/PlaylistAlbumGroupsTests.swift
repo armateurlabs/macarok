@@ -140,6 +140,21 @@ final class PlaylistAlbumGroupsTests: XCTestCase {
         XCTAssertEqual(model.selectedQueueIDs, [a1.id, a2.id, b1.id], "A stale anchor selects nothing rather than the wrong rows.")
     }
 
+    @MainActor
+    func testIsQueueGroupSelectedRequiresEveryEntryOfTheGroup() {
+        let model = AppModel(registerSystemControls: false)
+        let a1 = entry("a1", album: "A"), a2 = entry("a2", album: "A"), b1 = entry("b1", album: "B")
+        model.queue = [a1, a2, b1]
+        XCTAssertFalse(model.isQueueGroupSelected(firstEntryID: a1.id, count: 2))
+        model.selectedQueueIDs = [a1.id]
+        XCTAssertFalse(model.isQueueGroupSelected(firstEntryID: a1.id, count: 2), "A partial group selection does not read as the album.")
+        model.selectedQueueIDs = [a1.id, a2.id]
+        XCTAssertTrue(model.isQueueGroupSelected(firstEntryID: a1.id, count: 2))
+        XCTAssertFalse(model.isQueueGroupSelected(firstEntryID: b1.id, count: 1), "Other groups stay unselected.")
+        model.selectedQueueIDs = [b1.id]
+        XCTAssertTrue(model.isQueueGroupSelected(firstEntryID: b1.id, count: 1), "A single selected entry reads as selected.")
+    }
+
     private func entry(_ id: String, album: String, source: String = "source") -> QueueItem {
         QueueItem(track: TrackRecord(id: id, sourceID: source, albumID: album, title: id, artist: "Artist",
                                      album: album, duration: 60))

@@ -192,7 +192,6 @@ struct QueuePane: View {
                         case .header(let header):
                             PlaylistAlbumHeaderRow(model: model, header: header)
                                 .moveDisabled(true).deleteDisabled(true).selectionDisabled(true)
-                                .listRowBackground(Color.clear)
                         case .entry(let index, let item, let layout):
                             QueueEntryRow(model: model, player: player, index: index, item: item, layout: layout).tag(item.id)
                         }
@@ -329,18 +328,22 @@ private struct QueueEntryMenu: View {
 }
 
 /// Amarok-inspired album heading. It is not a queue entry: it cannot be selected, moved, or deleted.
+/// While every track of its group is selected, the header paints the same selection background as
+/// native rows and turns its labels white, so the album reads as one selected block.
 private struct PlaylistAlbumHeaderRow: View {
     @Bindable var model: AppModel
     let header: PlaylistAlbumHeader
 
     var body: some View {
+        let selected = model.isQueueGroupSelected(firstEntryID: header.firstEntryID, count: header.offsets.count)
         HStack(spacing: 10) {
             ArtworkView(track: header.track, model: model).frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(header.album).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    .foregroundStyle(selected ? Color.white : Color.primary)
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text([header.artist, header.year.map(String.init) ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.system(size: 11)).foregroundStyle(selected ? Color.white.opacity(0.85) : Color.secondary).lineLimit(1)
                     // Groups only join entries from one source.
                     if model.playlistShowsSources {
                         SourceBadge(model: model, sourceID: header.track.sourceID, compact: true)
@@ -349,9 +352,12 @@ private struct PlaylistAlbumHeaderRow: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
             Text("\(header.offsets.count) tracks · \(header.duration.playbackTime)")
-                .font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary).fixedSize()
+                .font(.system(size: 10)).monospacedDigit().fixedSize()
+                .foregroundStyle(selected ? Color.white.opacity(0.85) : Color.secondary)
         }.padding(.top, 8).padding(.bottom, 3).contentShape(Rectangle())
-            .accessibilityElement(children: .combine).accessibilityIdentifier("playlistAlbumHeader")
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityIdentifier("playlistAlbumHeader")
             // A click selects the whole album group; a double-click also plays it from its first entry.
             .onTapGesture { model.selectQueueGroup(firstEntryID: header.firstEntryID, count: header.offsets.count,
                                                    adding: NSEvent.modifierFlags.contains(.command)) }
@@ -362,6 +368,7 @@ private struct PlaylistAlbumHeaderRow: View {
                 Divider()
                 Button("Remove Album from Playlist", role: .destructive) { removeGroup() }
             }
+            .listRowBackground(PlaylistHeaderSelectionBackground(selected: selected))
     }
 
     private func removeGroup() {
@@ -369,6 +376,23 @@ private struct PlaylistAlbumHeaderRow: View {
         guard let first = model.queue.firstIndex(where: { $0.id == header.firstEntryID }) else { return }
         let end = min(model.queue.count, first + header.offsets.count)
         model.removeQueue(IndexSet(integersIn: first..<end))
+    }
+}
+
+/// Mirrors the native inset-list selection: an accent rounded band that dims to the
+/// unemphasized gray when the window is not key, drawn behind a group header whose every entry is selected.
+private struct PlaylistHeaderSelectionBackground: View {
+    let selected: Bool
+    @Environment(\.controlActiveState) private var controlActiveState
+    var body: some View {
+        if selected {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(controlActiveState == .key ? NSColor.selectedContentBackgroundColor
+                                                            : NSColor.unemphasizedSelectedContentBackgroundColor))
+                .padding(.horizontal, 4)
+        } else {
+            Color.clear
+        }
     }
 }
 
