@@ -223,6 +223,7 @@ struct YouTubePane: View {
 }
 
 /// The IFrame player. It reports playback and refusals, and pauses when Macarok's music starts again.
+/// Fullscreen is WebKit's own: its fullscreen button moves the web view into WebKit's fullscreen window.
 private struct YouTubePlayerView: NSViewRepresentable {
     let videoID: String
     let musicIsPlaying: Bool
@@ -230,15 +231,16 @@ private struct YouTubePlayerView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> WKWebView {
+    func makeNSView(context: Context) -> WebViewContainer {
         let view = WKWebView(frame: .zero, configuration: YouTubeWeb.configuration(messages: WeakMessageHandler(context.coordinator)))
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
-        return view
+        return WebViewContainer(webView: view)
     }
 
-    func updateNSView(_ view: WKWebView, context: Context) {
+    func updateNSView(_ container: WebViewContainer, context: Context) {
+        let view = container.webView
         let coordinator = context.coordinator
         coordinator.onEvent = onEvent
         if coordinator.videoID != videoID {
@@ -251,7 +253,8 @@ private struct YouTubePlayerView: NSViewRepresentable {
         coordinator.musicWasPlaying = musicIsPlaying
     }
 
-    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+    static func dismantleNSView(_ container: WebViewContainer, coordinator: Coordinator) {
+        let view = container.webView
         view.evaluateJavaScript("macarokPause()")
         view.stopLoading(); view.navigationDelegate = nil; view.uiDelegate = nil
         view.configuration.userContentController.removeScriptMessageHandler(forName: "macarok")
@@ -292,7 +295,7 @@ private struct YouTubeSearchView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> WKWebView {
+    func makeNSView(context: Context) -> WebViewContainer {
         let view = WKWebView(frame: .zero, configuration: YouTubeWeb.configuration())
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
@@ -301,10 +304,11 @@ private struct YouTubeSearchView: NSViewRepresentable {
         context.coordinator.observation = view.observe(\.url, options: [.new]) { [weak coordinator = context.coordinator] view, _ in
             MainActor.assumeIsolated { coordinator?.inspect(view.url, in: view) }
         }
-        return view
+        return WebViewContainer(webView: view)
     }
 
-    func updateNSView(_ view: WKWebView, context: Context) {
+    func updateNSView(_ container: WebViewContainer, context: Context) {
+        let view = container.webView
         let coordinator = context.coordinator
         coordinator.onChoose = onChoose
         guard coordinator.query != query else { return }
@@ -312,8 +316,9 @@ private struct YouTubeSearchView: NSViewRepresentable {
         view.load(URLRequest(url: YouTubeWeb.searchURL(query)))
     }
 
-    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+    static func dismantleNSView(_ container: WebViewContainer, coordinator: Coordinator) {
         coordinator.observation = nil
+        let view = container.webView
         view.evaluateJavaScript("document.querySelectorAll('video').forEach(function(v){v.pause()})")
         view.stopLoading(); view.navigationDelegate = nil; view.uiDelegate = nil
     }
@@ -355,4 +360,22 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         target?.userContentController(controller, didReceive: message)
     }
+}
+
+/// Hosts the web view by frame, not by SwiftUI's Auto Layout constraints.
+/// On macOS, WebKit presents HTML5 fullscreen itself: it takes the web view out of the
+/// app's view hierarchy, shows its own fullscreen window, and puts the web view back
+/// on exit. A web view constrained by SwiftUI ancestors keeps no constraints to restore,
+/// and its viewport collapses to 0×0 in fullscreen (WebKit bug 313802, the black screen).
+/// A plain container with a frame-based, autoresizing web view survives that round trip.
+private final class WebViewContainer: NSView {
+    let webView: WKWebView
+    init(webView: WKWebView) {
+        self.webView = webView
+        super.init(frame: .zero)
+        webView.frame = bounds
+        webView.autoresizingMask = [.width, .height]
+        addSubview(webView)
+    }
+    required init?(coder: NSCoder) { nil }
 }

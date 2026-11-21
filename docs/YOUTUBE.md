@@ -12,7 +12,7 @@ Macarok looks for the song's video in this order:
 
 A found or chosen video is remembered for the song (its artist and title, whatever source it comes from). A video you choose always wins over an automatic match. **Other Videos → Choose on YouTube…** picks another one. A song without a video is searched again after a week, or as soon as an API key is added.
 
-The video plays in YouTube's embedded player. Starting it pauses your music; playing music again pauses the video. Some music videos refuse playback outside YouTube: the tab then keeps the video's details and offers **Watch on YouTube**. Radio stations and podcast episodes have no song video.
+The video plays in YouTube's embedded player. Starting it pauses your music; playing music again pauses the video. The player's fullscreen button works as it does in a browser: the video moves to its own fullscreen screen, and returns to the tab when you leave it. Some music videos refuse playback outside YouTube: the tab then keeps the video's details and offers **Watch on YouTube**. Radio stations and podcast episodes have no song video.
 
 ### Personal YouTube API key
 
