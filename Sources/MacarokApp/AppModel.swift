@@ -218,6 +218,8 @@ final class AppModel {
     var streamingBufferFraction: Double?
     /// A Settings tab to show the next time Settings appears or updates, such as About from the app menu.
     var requestedSettingsTab: SettingsTab?
+    /// Sparkle's updater; it stays off outside an installed application.
+    let updates = AppUpdater()
     var scanWarnings: [String] = []
     var radio: RadioController?
     var archive: InternetArchiveController?

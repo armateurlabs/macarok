@@ -28,7 +28,7 @@ struct SettingsView: View {
             sources.tag(SettingsTab.sources).tabItem { Label("Sources", systemImage: "externaldrive.connected.to.line.below") }
             PodcastSettingsView(model: model, podcasts: model.podcasts).tag(SettingsTab.podcasts).tabItem { Label { Text("Podcasts") } icon: { Image(nsImage: PodcastSourceIcon.settingsImage).renderingMode(.template) } }
             ServicesSettingsView(model: model).tag(SettingsTab.scrobbling).tabItem { Label("Services", systemImage: "network") }
-            AboutSettingsView().tag(SettingsTab.about).tabItem { Label("About", systemImage: "info.circle") }
+            AboutSettingsView(updates: model.updates).tag(SettingsTab.about).tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 650, height: 555)
         .onChange(of: model.requestedSettingsTab, initial: true) { _, tab in
@@ -45,13 +45,6 @@ struct SettingsView: View {
         }
         .sheet(item: $credentialSource) { CredentialEditor(source: $0, model: model) }
         .sheet(isPresented: Binding(get: { model.addSourcePresenter == .settings }, set: { if !$0 && model.addSourcePresenter == .settings { model.addSourcePresenter = nil } })) { AddSourceSheet(model: model) }
-    }
-
-    private var applicationVersion: String {
-        guard Bundle.main.bundleURL.pathExtension == "app",
-              let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-              !version.isEmpty else { return "Development" }
-        return version
     }
 
     private var general: some View {
@@ -82,10 +75,18 @@ struct SettingsView: View {
             Section("Menu Bar") {
                 Toggle("Show Macarok in the menu bar", isOn: $model.settings.showMenuBar)
             }
-            Section("About") {
-                LabeledContent("Macarok", value: applicationVersion)
-                LabeledContent("Audio engine", value: "libVLC 4")
-                Link("Project on GitHub", destination: URL(string: "https://github.com/armateurlabs/macarok")!)
+            Section("Updates") {
+                Toggle("Check for updates automatically", isOn: Binding(get: { model.updates.automaticallyChecksForUpdates },
+                                                                         set: { model.updates.automaticallyChecksForUpdates = $0 }))
+                    .disabled(!model.updates.isAvailable)
+                Text(model.updates.isAvailable ? "Once a day. Macarok shows what's new and asks before installing."
+                                               : "Updates are available in the installed application.")
+                    .font(.caption).foregroundStyle(.secondary)
+                LabeledContent {
+                    Button("Check Now", action: model.updates.checkForUpdates).disabled(!model.updates.canCheckForUpdates)
+                } label: {
+                    Text(UpdateStatusText.lastCheck(model.updates.lastUpdateCheckDate)).foregroundStyle(.secondary)
+                }
             }
         }.formStyle(.grouped)
     }

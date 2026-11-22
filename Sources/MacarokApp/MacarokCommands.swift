@@ -7,7 +7,10 @@ import UniformTypeIdentifiers
 struct MacarokCommands: Commands {
     @Bindable var model: AppModel
     var body: some Commands {
-        CommandGroup(replacing: .appInfo) { AboutMenuButton(model: model) }
+        CommandGroup(replacing: .appInfo) {
+            AboutMenuButton(model: model)
+            Button("Check for Updates…") { model.updates.checkForUpdates() }.disabled(!model.updates.canCheckForUpdates)
+        }
         CommandGroup(replacing: .undoRedo) {
             Button(model.queueUndoPresentation.undoTitle) { model.queueUndoPresentation.undo() }
                 .keyboardShortcut("z", modifiers: .command)

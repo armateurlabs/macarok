@@ -8,6 +8,7 @@ struct AboutSettingsView: View {
     static let contactURL = URL(string: "mailto:contact@armateurlabs.fr")!
 
     var bundle: Bundle = .main
+    var updates: AppUpdater?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,10 +33,12 @@ struct AboutSettingsView: View {
             .font(.system(size: 12)).padding(.top, 16)
 
             HStack(spacing: 8) {
+                Button("Check for Updates…") { updates?.checkForUpdates() }.disabled(updates?.canCheckForUpdates != true)
                 Button("Licenses", action: openLicenses).disabled(licensesURL == nil)
                     .help(licensesURL == nil ? "License notices are included in the application bundle." : "Open the licenses of Macarok and its dependencies")
                 Button("GitHub") { NSWorkspace.shared.open(Self.repositoryURL) }
             }.padding(.top, 12)
+            Text(updateStatus).font(.system(size: 11)).foregroundStyle(.secondary).padding(.top, 6)
             Spacer(minLength: 0)
         }
         .padding(20)
@@ -48,6 +51,7 @@ struct AboutSettingsView: View {
                 .accessibilityHidden(true)
             Text("Macarok").font(.system(size: 24, weight: .bold))
             Text(versionText).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
+            Text("Audio engine: libVLC 4").font(.system(size: 11)).foregroundStyle(.secondary)
             Link(destination: Self.repositoryURL) {
                 Text("github.com/armateurlabs/macarok").lineLimit(1).fixedSize()
             }.font(.system(size: 11)).padding(.top, 4)
@@ -89,6 +93,12 @@ struct AboutSettingsView: View {
         }
     }
 
+    private var updateStatus: String {
+        guard let updates, updates.isAvailable else { return "Updates are available in the installed application." }
+        let schedule = updates.automaticallyChecksForUpdates ? "Macarok checks for updates once a day" : "Automatic update checks are off"
+        return "\(schedule) · \(UpdateStatusText.lastCheck(updates.lastUpdateCheckDate))"
+    }
+
     /// The notices copied into the application bundle by the build script.
     private var licensesURL: URL? {
         bundle.url(forResource: "ThirdPartyNotices", withExtension: "md")
@@ -97,5 +107,18 @@ struct AboutSettingsView: View {
     private func openLicenses() {
         guard let licensesURL else { return }
         NSWorkspace.shared.open(licensesURL)
+    }
+}
+
+enum UpdateStatusText {
+    static func lastCheck(_ date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "Not checked yet" }
+        let calendar = Calendar.current
+        let time = date.formatted(date: .omitted, time: .shortened)
+        if calendar.isDate(date, inSameDayAs: now) { return "Last checked today at \(time)" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
+            return "Last checked yesterday at \(time)"
+        }
+        return "Last checked \(date.formatted(date: .abbreviated, time: .shortened))"
     }
 }

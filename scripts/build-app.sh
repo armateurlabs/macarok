@@ -56,6 +56,21 @@ if [[ -z "$framework_path" ]]; then
     exit 1
 fi
 ditto "$framework_path" "$staged_app/Contents/Frameworks/VLCKit.framework"
+sparkle_path="$(find .build/artifacts -type d -name Sparkle.framework -path '*macos*' -print -quit)"
+if [[ -z "$sparkle_path" ]]; then
+    echo "The macOS Sparkle framework is missing from SwiftPM artifacts." >&2
+    exit 1
+fi
+# ditto preserves the framework's symlinks and executable permissions, which Sparkle requires.
+sparkle_framework="$staged_app/Contents/Frameworks/Sparkle.framework"
+ditto "$sparkle_path" "$sparkle_framework"
+# Its XPC services exist only for sandboxed applications.
+rm -rf "$sparkle_framework/Versions/B/XPCServices" "$sparkle_framework/XPCServices"
+codesign "${signing_options[@]}" "$sparkle_framework/Versions/B/Autoupdate"
+codesign "${signing_options[@]}" "$sparkle_framework/Versions/B/Updater.app"
+codesign "${signing_options[@]}" "$sparkle_framework"
+sparkle_license="$(find .build/artifacts -type f -path '*/sparkle/Sparkle/LICENSE' -print -quit)"
+[[ -n "$sparkle_license" ]] && cp "$sparkle_license" "$staged_app/Contents/Resources/Licenses/Sparkle-MIT.txt"
 for resource_bundle in "$binary_directory"/*.bundle; do
     [[ -d "$resource_bundle" ]] || continue
     ditto "$resource_bundle" "$staged_app/Contents/Resources/$(basename "$resource_bundle")"

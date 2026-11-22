@@ -21,6 +21,12 @@ The build uses GitHub's hosted Apple Silicon `xcode-27` runner with Xcode 27.1. 
 
 Release files are named `Macarok-VERSION-arm64.dmg` and `Macarok-VERSION-arm64.dmg.sha256`. They target Apple Silicon and macOS 14 or later. The full release version is recorded in the app's information string; its numeric version is stored in `CFBundleShortVersionString`, and the workflow run number supplies `CFBundleVersion`.
 
+## In-app updates
+
+Installed apps check `https://github.com/armateurlabs/macarok/releases/latest/download/appcast.xml` with Sparkle once a day (users can turn this off in Settings › General › Updates) and on **Check for Updates…**. The release workflow signs the DMG with the EdDSA private key in the `SPARKLE_PRIVATE_KEY` secret, verifies the signature, and publishes `appcast.xml` beside the DMG; `scripts/write-appcast.py` writes it from the version, the build number (which Sparkle compares with `CFBundleVersion`), and `docs/releases/VERSION.md` without its installation and license sections. Without the secret, the release has no appcast and installed apps do not see it. The latest published release serves the feed, so prereleases are never offered.
+
+The matching public key is `SUPublicEDKey` in `Support/Info.plist`. The private key also lives in the maintainer's login keychain (`.build/artifacts/sparkle/Sparkle/bin/generate_keys -p` prints its public key); keep an exported backup (`generate_keys -x FILE`) in a password manager. Losing it means installed apps can no longer verify an update: without a Developer ID, Sparkle cannot rotate the key, and users must reinstall manually. Sparkle replaces the running app and relaunches it, so an updated app is not quarantined.
+
 ## Build and inspect locally
 
 ```sh

@@ -9,6 +9,7 @@ Macarok's own source code is licensed under the MIT license in the repository's 
 | VLCKit / libVLC 4 | https://github.com/videolan/vlckit and https://code.videolan.org/videolan/vlc | LGPL 2.1 or later for VLCKit/libVLC; upstream multimedia modules and dependencies have their own notices. |
 | GRDB.swift 7.12.0 | https://github.com/groue/GRDB.swift/tree/v7.12.0 | MIT |
 | KeyboardShortcuts 3.1.0 | https://github.com/sindresorhus/KeyboardShortcuts/tree/v3.1.0 | MIT |
+| Sparkle 2.10.1 | https://github.com/sparkle-project/Sparkle/tree/2.10.1 | MIT, with the notices of its bundled components in its included license |
 | TagLib 2.3.2 through CXXTagLib | https://github.com/sbooth/CXXTagLib/tree/9e499ea0a69d107791ac0a2fe9d6a59cf401c6f9 | MPL 1.1 / LGPL dual licensing as provided by upstream |
 | utfcpp bundled with TagLib | https://github.com/nemtrif/utfcpp | Boost Software License 1.0 |
 | Optional Chromaprint / fpcalc 1.6.2 | https://github.com/acoustid/chromaprint/tree/v1.6.2 | LGPL 2.1 or later, including upstream notices for MIT-licensed Chromaprint code |

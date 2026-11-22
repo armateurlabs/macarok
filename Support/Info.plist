@@ -4,6 +4,12 @@
     <key>CFBundleName</key><string>Macarok</string>
     <key>CFBundleDisplayName</key><string>Macarok</string>
     <key>NSHumanReadableCopyright</key><string>© 2026 Armateur Labs</string>
+    <key>SUFeedURL</key><string>https://github.com/armateurlabs/macarok/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key><string>sLJ4bNkVqt+keA0sSHAFfEvHhdGeh+is3fwzj7vTaHo=</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUScheduledCheckInterval</key><integer>86400</integer>
+    <key>SUAllowsAutomaticUpdates</key><false/>
+    <key>SUVerifyUpdateBeforeExtraction</key><true/>
     <key>CFBundleIdentifier</key><string>com.armateurlabs.Macarok</string>
     <key>CFBundleExecutable</key><string>Macarok</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>

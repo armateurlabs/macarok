@@ -40,6 +40,8 @@ Settings → General → Menu Bar offers **Show Macarok in the menu bar**, disab
 
 Settings → About, the last tab, shows the app icon, the full release version and build number, what Macarok does, its privacy note, and its publisher (Armateur Labs, with website and contact). **Licenses** opens the third-party notices bundled with the app. The app menu's **About Macarok** opens this tab instead of the standard panel.
 
+Updates use Sparkle. Settings → General → Updates turns the daily automatic check on or off (on by default) and shows the last check; **Check for Updates…** appears in the app menu and in About. An available update shows its release notes and installs only on confirmation: Macarok quits, is replaced, and reopens. Updates are verified with an EdDSA signature.
+
 A single click inspects an item. Double-clicking a library track, album, or artist starts its first available track when the active playlist is empty. With an existing playlist, individual tracks follow the Track double-click preference: Add to Playlist, Add After Current Track, or Play Now. Double-clicking a playlist entry plays that existing entry.
 
 Double-clicking an artist or album always appends its complete selection, including when search shows only some matching tracks. The configurable double-click preference applies to individual tracks. Artist, album, and track context menus offer Add After Current Track, which inserts the selection in order immediately after the current queue entry without interrupting it. Without a current entry, the selection appends to the queue. Repeated copies receive independent queue identities.
