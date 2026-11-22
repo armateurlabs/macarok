@@ -6,11 +6,11 @@
 
 A native macOS music player inspired by Amarok 1.4: a searchable library, rich listening context, and an active playlist in three persistent panels.
 
-**Status:** native macOS application in development. The SwiftUI app includes libVLC 4 playback, a SQLite library, local/OpenSubsonic/Bandcamp/podcast sources, Internet radio, Internet Archive (Live Music Archive and LibriVox), optional Last.fm scrobbling, CUE tracks, and metadata/artwork editors.
+**Status:** stable native macOS application. The SwiftUI app includes libVLC 4 playback, a SQLite library, local/OpenSubsonic/Bandcamp/podcast sources, Internet radio, Internet Archive (Live Music Archive and LibriVox), optional Last.fm scrobbling, CUE tracks, and metadata/artwork editors.
 
 ## Download
 
-Get the DMG from [GitHub Releases](https://github.com/armateurlabs/macarok/releases), open it, and drag Macarok to Applications. Release builds currently support Apple Silicon Macs with macOS 14 or later. They are ad-hoc signed and not notarized by Apple; macOS may block the first launch.
+Get the DMG from [GitHub Releases](https://github.com/armateurlabs/macarok/releases), open it, and drag Macarok to Applications. Release builds support Apple Silicon Macs with macOS 14 or later. They are signed with the Armateur Labs certificate but not notarized by Apple, so macOS blocks the first launch of each downloaded version: approve it in **System Settings › Privacy & Security › Open Anyway**.
 
 ## Screenshots
 
