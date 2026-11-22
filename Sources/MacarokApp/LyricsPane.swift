@@ -188,7 +188,9 @@ private struct LyricsSearchSheet: View {
                         Text([result.artist, result.album].filter { !$0.isEmpty }.joined(separator: " · ")).foregroundStyle(.secondary).lineLimit(1)
                     }.font(.system(size: 12)).padding(.vertical, 4).tag(result.id)
                 }
-            }.overlay {
+            }.listStyle(.inset(alternatesRowBackgrounds: true))
+            .background(NativeListBackground(revision: controller.searchResults.map(\.id).hashValue))
+            .overlay {
                 if controller.searchResults.isEmpty && !controller.isSearching {
                     ContentUnavailableView("No Matches", systemImage: "magnifyingglass", description: Text("Try a shorter title or leave the album blank."))
                 }

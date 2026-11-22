@@ -55,7 +55,7 @@ struct SimilarMixStatusRow: View {
             if !similarity.isSearching { Button("Try Again") { similarity.retry() }.controlSize(.small) }
         }
         .font(.system(size: 12)).padding(.vertical, 6).padding(.horizontal, 8)
-        .modifier(SuggestionFrame(highlighted: false))
+        .modifier(SuggestionFrame())
         .accessibilityIdentifier("similarMixStatus")
     }
 
@@ -67,11 +67,10 @@ struct SimilarMixStatusRow: View {
 
 /// Dashed accent outline marking the announced, not yet committed next track.
 struct SuggestionFrame: ViewModifier {
-    let highlighted: Bool
     func body(content: Content) -> some View {
         content
             .background(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-            .background(Color.accentColor.opacity(highlighted ? 0.18 : 0.06), in: RoundedRectangle(cornerRadius: 6))
+            .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 

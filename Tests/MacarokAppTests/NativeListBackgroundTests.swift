@@ -34,9 +34,13 @@ final class NativeListBackgroundTests: XCTestCase {
             XCTAssertNil(probe.hitTest(NSPoint(x: probe.bounds.midX, y: probe.bounds.midY)))
             XCTAssertFalse(probe.acceptsFirstResponder)
 
+            let unselectedColor = try rowColor(table: table, hosting: hosting, row: 1)
             table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
             try await settle(hosting)
             XCTAssertEqual(table.selectedRowIndexes, IndexSet(integer: 1), "Native selection must survive background updates.")
+            XCTAssertEqual(table.selectionHighlightStyle, NSTableView.SelectionHighlightStyle.none, "The native accent band is replaced.")
+            XCTAssertGreaterThan(distance(try rowColor(table: table, hosting: hosting, row: 1), unselectedColor), 0.02,
+                                 "The soft selection must visibly tint the selected row.")
             state.count = 4; state.revision += 1
             try await settle(hosting)
             XCTAssertEqual(table.numberOfRows, 4)
@@ -57,6 +61,25 @@ final class NativeListBackgroundTests: XCTestCase {
             XCTAssertEqual(table.numberOfRows, 0)
             try assertActualAlternationAndUniformEmptyArea(table: table, hosting: hosting)
             XCTAssertFalse(window.isVisible)
+        }
+    }
+
+    func testSelectionStateChangesRepaintTheSoftSelectionSynchronously() {
+        final class CountingPainter: NativeListSelectionView {
+            var invalidations = 0
+            // Without a window AppKit reads needsDisplay back as false, so count the requests themselves.
+            override var needsDisplay: Bool {
+                get { super.needsDisplay }
+                set { if newValue { invalidations += 1 }; super.needsDisplay = newValue }
+            }
+        }
+        let row = NSTableRowView(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        let painter = CountingPainter(frame: row.bounds)
+        row.addSubview(painter)
+        for (index, change) in [{ row.isSelected = true }, { row.isPreviousRowSelected = true }, { row.isNextRowSelected = true }].enumerated() {
+            painter.invalidations = 0
+            change()
+            XCTAssertGreaterThan(painter.invalidations, 0, "Change \(index): a click must repaint its row in the click's own frame, not after an asynchronous refresh.")
         }
     }
 
@@ -144,6 +167,18 @@ final class NativeListBackgroundTests: XCTestCase {
             let last = mask.convert(table.rect(ofRow: table.numberOfRows - 1), from: table)
             XCTAssertGreaterThanOrEqual(mask.emptyArea.minY, last.maxY - 1, "The mask must never cover a real row.", file: file, line: line)
         }
+    }
+
+    private func rowColor(table: NSTableView, hosting: NSView, row: Int) throws -> NSColor {
+        hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded()
+        let bitmap = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+        hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+        let rect = table.rect(ofRow: row)
+        let point = table.convert(NSPoint(x: rect.minX + rect.width * 0.75, y: rect.midY), to: hosting)
+        let x = min(bitmap.pixelsWide - 1, max(0, Int(point.x / hosting.bounds.width * CGFloat(bitmap.pixelsWide))))
+        let topY = hosting.isFlipped ? point.y : hosting.bounds.height - point.y
+        let y = min(bitmap.pixelsHigh - 1, max(0, Int(topY / hosting.bounds.height * CGFloat(bitmap.pixelsHigh))))
+        return try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
     }
 
     private func distance(_ first: NSColor, _ second: NSColor) -> CGFloat {

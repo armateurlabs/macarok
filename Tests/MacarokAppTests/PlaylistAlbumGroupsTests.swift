@@ -82,6 +82,7 @@ final class PlaylistAlbumGroupsTests: XCTestCase {
         model.selectedQueueIDs = [model.queue[1].id]
         try await settle()
         XCTAssertEqual(try table().selectedRow, 2, "Selection follows queue UUIDs past the header row.")
+        XCTAssertEqual(try table().selectionHighlightStyle, NSTableView.SelectionHighlightStyle.none, "The playlist draws its own selection.")
         model.settings.playlistAlbumGroups = false
         try await settle()
         XCTAssertEqual(try table().numberOfRows, 3)
@@ -140,19 +141,21 @@ final class PlaylistAlbumGroupsTests: XCTestCase {
         XCTAssertEqual(model.selectedQueueIDs, [a1.id, a2.id, b1.id], "A stale anchor selects nothing rather than the wrong rows.")
     }
 
-    @MainActor
-    func testIsQueueGroupSelectedRequiresEveryEntryOfTheGroup() {
-        let model = AppModel(registerSystemControls: false)
-        let a1 = entry("a1", album: "A"), a2 = entry("a2", album: "A"), b1 = entry("b1", album: "B")
-        model.queue = [a1, a2, b1]
-        XCTAssertFalse(model.isQueueGroupSelected(firstEntryID: a1.id, count: 2))
-        model.selectedQueueIDs = [a1.id]
-        XCTAssertFalse(model.isQueueGroupSelected(firstEntryID: a1.id, count: 2), "A partial group selection does not read as the album.")
-        model.selectedQueueIDs = [a1.id, a2.id]
-        XCTAssertTrue(model.isQueueGroupSelected(firstEntryID: a1.id, count: 2))
-        XCTAssertFalse(model.isQueueGroupSelected(firstEntryID: b1.id, count: 1), "Other groups stay unselected.")
-        model.selectedQueueIDs = [b1.id]
-        XCTAssertTrue(model.isQueueGroupSelected(firstEntryID: b1.id, count: 1), "A single selected entry reads as selected.")
+    func testSelectionHighlightsMergeAFullAlbumIntoOneBlockAndAdjacentEntriesIntoRuns() {
+        let queue = [entry("a1", album: "A"), entry("a2", album: "A"), entry("b1", album: "B"), entry("b2", album: "B"), entry("c1", album: "C")]
+        let rows = PlaylistAlbumGrouping.rows(queue, grouped: true) { _ in false }
+        // Rows: H(A) a1 a2 H(B) b1 b2 c1
+        func shapes(_ selected: [Int]) -> [String] {
+            let highlights = PlaylistAlbumGrouping.highlights(rows, selected: Set(selected.map { queue[$0].id }))
+            return rows.map { row in
+                guard let highlight = highlights[row.id] else { return "-" }
+                return (highlight.tone == .strong ? "S" : "s") + (highlight.roundsTop ? "^" : "") + (highlight.roundsBottom ? "v" : "")
+            }
+        }
+        XCTAssertEqual(shapes([0, 1, 3, 4]), ["S^", "s", "sv", "-", "-", "S^", "Sv"],
+                       "A full album is a header band over a soft body; b2 and c1 merge across the album boundary.")
+        XCTAssertEqual(shapes([0]), ["-", "S^v", "-", "-", "-", "-", "-"], "A partial album keeps its header unselected.")
+        XCTAssertEqual(shapes([]), ["-", "-", "-", "-", "-", "-", "-"])
     }
 
     private func entry(_ id: String, album: String, source: String = "source") -> QueueItem {

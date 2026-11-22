@@ -1238,12 +1238,6 @@ final class AppModel {
         return Array(queue[first..<min(queue.count, first + count)].map(\.id))
     }
 
-    /// The header reads as selected only while every entry of its group is selected.
-    func isQueueGroupSelected(firstEntryID: UUID, count: Int) -> Bool {
-        let ids = Set(queueGroupIDs(firstEntryID: firstEntryID, count: count))
-        return !ids.isEmpty && selectedQueueIDs.isSuperset(of: ids)
-    }
-
     /// Selects every entry of an album group, anchored by its first queue entry's identity because
     /// group offsets can be stale. Command-click adds the group to the current selection.
     func selectQueueGroup(firstEntryID: UUID, count: Int, adding: Bool) {

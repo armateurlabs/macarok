@@ -36,6 +36,19 @@ struct PlaylistAlbumHeader: Equatable {
     let duration: Double
 }
 
+/// One row's share of a selection block. Rounded edges mark where a block starts and ends.
+struct PlaylistRowHighlight: Equatable {
+    enum Tone: Equatable {
+        /// An album header band or a selected entry.
+        case strong
+        /// The body of a fully selected album, under its header band.
+        case soft
+    }
+    let tone: Tone
+    let roundsTop: Bool
+    let roundsBottom: Bool
+}
+
 enum PlaylistAlbumGrouping {
     static func rows(_ queue: [QueueItem], grouped: Bool, isFlat: (TrackRecord) -> Bool) -> [PlaylistRow] {
         guard grouped else { return queue.enumerated().map { .entry(index: $0.offset, item: $0.element, layout: .plain) } }
@@ -71,6 +84,43 @@ enum PlaylistAlbumGrouping {
             guard rows.indices.contains(offset), case .entry(let index, _, _) = rows[offset] else { return nil }
             return index
         })
+    }
+
+    /// The playlist draws its own selection instead of the native accent band. A fully selected
+    /// album reads as one block: a strong header band above a softer body. Other selected entries
+    /// use the strong tone, and adjacent ones merge into a single rounded run.
+    static func highlights(_ rows: [PlaylistRow], selected: Set<UUID>) -> [String: PlaylistRowHighlight] {
+        guard !selected.isEmpty else { return [:] }
+        var tones = [PlaylistRowHighlight.Tone?](repeating: nil, count: rows.count)
+        for index in rows.indices where tones[index] == nil {
+            switch rows[index] {
+            case .header(let header):
+                let body = rows.indices.dropFirst(index + 1).prefix(header.offsets.count)
+                let complete = body.count == header.offsets.count && body.allSatisfy {
+                    if case .entry(_, let item, _) = rows[$0] { return selected.contains(item.id) }
+                    return false
+                }
+                guard complete else { continue }
+                tones[index] = .strong
+                for entry in body { tones[entry] = .soft }
+            case .entry(_, let item, _):
+                if selected.contains(item.id) { tones[index] = .strong }
+            }
+        }
+        func joins(_ upper: Int, _ lower: Int) -> Bool {
+            guard upper >= 0, lower < rows.count, let top = tones[upper], let bottom = tones[lower] else { return false }
+            switch (rows[upper], top, rows[lower], bottom) {
+            case (.header, .strong, .entry, .soft), (.entry, .soft, .entry, .soft), (.entry, .strong, .entry, .strong): return true
+            default: return false
+            }
+        }
+        var result: [String: PlaylistRowHighlight] = [:]
+        for index in rows.indices {
+            guard let tone = tones[index] else { continue }
+            result[rows[index].id] = PlaylistRowHighlight(tone: tone, roundsTop: !joins(index - 1, index),
+                                                          roundsBottom: !joins(index, index + 1))
+        }
+        return result
     }
 
     /// A drop position becomes the number of queue entries displayed before it.
