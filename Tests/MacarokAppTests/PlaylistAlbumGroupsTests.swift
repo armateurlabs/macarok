@@ -158,6 +158,24 @@ final class PlaylistAlbumGroupsTests: XCTestCase {
         XCTAssertEqual(shapes([]), ["-", "-", "-", "-", "-", "-", "-"])
     }
 
+    func testOnlyGroupedEntriesShowTheirAlbumTrackNumber() {
+        func track(_ id: String, album: String, number: Int?, disc: Int? = nil) -> QueueItem {
+            var item = entry(id, album: album); item.track.trackNumber = number; item.track.discNumber = disc; return item
+        }
+        let queue = [track("a8", album: "A", number: 8, disc: 1), track("a9", album: "A", number: 9, disc: 1),
+                     track("lone", album: "L", number: 4),
+                     track("b21", album: "B", number: 1, disc: 2), track("b11", album: "B", number: 1, disc: 1), track("bx", album: "B", number: nil, disc: 1)]
+        let numbers = PlaylistAlbumGrouping.albumTrackNumbers(PlaylistAlbumGrouping.rows(queue, grouped: true) { _ in false })
+        XCTAssertEqual(numbers[queue[0].id], "08", "The album number, not the playlist position.")
+        XCTAssertEqual(numbers[queue[1].id], "09")
+        XCTAssertNil(numbers[queue[2].id], "A lone album entry shows its artwork, not a number.")
+        XCTAssertEqual(numbers[queue[3].id], "2-1", "A group spanning several discs prefixes the disc.")
+        XCTAssertEqual(numbers[queue[4].id], "1-1")
+        XCTAssertNil(numbers[queue[5].id], "A missing number stays blank.")
+        XCTAssertTrue(PlaylistAlbumGrouping.albumTrackNumbers(PlaylistAlbumGrouping.rows(queue, grouped: false) { _ in false }).isEmpty,
+                      "Without album groups, no entry is numbered.")
+    }
+
     private func entry(_ id: String, album: String, source: String = "source") -> QueueItem {
         QueueItem(track: TrackRecord(id: id, sourceID: source, albumID: album, title: id, artist: "Artist",
                                      album: album, duration: 60))

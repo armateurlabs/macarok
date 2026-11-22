@@ -3,6 +3,7 @@
 <plist version="1.0"><dict>
     <key>CFBundleName</key><string>Macarok</string>
     <key>CFBundleDisplayName</key><string>Macarok</string>
+    <key>NSHumanReadableCopyright</key><string>© 2026 Armateur Labs</string>
     <key>CFBundleIdentifier</key><string>com.armateurlabs.Macarok</string>
     <key>CFBundleExecutable</key><string>Macarok</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>

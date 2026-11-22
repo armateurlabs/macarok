@@ -123,6 +123,26 @@ enum PlaylistAlbumGrouping {
         return result
     }
 
+    /// Grouped entries show their number on the album, not their place in the playlist. A group that spans
+    /// several discs prefixes the disc ("2-1"). Lone and ungrouped entries, and tracks without a number, show none.
+    static func albumTrackNumbers(_ rows: [PlaylistRow]) -> [UUID: String] {
+        var numbers: [UUID: String] = [:]
+        for (index, row) in rows.enumerated() {
+            guard case .header(let header) = row else { continue }
+            let tracks: [QueueItem] = rows.dropFirst(index + 1).prefix(header.offsets.count).compactMap {
+                if case .entry(_, let item, .grouped) = $0 { return item }
+                return nil
+            }
+            let spansDiscs = Set(tracks.compactMap(\.track.discNumber)).count > 1
+            for item in tracks {
+                guard let number = item.track.trackNumber, number > 0 else { continue }
+                if spansDiscs, let disc = item.track.discNumber { numbers[item.id] = "\(disc)-\(number)" }
+                else { numbers[item.id] = String(format: "%02d", number) }
+            }
+        }
+        return numbers
+    }
+
     /// A drop position becomes the number of queue entries displayed before it.
     static func queueDestination(_ destination: Int, rows: [PlaylistRow]) -> Int {
         rows.prefix(max(0, min(destination, rows.count))).reduce(0) { count, row in

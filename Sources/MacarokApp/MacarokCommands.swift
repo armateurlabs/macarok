@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct MacarokCommands: Commands {
     @Bindable var model: AppModel
     var body: some Commands {
+        CommandGroup(replacing: .appInfo) { AboutMenuButton(model: model) }
         CommandGroup(replacing: .undoRedo) {
             Button(model.queueUndoPresentation.undoTitle) { model.queueUndoPresentation.undo() }
                 .keyboardShortcut("z", modifiers: .command)
@@ -106,6 +107,18 @@ extension AppModel {
         case "search": NotificationCenter.default.post(name: .macarokFocusSearch, object: nil)
         case "showCurrentTrack": showCurrentTrack()
         default: break
+        }
+    }
+}
+
+/// "About Macarok" shows Settings › About instead of the standard panel.
+private struct AboutMenuButton: View {
+    @Bindable var model: AppModel
+    @Environment(\.openSettings) private var openSettings
+    var body: some View {
+        Button("About Macarok") {
+            model.requestedSettingsTab = .about
+            openSettings()
         }
     }
 }

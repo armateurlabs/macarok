@@ -216,6 +216,8 @@ final class AppModel {
     @ObservationIgnored var findsArtistPicturesOnline = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
     var artworkRevision = 0
     var streamingBufferFraction: Double?
+    /// A Settings tab to show the next time Settings appears or updates, such as About from the app menu.
+    var requestedSettingsTab: SettingsTab?
     var scanWarnings: [String] = []
     var radio: RadioController?
     var archive: InternetArchiveController?

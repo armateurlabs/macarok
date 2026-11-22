@@ -187,14 +187,15 @@ struct QueuePane: View {
             } else {
                 let rows = PlaylistAlbumGrouping.rows(model.queue, grouped: model.settings.playlistAlbumGroups, isFlat: model.isRadioTrack)
                 let highlights = PlaylistAlbumGrouping.highlights(rows, selected: model.selectedQueueIDs)
+                let numbers = PlaylistAlbumGrouping.albumTrackNumbers(rows)
                 List(selection: $model.selectedQueueIDs) {
                     ForEach(rows) { row in
                         switch row {
                         case .header(let header):
                             PlaylistAlbumHeaderRow(model: model, header: header, highlight: highlights[row.id])
                                 .moveDisabled(true).deleteDisabled(true).selectionDisabled(true)
-                        case .entry(let index, let item, let layout):
-                            QueueEntryRow(model: model, player: player, index: index, item: item, layout: layout).tag(item.id)
+                        case .entry(_, let item, let layout):
+                            QueueEntryRow(model: model, player: player, item: item, layout: layout, number: numbers[item.id]).tag(item.id)
                                 .listRowBackground(highlights[row.id].map(PlaylistSelectionBackground.init))
                         }
                     }
@@ -243,18 +244,33 @@ struct QueuePane: View {
 private struct QueueEntryRow: View {
     @Bindable var model: AppModel
     @ObservedObject var player: VLCPlaybackEngine
-    let index: Int
     let item: QueueItem
     let layout: PlaylistEntryLayout
+    /// The track's number on its album, shown only under an album header.
+    let number: String?
 
     var body: some View {
         HStack(spacing: 9) {
-            if layout == .single { ArtworkView(track: item.track, model: model).frame(width: 34, height: 34) }
-            Group {
-                if item.id == model.currentQueueID { Image(systemName: player.state == .playing ? "waveform" : "pause.fill").foregroundStyle(Color.accentColor) }
-                else if isSuggestion { Image(systemName: "sparkles").foregroundStyle(Color.accentColor).help("Suggested next track") }
-                else { Text(String(format: "%02d", index + 1)).foregroundStyle(.tertiary) }
-            }.font(.system(size: 10)).frame(width: 19)
+            if layout == .single {
+                // A lone album entry has no number; its playing or suggested state is drawn over its artwork.
+                ArtworkView(track: item.track, model: model).frame(width: 34, height: 34)
+                    .overlay {
+                        if let status = statusSymbol {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.45))
+                                Image(systemName: status).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                            }.help(isSuggestion ? "Suggested next track" : "")
+                        }
+                    }
+            } else {
+                Group {
+                    if let status = statusSymbol {
+                        Image(systemName: status).foregroundStyle(Color.accentColor).help(isSuggestion ? "Suggested next track" : "")
+                    } else if let number {
+                        Text(number).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                }.font(.system(size: 10)).frame(width: 19)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.track.title).fontWeight(item.id == model.currentQueueID ? .semibold : .regular).lineLimit(1, reservesSpace: true)
                 // Grouped entries omit an empty detail line, so album bodies stay compact under their header.
@@ -280,6 +296,11 @@ private struct QueueEntryRow: View {
     }
 
     private var isSuggestion: Bool { model.similarity.isSuggestion(item.id) }
+
+    private var statusSymbol: String? {
+        if item.id == model.currentQueueID { return player.state == .playing ? "waveform" : "pause.fill" }
+        return isSuggestion ? "sparkles" : nil
+    }
 
     private var subtitle: String {
         let details: [String]

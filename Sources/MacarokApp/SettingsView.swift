@@ -3,7 +3,7 @@ import KeyboardShortcuts
 import MacarokCore
 import SwiftUI
 
-enum SettingsTab: Hashable { case general, playback, shortcuts, sources, podcasts, scrobbling }
+enum SettingsTab: Hashable { case general, playback, shortcuts, sources, podcasts, scrobbling, about }
 
 struct SettingsView: View {
     @Bindable var model: AppModel
@@ -28,8 +28,14 @@ struct SettingsView: View {
             sources.tag(SettingsTab.sources).tabItem { Label("Sources", systemImage: "externaldrive.connected.to.line.below") }
             PodcastSettingsView(model: model, podcasts: model.podcasts).tag(SettingsTab.podcasts).tabItem { Label { Text("Podcasts") } icon: { Image(nsImage: PodcastSourceIcon.settingsImage).renderingMode(.template) } }
             ServicesSettingsView(model: model).tag(SettingsTab.scrobbling).tabItem { Label("Services", systemImage: "network") }
+            AboutSettingsView().tag(SettingsTab.about).tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 650, height: 555)
+        .onChange(of: model.requestedSettingsTab, initial: true) { _, tab in
+            guard let tab else { return }
+            selectedTab = tab
+            model.requestedSettingsTab = nil
+        }
         .onAppear { model.openMainWindow = { openWindow(id: "main") } }
         .confirmationDialog("Remove \(removal?.name ?? "Source")?", isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }), titleVisibility: .visible) {
             Button("Remove Source", role: .destructive) { if let removal { model.removeSource(removal) }; removal = nil }
