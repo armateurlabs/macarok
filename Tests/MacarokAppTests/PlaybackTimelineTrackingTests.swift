@@ -1,4 +1,5 @@
 import AppKit
+import MacarokAudio
 import SwiftUI
 import XCTest
 @testable import MacarokApp
@@ -145,6 +146,29 @@ final class PlaybackTimelineTrackingTests: XCTestCase {
         XCTAssertEqual(fixture.slider.doubleValue, 3.2)
     }
 
+    func testRunningClockAdvancesOnlyThePaintedThumbAtExactlyRealTimeRate() throws {
+        let slider = BufferedTimelineSlider.makeSlider()
+        slider.minValue = 0; slider.maxValue = 100
+        let generation = UUID()
+        defer { slider.stopPresentationUpdates() }
+        let clock = PlaybackClock(position: 10, uptime: 50, isRunning: true)
+        slider.applyPlaybackPosition(10, clock: clock, generation: generation, seekRevision: 0, at: 50)
+        for time in [50.016, 50.5, 51.25] {
+            slider.advancePresentation(to: time)
+            XCTAssertEqual(slider.renderedPosition, 10 + (time - 50), accuracy: 1e-9, "Every frame sits on one real-time line.")
+        }
+        // A 5 Hz publication from the same running clock neither restarts nor bends the motion.
+        slider.applyPlaybackPosition(11.2, clock: clock, generation: generation, seekRevision: 0, at: 51.3)
+        XCTAssertEqual(slider.renderedPosition, 11.3, accuracy: 1e-9)
+        XCTAssertEqual(slider.doubleValue, 11.2, "Native input and accessibility keep the published value.")
+        XCTAssertEqual(try accessibleValue(slider), 11.2, accuracy: 0.0001)
+
+        slider.applyPlaybackPosition(11.4, clock: PlaybackClock(position: 11.4, uptime: 51.4, isRunning: false),
+                                     generation: generation, seekRevision: 0, at: 51.4)
+        slider.advancePresentation(to: 60)
+        XCTAssertEqual(slider.renderedPosition, 11.4, "A stopped clock stands still.")
+    }
+
     private func accessibleValue(_ slider: TimelineSlider) throws -> Double {
         let element = try XCTUnwrap(slider.accessibilityChildren()?.compactMap { $0 as? NSSliderCell }.first)
         return try XCTUnwrap(element.accessibilityValue() as? NSNumber).doubleValue
@@ -200,7 +224,9 @@ final class PlaybackTimelineTrackingTests: XCTestCase {
             coordinator.parent = component
             slider.updatePlayback(position: queuedValue ?? (interaction.isEditing ? interaction.position ?? measured : measured),
                 measuredPosition: measured, duration: duration, enabled: true,
-                playing: playing && !interaction.isEditing, generation: generation, seekRevision: seekRevision)
+                clock: playing && !interaction.isEditing
+                    ? PlaybackClock(position: measured, uptime: ProcessInfo.processInfo.systemUptime, isRunning: true) : nil,
+                generation: generation, seekRevision: seekRevision)
         }
 
         func stop() { slider.stopPresentationUpdates(); onDraftChanged = nil; coordinator = nil }

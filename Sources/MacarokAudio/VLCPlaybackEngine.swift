@@ -15,6 +15,8 @@ public final class PlaybackTimeline: ObservableObject {
     @Published public fileprivate(set) var bufferingProgress: Double = 1
     @Published public fileprivate(set) var isSeekable = false
     @Published public fileprivate(set) var seekRevision: UInt64 = 0
+    /// Changes only when the cursor starts, stops, or is placed; views extrapolate it frame by frame.
+    @Published public fileprivate(set) var clock = PlaybackClock(position: 0, uptime: 0, isRunning: false)
 }
 
 public struct PlaybackDiagnostics: Equatable, Sendable {
@@ -30,25 +32,63 @@ public struct PlaybackHealthSnapshot: Equatable, Sendable {
     public let readBytes: UInt64?
 }
 
-/// Wall-clock reference for the last playback position accepted from VLC.
-public struct PlaybackClockAnchor: Equatable, Sendable {
+/// The timeline cursor. It has two states: running at exactly real-time rate while audio plays, or
+/// standing still. Its position at any instant is a pure function of the system uptime.
+public struct PlaybackClock: Equatable, Sendable {
     public let position: Double
+    /// `ProcessInfo.systemUptime`, which shares `CACurrentMediaTime`'s time base.
     public let uptime: TimeInterval
-    /// Line slope learned from accepted samples: 1 advances the cursor at real-time rate.
-    public let rate: Double
-    /// When samples first began disagreeing with the learned line; nil while they agree.
-    public let disagreeSince: TimeInterval?
-    public let lastReportedPosition: Double
-    public let lastReportedUptime: TimeInterval
+    public let isRunning: Bool
 
-    public init(position: Double, uptime: TimeInterval, rate: Double = 1, disagreeSince: TimeInterval? = nil,
-                lastReportedPosition: Double? = nil, lastReportedUptime: TimeInterval? = nil) {
+    public init(position: Double, uptime: TimeInterval, isRunning: Bool) {
         self.position = position
         self.uptime = uptime
-        self.rate = rate
-        self.disagreeSince = disagreeSince
-        self.lastReportedPosition = lastReportedPosition ?? position
-        self.lastReportedUptime = lastReportedUptime ?? uptime
+        self.isRunning = isRunning
+    }
+
+    public func position(at time: TimeInterval) -> Double {
+        isRunning ? position + max(0, time - uptime) : position
+    }
+}
+
+/// Runs and stops the cursor without ever bending it. It starts from where it stands when audio starts
+/// and stops where it stands otherwise, so pausing and resuming never move it. VLC's clock is only
+/// compared with it: VLCKit reports a cached time that lags up to ~0.6 s after a resume, so waiting for
+/// that clock would freeze the cursor and then make it jump. A clock that stays more than
+/// `maximumDrift` away for `driftGrace` is a synchronization error, reported to the caller, and the
+/// cursor is placed back on the clock once.
+struct PlaybackCursor: Equatable {
+    static let maximumDrift: Double = 1
+    static let driftGrace: TimeInterval = 2
+
+    private(set) var clock = PlaybackClock(position: 0, uptime: 0, isRunning: false)
+    private var driftSince: TimeInterval?
+
+    mutating func stop(at position: Double, now: TimeInterval) {
+        driftSince = nil
+        // A stopped clock's uptime is irrelevant; keeping it avoids republishing an unchanged cursor.
+        guard clock.isRunning || clock.position != max(0, position) else { return }
+        clock = PlaybackClock(position: max(0, position), uptime: now, isRunning: false)
+    }
+
+    /// Starts from where the cursor stands, at `time`: now, or when audio actually started.
+    mutating func run(at time: TimeInterval) {
+        guard !clock.isRunning else { return }
+        clock = PlaybackClock(position: clock.position, uptime: time, isRunning: true)
+        driftSince = nil
+    }
+
+    /// Compares a clock sample read when VLC notified it. Returns the drift that was corrected.
+    mutating func check(_ sample: Double, at now: TimeInterval) -> Double? {
+        guard clock.isRunning, sample.isFinite else { return nil }
+        let drift = sample - clock.position(at: now)
+        guard abs(drift) > Self.maximumDrift else { driftSince = nil; return nil }
+        let since = driftSince ?? now
+        driftSince = since
+        guard now - since >= Self.driftGrace else { return nil }
+        clock = PlaybackClock(position: max(0, sample), uptime: now, isRunning: true)
+        driftSince = nil
+        return drift
     }
 }
 
@@ -112,7 +152,8 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             return PlaybackHealthSnapshot(position: position, playedAudioBuffers: nil, decodedAudio: nil, readBytes: nil)
         }
         let statistics = current.backend.media.statistics
-        return PlaybackHealthSnapshot(position: position, playedAudioBuffers: statistics.playedAudioBuffers,
+        // The watchdog judges progress from the audio actually reached, not from the running cursor.
+        return PlaybackHealthSnapshot(position: clockSample, playedAudioBuffers: statistics.playedAudioBuffers,
                                       decodedAudio: statistics.decodedAudio, readBytes: statistics.readBytes)
     }
 
@@ -129,7 +170,11 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     private var explicitlyStopped = false
     private var pendingSeek: Double?
     private var playingSince: TimeInterval?
-    private var clockAnchor: PlaybackClockAnchor?
+    private var cursor = PlaybackCursor()
+    /// VLC's latest clock sample: the audio actually reached, unlike the steadily running cursor.
+    private var clockSample: Double = 0
+    /// A Macarok stream that is refilling stops the audio even while VLC still reports playing.
+    private var transportBuffering = false
     private var inFlightSeek: (target: Double, startedAt: TimeInterval)?
     private var timelineTimer: Timer?
     private var live = false
@@ -146,6 +191,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         return VLCLibrary(options: ["--no-video", "--no-osd", "--quiet", "--no-metadata-network-access", "--keystore=none"])
     }()
     private static let signposter = OSSignposter(subsystem: "com.armateurlabs.Macarok", category: "Playback")
+    private static let logger = Logger(subsystem: "com.armateurlabs.Macarok", category: "Playback")
     private var transitionInterval: OSSignpostIntervalState?
     private var transitionStartedAt: TimeInterval?
 
@@ -173,9 +219,48 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
 
     public var isPlaying: Bool { state == .playing || state == .buffering }
 
-    private func setState(_ next: PlaybackState) {
+    /// `startedAt` backdates a cursor that starts with audio already playing, such as an adopted successor.
+    private func setState(_ next: PlaybackState, startedAt: TimeInterval? = nil) {
         guard state != next else { return }
         state = next
+        reconcileCursor(startedAt: startedAt)
+    }
+
+    /// Audio is coming out, and no seek is waiting to land.
+    private var cursorRuns: Bool { state == .playing && !transportBuffering && pendingSeek == nil && inFlightSeek == nil }
+
+    private func reconcileCursor(startedAt: TimeInterval? = nil) {
+        if cursorRuns {
+            guard !cursor.clock.isRunning else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            cursor.run(at: min(now, startedAt ?? now))
+            publishCursor(now: now)
+        } else if cursor.clock.isRunning {
+            stopCursor()
+        }
+    }
+
+    /// Stops the cursor where it stands, or places it at `position`.
+    private func stopCursor(at position: Double? = nil) {
+        let now = ProcessInfo.processInfo.systemUptime
+        cursor.stop(at: position ?? boundedToDuration(cursor.clock.position(at: now)), now: now)
+        publishCursor(now: now)
+    }
+
+    private func publishCursor(now: TimeInterval) {
+        if timeline.clock != cursor.clock { timeline.clock = cursor.clock }
+        // A placed position is already bounded by its caller; a resume point may exceed an unverified RSS duration.
+        let value = cursor.clock.position(at: now)
+        position = cursor.clock.isRunning ? boundedToDuration(value) : value
+    }
+
+    private func boundedToDuration(_ value: Double) -> Double { duration > 0 ? min(value, duration) : value }
+
+    /// Reported by the application while its own network stream refills; the cursor stands still meanwhile.
+    public func setTransportBuffering(_ buffering: Bool) {
+        guard transportBuffering != buffering else { return }
+        transportBuffering = buffering
+        reconcileCursor()
     }
 
     private func endTransition(startedPlaying: Bool = false, at uptime: TimeInterval? = nil) {
@@ -292,10 +377,9 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
                                             durationHint: durationHint, live: live))
         }
         explicitlyStopped = false
-        clockAnchor = nil
         if didComplete {
             didComplete = false
-            position = 0
+            stopCursor(at: 0)
             player.time = VLCTime(number: NSNumber(value: segmentStart * 1_000))
         }
         startTimelineUpdates()
@@ -310,7 +394,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         stopTimelineUpdates(); generation = UUID(); explicitlyStopped = true
         handoff.stopAll()
         heldStream?.close(); heldStream = nil; player?.delegate = nil; player?.stop()
-        pendingSeek = nil; inFlightSeek = nil; clockAnchor = nil; setState(.paused); position = 0; duration = 0; isSeekable = false
+        pendingSeek = nil; inFlightSeek = nil; setState(.paused); stopCursor(at: 0); duration = 0; isSeekable = false
     }
 
     public func togglePlayPause() {
@@ -324,11 +408,10 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         explicitlyStopped = true
         pendingSeek = nil
         inFlightSeek = nil
-        clockAnchor = nil
         handoff.stopAll()
         player?.stop()
         setState(.stopped)
-        position = 0
+        stopCursor(at: 0)
         bufferingProgress = 1
         isSeekable = false
     }
@@ -337,22 +420,20 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         synchronizeUpcomingPlayback()
         guard !live, let player, seconds.isFinite else { return }
         guard streamSupportsSeeking?() != false else {
-            pendingSeek = nil; inFlightSeek = nil; clockAnchor = nil; isSeekable = false
+            pendingSeek = nil; inFlightSeek = nil; isSeekable = false
             return
         }
         let target = boundedSeekTarget(seconds)
         timeline.seekRevision &+= 1
-        clockAnchor = nil
+        stopCursor(at: target)
         guard player.isSeekable else {
             pendingSeek = target
             inFlightSeek = nil
-            position = target
             return
         }
         pendingSeek = nil
         inFlightSeek = (target, ProcessInfo.processInfo.systemUptime)
         player.time = VLCTime(number: NSNumber(value: (target + segmentStart) * 1_000))
-        position = target
     }
 
     /// A stalled decoder is a recoverable playback error, never a successful queue completion.
@@ -457,15 +538,16 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         segmentStart = backend.segmentStart
         segmentEnd = backend.segmentEnd
         durationHint = backend.durationHint
-        position = 0
         duration = segmentEnd.map { $0 - segmentStart } ?? durationHint ?? 0
+        clockSample = 0
+        transportBuffering = false
+        stopCursor(at: 0)
         hasStarted = snapshot.hasStarted
         playingSince = hasStarted ? snapshot.firstPlayingUptime ?? ProcessInfo.processInfo.systemUptime : nil
         didComplete = false
         explicitlyStopped = false
         pendingSeek = nil
         inFlightSeek = nil
-        clockAnchor = nil
         if lastError != nil { lastError = nil }
         isSeekable = false
         bufferingProgress = hasStarted ? 1 : 0
@@ -474,7 +556,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         if !preserveTransition { startTimelineUpdates() }
         if hasStarted {
             endTransition(startedPlaying: true, at: snapshot.firstPlayingUptime)
-            setState(.playing)
+            setState(.playing, startedAt: snapshot.firstPlayingUptime)
         }
     }
 
@@ -510,8 +592,6 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             endTransition(startedPlaying: true, at: handoff.current()?.firstPlayingUptime)
             hasStarted = true
             if playingSince == nil { playingSince = ProcessInfo.processInfo.systemUptime }
-            // A resume leaves a stale anchor behind; compare the clock from the first fresh sample.
-            clockAnchor = nil
             bufferingProgress = 1
             setState(.playing)
             startTimelineUpdates()
@@ -543,6 +623,17 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         // The common-mode clock already samples playing media at 5 Hz. Delegate notifications
         // are still needed for paused seeks, initial duration discovery, and seek acknowledgement.
         if state != .playing || pendingSeek != nil || inFlightSeek != nil || duration == 0 { synchronizeTime() }
+        checkClockDrift()
+    }
+
+    /// Runs on VLC's time notification, when its cached time is freshest.
+    private func checkClockDrift() {
+        guard let player, cursor.clock.isRunning, !explicitlyStopped else { return }
+        let sample = max(0, (player.time.value?.doubleValue ?? 0) / 1_000 - segmentStart)
+        let now = ProcessInfo.processInfo.systemUptime
+        guard let drift = cursor.check(sample, at: now) else { return }
+        Self.logger.error("Playback clock drifted \(drift, format: .fixed(precision: 2)) s away from the timeline cursor; the cursor was placed back on it")
+        publishCursor(now: now)
     }
 
     fileprivate func receiveBuffering(_ value: Float, generation: UUID) {
@@ -563,10 +654,14 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         else if sourceDuration > 0 { duration = max(0, sourceDuration - segmentStart) }
         else if let durationHint { duration = durationHint }
         let transportAllowsSeeking = streamSupportsSeeking?() != false
+        var placesCursor = false
         isSeekable = !live && transportAllowsSeeking && player.isSeekable
-        if !transportAllowsSeeking { pendingSeek = nil; inFlightSeek = nil }
+        if !transportAllowsSeeking {
+            // A dropped seek target was never applied; the cursor returns to the audio actually heard.
+            if pendingSeek != nil || inFlightSeek != nil { placesCursor = true }
+            pendingSeek = nil; inFlightSeek = nil
+        }
         if live { duration = 0 }
-        var reanchor = false
         if let target = pendingSeek {
             if isSeekable {
                 pendingSeek = nil
@@ -577,9 +672,10 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             // Report the audio actually heard instead of holding the timeline on it.
             guard hasStarted, let playingSince, ProcessInfo.processInfo.systemUptime - playingSince >= 2 else { return }
             pendingSeek = nil
-            reanchor = true
+            placesCursor = true
         }
         let reportedPosition = max(0, absolute - segmentStart)
+        clockSample = reportedPosition
         if let request = inFlightSeek {
             let elapsed = ProcessInfo.processInfo.systemUptime - request.startedAt
             let target = boundedSeekTarget(request.target)
@@ -587,65 +683,21 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
             if !acknowledged, elapsed < 15 {
                 // VLCKit can report its cached pre-seek time while the new byte range is buffering.
                 // Do not move the cursor back or evaluate a CUE end boundary from that old sample.
-                position = target
                 return
             }
+            if !acknowledged { placesCursor = true }
             inFlightSeek = nil
-            reanchor = true
         }
-        // A Bluetooth device renegotiating its output latency makes VLC's clock jump forward and snap
-        // back while the audio itself keeps playing. Hold the learned-rate line through such a step
-        // instead of publishing the jump.
-        let stable = Self.stablePlayingPosition(reported: reportedPosition, anchor: reanchor ? nil : clockAnchor,
-                                                playing: state == .playing && !reanchor,
-                                                now: ProcessInfo.processInfo.systemUptime)
-        clockAnchor = stable.anchor
-        position = stable.position
-        if duration > 0 { position = min(position, duration) }
-        if state == .playing { handoff.recordPlayingPosition(position, generation: generation) }
-        // The stabilized cursor, not a raw clock sample, decides a CUE segment's end.
-        if hasStarted, let end = segmentEnd, position + segmentStart >= end - 0.015, !didComplete {
+        let now = ProcessInfo.processInfo.systemUptime
+        // A target that was never applied leaves the cursor on the audio actually heard.
+        if placesCursor { cursor.stop(at: reportedPosition, now: now) }
+        // A landed seek starts the cursor from its target, where it stands.
+        reconcileCursor()
+        publishCursor(now: now)
+        if state == .playing { handoff.recordPlayingPosition(reportedPosition, generation: generation) }
+        if hasStarted, let end = segmentEnd, absolute >= end - 0.015, !didComplete {
             finish()
         }
-    }
-
-    /// While playing, the cursor follows a learned-rate line through accepted samples. A steady clock lead or
-    /// drift (wired output latency, VBR streams) is followed rather than fought; a step that leaves the line is
-    /// held through, and a clock that keeps disagreeing past `resyncSeconds` is adopted as truth together with
-    /// its observed rate, so the line settles onto it without sawtooth. Samples that freeze just below tolerance
-    /// freeze the cursor on the clock, so a stalling decoder stops the cursor instead of letting it run ahead.
-    /// Other states republish the sample at rate 1 but never rewind below the accepted line, so VLCKit's cached
-    /// pre-seek time cannot pull a paused cursor back; seeks re-anchor first and a resume compares fresh samples.
-    public nonisolated static func stablePlayingPosition(reported: Double, anchor: PlaybackClockAnchor?, playing: Bool,
-                                                         now: TimeInterval, leadTolerance: Double = 0.75,
-                                                         lagTolerance: Double = 0.5, resyncSeconds: TimeInterval = 3,
-                                                         rateRange: ClosedRange<Double> = 0 ... 1.6)
-        -> (position: Double, anchor: PlaybackClockAnchor) {
-        func reanchor(line: Double, rate: Double, disagree: TimeInterval? = nil) -> PlaybackClockAnchor {
-            PlaybackClockAnchor(position: max(0, line), uptime: now, rate: rate, disagreeSince: disagree,
-                                lastReportedPosition: reported, lastReportedUptime: now)
-        }
-        guard playing, let anchor, reported.isFinite else {
-            let bounded = max(0, reported.isFinite ? reported : 0)
-            guard reported.isFinite, let anchor else { return (bounded, reanchor(line: bounded, rate: 1)) }
-            let held = max(bounded, anchor.position)
-            return (held, reanchor(line: held, rate: 1))
-        }
-        let reportSpan = now - anchor.lastReportedUptime
-        let reportRate = reportSpan > 0.05 ? (reported - anchor.lastReportedPosition) / reportSpan : anchor.rate
-        let expected = anchor.position + anchor.rate * max(0, now - anchor.uptime)
-        if reported >= expected - lagTolerance && reported <= expected + leadTolerance {
-            return (max(0, reported), reanchor(line: reported, rate: anchor.rate))
-        }
-        let disagreeSince = anchor.disagreeSince ?? now
-        if now - disagreeSince >= resyncSeconds {
-            // The clock really moved: adopt it and learn its rate from the latest sample interval.
-            let learned = min(max(reportRate, rateRange.lowerBound), rateRange.upperBound)
-            return (max(0, reported), reanchor(line: reported, rate: learned))
-        }
-        return (expected, PlaybackClockAnchor(position: anchor.position, uptime: anchor.uptime, rate: anchor.rate,
-                                              disagreeSince: disagreeSince, lastReportedPosition: reported,
-                                              lastReportedUptime: now))
     }
 
     /// True when network media stopped before its end: a Macarok stream whose transfer failed, a stream of
@@ -674,7 +726,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         endTransition()
         stopTimelineUpdates()
         explicitlyStopped = true
-        pendingSeek = nil; inFlightSeek = nil; clockAnchor = nil; isSeekable = false
+        pendingSeek = nil; inFlightSeek = nil; isSeekable = false
         handoff.stopAll()
         player?.stop()
         setState(.stopped)
@@ -694,7 +746,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         explicitlyStopped = true
         inFlightSeek = nil
         setState(.stopped)
-        if duration > 0 { position = duration }
+        if duration > 0 { stopCursor(at: duration) }
         handoff.stopAll()
         player?.stop()
         onCompletion?()
@@ -704,7 +756,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         endTransition()
         stopTimelineUpdates()
         explicitlyStopped = true
-        pendingSeek = nil; inFlightSeek = nil; clockAnchor = nil; isSeekable = false
+        pendingSeek = nil; inFlightSeek = nil; isSeekable = false
         handoff.stopAll()
         player?.stop()
         if lastError != message { lastError = message }

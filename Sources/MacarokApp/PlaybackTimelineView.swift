@@ -38,7 +38,7 @@ struct PlaybackTimelineView: View {
                 onEditingChanged: { editing in
                     if editing { interaction.begin(at: measured, generation: model.playbackGeneration) }
                     else if let target = interaction.end(generation: model.playbackGeneration) { model.seekPlayback(to: target) }
-                }, animatesPlayback: model.player.state == .playing && model.streamingBufferFraction == nil && !interaction.isEditing,
+                }, animatesPlayback: !interaction.isEditing, clock: resumePoint == nil ? timeline.clock : nil,
                 playbackGeneration: model.playbackGeneration, seekRevision: timeline.seekRevision,
                 onEditingCancelled: { interaction.cancel() }, measuredPosition: measured,
                 chapterStarts: Self.chapterFractions(chapters, duration: duration),
@@ -160,6 +160,8 @@ struct BufferedTimelineSlider: NSViewRepresentable {
     let showsBuffer: Bool
     let onEditingChanged: (Bool) -> Void
     var animatesPlayback = false
+    /// The engine's cursor; while it runs, the thumb advances with it on every display frame.
+    var clock: PlaybackClock?
     var playbackGeneration: UUID?
     var seekRevision: UInt64 = 0
     var onEditingCancelled: (() -> Void)?
@@ -190,7 +192,7 @@ struct BufferedTimelineSlider: NSViewRepresentable {
         if slider.appearance?.name != appearance { slider.appearance = NSAppearance(named: appearance) }
         if let cell = slider.cell as? TimelineSliderCell { cell.bufferedRanges = ranges; cell.showsBuffer = showsBuffer; cell.chapterStarts = chapterStarts }
         slider.updatePlayback(position: value, measuredPosition: measuredPosition, duration: duration, enabled: enabled,
-            playing: animatesPlayback && !reduceMotion && enabled && !slider.trackingMouse,
+            clock: animatesPlayback && !reduceMotion && enabled && !slider.trackingMouse ? clock : nil,
             generation: playbackGeneration, seekRevision: seekRevision)
         slider.needsDisplay = true
     }
@@ -229,8 +231,9 @@ final class TimelineSlider: NSSlider {
     private var trackingValueChanged = false
     private var trackingGeneration: UUID?
     private var trackingSeekRevision: UInt64 = 0
-    private var smoothing = PlaybackTimelineSmoothing()
-    private var presentationTimer: Timer?
+    /// Only a running clock animates; the painted thumb then depends on the frame time alone.
+    private var runningClock: PlaybackClock?
+    private var displayLink: CADisplayLink?
     private var presentationGeneration: UUID?
     private var presentationSeekRevision: UInt64 = 0
     private var latestMeasuredPosition: Double = 0
@@ -239,7 +242,14 @@ final class TimelineSlider: NSSlider {
     var playbackTrackRect: NSRect { (cell as? TimelineSliderCell)?.playbackTrackRect ?? bounds }
     var playbackThumbRect: NSRect { (cell as? TimelineSliderCell)?.playbackThumbRect ?? .zero }
 
-    deinit { presentationTimer?.invalidate() }
+    deinit { displayLink?.invalidate() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // A display link follows its window's screen; recreate it there.
+        stopPresentationUpdates()
+        if window != nil, runningClock != nil { startPresentationUpdates() }
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -273,7 +283,7 @@ final class TimelineSlider: NSSlider {
     }
 
     func updatePlayback(position: Double, measuredPosition: Double? = nil, duration: Double, enabled: Bool,
-                        playing: Bool, generation: UUID?, seekRevision: UInt64,
+                        clock: PlaybackClock?, generation: UUID?, seekRevision: UInt64,
                         at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         latestMeasuredPosition = measuredPosition ?? position
         // Native tracking owns its value and range until release. SwiftUI can deliver a queued
@@ -283,50 +293,54 @@ final class TimelineSlider: NSSlider {
             return
         }
         minValue = 0; maxValue = max(1, duration); isEnabled = enabled
-        applyPlaybackPosition(min(maxValue, max(0, position)), playing: playing, generation: generation,
+        applyPlaybackPosition(min(maxValue, max(0, position)), clock: clock, generation: generation,
                               seekRevision: seekRevision, measuredPosition: measuredPosition, at: time)
     }
 
-    func applyPlaybackPosition(_ position: Double, playing: Bool, generation: UUID?, seekRevision: UInt64,
+    func applyPlaybackPosition(_ position: Double, clock: PlaybackClock?, generation: UUID?, seekRevision: UInt64,
                                measuredPosition: Double? = nil,
                                at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         latestMeasuredPosition = measuredPosition ?? position
         guard !defersPlaybackUpdate(generation: generation, seekRevision: seekRevision, enabled: isEnabled) else { return }
-        // Native input and accessibility retain the measured value. Only this cell's painting
-        // follows a short interpolation, without publishing 60 Hz changes through the view model.
+        // Native input and accessibility retain the published value. Only this cell's painting follows
+        // the running clock, without publishing per-frame changes through the view model.
         let target = trackingMouse && trackingCancelled ? latestMeasuredPosition : position
         doubleValue = min(maxValue, max(minValue, target))
         presentationGeneration = generation; presentationSeekRevision = seekRevision
-        let value = smoothing.update(to: doubleValue, at: time, playing: playing,
-                                     generation: generation, seekRevision: seekRevision)
-        (cell as? TimelineSliderCell)?.presentationValue = value
-        if smoothing.isAnimating(at: time) { startPresentationUpdates() }
-        else { stopPresentationUpdates() }
+        runningClock = clock?.isRunning == true ? clock : nil
+        if runningClock == nil {
+            stopPresentationUpdates()
+            // Pinned, so a cancelled drag's late native value cannot repaint the thumb.
+            (cell as? TimelineSliderCell)?.presentationValue = doubleValue
+        } else {
+            advancePresentation(to: time)
+            startPresentationUpdates()
+        }
         needsDisplay = true
     }
 
     func advancePresentation(to time: TimeInterval) {
-        (cell as? TimelineSliderCell)?.presentationValue = smoothing.value(at: time)
+        guard let runningClock else { return }
+        (cell as? TimelineSliderCell)?.presentationValue = min(maxValue, max(minValue, runningClock.position(at: time)))
         needsDisplay = true
-        if !smoothing.isAnimating(at: time) { stopPresentationUpdates() }
     }
 
     private func startPresentationUpdates() {
-        guard presentationTimer == nil else { return }
-        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.advancePresentation(to: ProcessInfo.processInfo.systemUptime) }
-        }
-        presentationTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
+        guard displayLink == nil, window != nil else { return }
+        let link = displayLink(target: self, selector: #selector(displayFrame(_:)))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
     }
 
-    func stopPresentationUpdates() { presentationTimer?.invalidate(); presentationTimer = nil }
+    /// The thumb is placed for the moment the frame reaches the screen.
+    @objc private func displayFrame(_ link: CADisplayLink) { advancePresentation(to: link.targetTimestamp) }
+
+    func stopPresentationUpdates() { displayLink?.invalidate(); displayLink = nil }
 
     func synchronizeInputPresentation() {
-        let value = smoothing.update(to: doubleValue, at: ProcessInfo.processInfo.systemUptime, playing: false,
-                                     generation: presentationGeneration, seekRevision: presentationSeekRevision)
+        runningClock = nil
         stopPresentationUpdates()
-        (cell as? TimelineSliderCell)?.presentationValue = value
+        (cell as? TimelineSliderCell)?.presentationValue = doubleValue
         needsDisplay = true
     }
 

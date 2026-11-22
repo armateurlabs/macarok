@@ -2148,6 +2148,7 @@ final class AppModel {
             bufferFraction = min(1, Double(snapshot.bufferedBytes) / Double(max(1, snapshot.targetBytes)))
         } else { bufferFraction = nil }
         if streamingBufferFraction != bufferFraction { streamingBufferFraction = bufferFraction }
+        player.setTransportBuffering(bufferFraction != nil)
         scrobbling?.update(isPlaying: player.state == .playing, isBuffering: player.state == .buffering || streamingBufferFraction != nil,
                            position: player.position, duration: player.duration)
         if player.state == .playing, !currentIsRadio, let track = currentTrack {

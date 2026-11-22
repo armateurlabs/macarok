@@ -279,17 +279,29 @@ final class VLCPlaybackEngineTests: XCTestCase {
         XCTAssertGreaterThan(playing.commonTicks, 5, "Common-mode sources must remain active during menu tracking.")
         XCTAssertGreaterThan(playing.position, initialPosition + 0.4,
                              "The timeline must advance before leaving the menu-tracking run loop.")
+        XCTAssertTrue(player.timeline.clock.isRunning, "Playing audio runs the cursor.")
 
         player.pause()
         try await eventually(player: player) { player.state == .paused }
+        XCTAssertFalse(player.timeline.clock.isRunning, "Anything but playing stops the cursor.")
         let pausedPosition = player.position
         let paused = runMenuTracking(player: player, duration: 0.6)
         XCTAssertEqual(paused.position, pausedPosition, accuracy: 0.1)
         XCTAssertEqual(player.state, .paused)
 
+        let pausedClock = player.timeline.clock
+        let resumedAt = ProcessInfo.processInfo.systemUptime
+        player.play()
+        try await eventually(player: player) { player.state == .playing }
+        let resumed = player.timeline.clock
+        XCTAssertTrue(resumed.isRunning)
+        XCTAssertEqual(resumed.position, pausedClock.position, "Resuming starts the cursor where it stopped, without a jump.")
+        XCTAssertLessThan(resumed.uptime - resumedAt, 0.3, "The cursor starts with the playing event, not with VLC's lagging clock.")
+
         player.stop()
         let stopped = runMenuTracking(player: player, duration: 0.6)
         XCTAssertEqual(stopped.position, 0, accuracy: 0.001)
+        XCTAssertEqual(player.timeline.clock, PlaybackClock(position: 0, uptime: player.timeline.clock.uptime, isRunning: false))
         XCTAssertEqual(player.state, .stopped)
         XCTAssertNil(player.lastError)
     }
