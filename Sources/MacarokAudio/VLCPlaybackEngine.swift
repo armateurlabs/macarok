@@ -56,16 +56,25 @@ public struct PlaybackClock: Equatable, Sendable {
 /// compared with it: VLCKit reports a cached time that lags up to ~0.6 s after a resume, so waiting for
 /// that clock would freeze the cursor and then make it jump. A clock that stays more than
 /// `maximumDrift` away for `driftGrace` is a synchronization error, reported to the caller, and the
-/// cursor is placed back on the clock once.
+/// cursor is placed back on the clock once. A clock that stops moving for `stallTimeout` while the cursor
+/// runs means the audio stopped although VLC still reports playing: the cursor stops on the audio heard
+/// and runs again once the clock moves.
 struct PlaybackCursor: Equatable {
     static let maximumDrift: Double = 1
     static let driftGrace: TimeInterval = 2
+    /// Above VLCKit's ~0.6 s report lag after a resume and an AirPlay device's ~1 s start.
+    static let stallTimeout: TimeInterval = 1.5
 
     private(set) var clock = PlaybackClock(position: 0, uptime: 0, isRunning: false)
+    private(set) var isStalled = false
     private var driftSince: TimeInterval?
+    private var lastSample: Double?
+    private var sampleMovedAt: TimeInterval = 0
 
     mutating func stop(at position: Double, now: TimeInterval) {
         driftSince = nil
+        isStalled = false
+        sampleMovedAt = now
         // A stopped clock's uptime is irrelevant; keeping it avoids republishing an unchanged cursor.
         guard clock.isRunning || clock.position != max(0, position) else { return }
         clock = PlaybackClock(position: max(0, position), uptime: now, isRunning: false)
@@ -76,6 +85,18 @@ struct PlaybackCursor: Equatable {
         guard !clock.isRunning else { return }
         clock = PlaybackClock(position: clock.position, uptime: time, isRunning: true)
         driftSince = nil
+    }
+
+    /// Follows every VLC clock sample. Returns true when the clock stopped moving under a running cursor,
+    /// which then stops on the audio heard; it stays stalled until the clock moves again.
+    mutating func observe(_ sample: Double, at now: TimeInterval) -> Bool {
+        guard sample.isFinite else { return false }
+        if let lastSample, abs(sample - lastSample) > 0.001 { sampleMovedAt = now; isStalled = false }
+        lastSample = sample
+        guard clock.isRunning, now - max(sampleMovedAt, clock.uptime) >= Self.stallTimeout else { return false }
+        stop(at: sample, now: now)
+        isStalled = true
+        return true
     }
 
     /// Compares a clock sample read when VLC notified it. Returns the drift that was corrected.
@@ -227,7 +248,13 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     }
 
     /// Audio is coming out, and no seek is waiting to land.
-    private var cursorRuns: Bool { state == .playing && !transportBuffering && pendingSeek == nil && inFlightSeek == nil }
+    private var cursorRuns: Bool {
+        state == .playing && !transportBuffering && !cursor.isStalled && pendingSeek == nil && inFlightSeek == nil
+    }
+
+    /// The audio actually reached, for resume points and saved progress: VLC's clock while the cursor runs,
+    /// so a cursor ahead of the audio is never saved; otherwise the cursor where it stands.
+    public var heardPosition: Double { cursor.clock.isRunning ? min(position, clockSample) : position }
 
     private func reconcileCursor(startedAt: TimeInterval? = nil) {
         if cursorRuns {
@@ -691,6 +718,9 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         let now = ProcessInfo.processInfo.systemUptime
         // A target that was never applied leaves the cursor on the audio actually heard.
         if placesCursor { cursor.stop(at: reportedPosition, now: now) }
+        if cursor.observe(reportedPosition, at: now) {
+            Self.logger.error("Playback clock stopped while VLC reports playing; the timeline cursor stopped on the audio heard")
+        }
         // A landed seek starts the cursor from its target, where it stands.
         reconcileCursor()
         publishCursor(now: now)
@@ -718,7 +748,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     }
 
     private func reportInterruption() {
-        let reached = handoff.current().flatMap { $0.backend.generation == generation ? $0.lastPlayingPosition : nil } ?? position
+        let reached = handoff.current().flatMap { $0.backend.generation == generation ? $0.lastPlayingPosition : nil } ?? heardPosition
         guard let onInterrupted else {
             reportError("The connection to the server was lost before the end of this track. Press Play to continue where it stopped.")
             return
@@ -730,6 +760,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         handoff.stopAll()
         player?.stop()
         setState(.stopped)
+        stopCursor(at: reached)
         onInterrupted(reached)
     }
 
@@ -753,6 +784,7 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
     }
 
     private func reportError(_ message: String) {
+        let heard = heardPosition
         endTransition()
         stopTimelineUpdates()
         explicitlyStopped = true
@@ -761,6 +793,8 @@ public final class VLCPlaybackEngine: NSObject, ObservableObject {
         player?.stop()
         if lastError != message { lastError = message }
         setState(.failed)
+        // The resume point is the audio heard, not a cursor that ran ahead of a stalled decoder.
+        stopCursor(at: heard)
         onError?(message)
     }
 }

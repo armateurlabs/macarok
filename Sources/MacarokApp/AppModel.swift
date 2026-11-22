@@ -2169,12 +2169,12 @@ final class AppModel {
         if lastSavedTick >= 5 {
             lastSavedTick = 0; updateNowPlaying()
             if player.state == .playing, !currentIsRadio, let track = currentTrack {
-                archive?.recordProgress(track: track, position: player.position)
-                podcasts.record(track: track, position: player.position, duration: player.duration)
+                archive?.recordProgress(track: track, position: player.heardPosition)
+                podcasts.record(track: track, position: player.heardPosition, duration: player.duration)
             }
             if player.state == .playing, let store {
                 queueSaveRevision &+= 1
-                let revision = queueSaveRevision, index = currentIndex ?? 0, position = currentIsRadio ? 0 : player.position
+                let revision = queueSaveRevision, index = currentIndex ?? 0, position = currentIsRadio ? 0 : player.heardPosition
                 Task { try? await backgroundWorker.saveQueuePosition(store: store, currentIndex: index, position: position, revision: revision) }
             }
         }

@@ -30,6 +30,29 @@ final class PlaybackClockStabilityTests: XCTestCase {
         }
     }
 
+    func testFrozenClockStopsTheCursorOnTheAudioHeardUntilItMovesAgain() {
+        var cursor = PlaybackCursor()
+        cursor.run(at: 0)
+        XCTAssertFalse(cursor.observe(0.2, at: 0.2))
+        XCTAssertFalse(cursor.observe(1, at: 1))
+        XCTAssertFalse(cursor.observe(1, at: 2.4), "A clock still for less than the timeout is not a stall.")
+        XCTAssertTrue(cursor.observe(1, at: 2.6), "VLC still reports playing, but its clock stopped: so does the cursor.")
+        XCTAssertEqual(cursor.clock, PlaybackClock(position: 1, uptime: 2.6, isRunning: false), "Stopped on the audio heard.")
+        XCTAssertTrue(cursor.isStalled)
+        XCTAssertFalse(cursor.observe(1.2, at: 4))
+        XCTAssertFalse(cursor.isStalled, "The clock moving again releases the cursor.")
+    }
+
+    func testResumeLagIsNotAStall() {
+        var cursor = PlaybackCursor()
+        _ = cursor.observe(10, at: 90)
+        cursor.stop(at: 10, now: 95)
+        cursor.run(at: 100)
+        // VLCKit keeps reporting the paused time for ~0.6 s after a resume, and an AirPlay start takes ~1 s.
+        for now in [100.2, 100.6, 101.2] { XCTAssertFalse(cursor.observe(10, at: now)) }
+        XCTAssertTrue(cursor.clock.isRunning)
+    }
+
     func testLastingDriftIsCorrectedOnceAsASynchronizationError() {
         var cursor = PlaybackCursor()
         cursor.run(at: 0)
