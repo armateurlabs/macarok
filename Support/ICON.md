@@ -16,6 +16,10 @@ swift scripts/make-icon.swift
 
 The AppKit generator validates the square source, applies a consistent rounded-square export mask, and downsamples with high-quality interpolation. The mask excludes generated exterior fringe while retaining the wolf, apple, colors, and internal tile. It writes the standard 16, 32, 128, 256, and 512 point representations at 1× and 2× into `.build/Macarok.iconset`, exports the largest PNG, then calls `iconutil` to produce the ICNS. The app build script regenerates these resources on every build.
 
+## Menu bar icon
+
+`Support/MenuBarIcon.png` is the menu bar silhouette: the app icon's wolf, cropped below the head so the head, eye, and apple fill the item. It was traced from `AppIconArtwork.png` by keeping its blue body and its apple, leaf, and stem, separating the apple from the muzzle with a thin gap, and filling the apple's highlight. The eye and open mouth stay in negative space. `Sources/MacarokApp/MenuBarIcon.swift` embeds it as 18, 36, and 54-pixel PNG representations of an 18-point template image, so macOS draws it in the menu bar's color and highlight. After changing the source, regenerate those representations by downsampling it with high-quality interpolation and replacing the base64 strings.
+
 ## Verification
 
 The selected icon was packaged on 16 November 2026. All ten decoded ICNS representations retain their expected dimensions and alpha channels; the largest representation matches the 1024-pixel PNG exactly. The 32- and 64-pixel exports were visually inspected. The local Release bundle passed deep strict signature verification and retains macOS 14.0 as its minimum. Its icon-only resource update preserves the existing executable apart from its code signature; no application source compilation was needed. The previous bundle is retained under the ignored `.build/icon-b-update` directory.

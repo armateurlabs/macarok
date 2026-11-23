@@ -219,4 +219,12 @@ private final class TestMenuBarHost: MenuBarHosting {
         self.player = player; visible = true; updates += 1
     }
     func hide() { visible = false }
+
+    @MainActor
+    func testMenuBarIconIsAnEighteenPointTemplateWithEveryScale() {
+        let image = MenuBarIcon.image
+        XCTAssertTrue(image.isTemplate, "The menu bar draws a template in its own color and highlight.")
+        XCTAssertEqual(image.size, NSSize(width: 18, height: 18))
+        XCTAssertEqual(image.representations.map(\.pixelsWide).sorted(), [18, 36, 54], "Every embedded scale decodes.")
+    }
 }

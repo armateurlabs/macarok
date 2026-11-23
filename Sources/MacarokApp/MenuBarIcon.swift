@@ -1,0 +1,21 @@
+import AppKit
+
+/// The menu bar item: the app icon's wolf, zoomed to its head, as a monochrome template that follows
+/// the menu bar's appearance and highlight. Generated from `Support/MenuBarIcon.png` (see Support/ICON.md).
+enum MenuBarIcon {
+    static let image: NSImage = {
+        let image = NSImage(size: NSSize(width: 18, height: 18))
+        for encoded in [scale1, scale2, scale3] {
+            guard let data = Data(base64Encoded: encoded), let representation = NSBitmapImageRep(data: data) else { continue }
+            representation.size = NSSize(width: 18, height: 18)
+            image.addRepresentation(representation)
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Macarok"
+        return image
+    }()
+
+    private static let scale1 = "iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAABWElEQVR42rXTvUtcURAF8N9+KIYshKiQtIGk0jKdtRBNaat/gJDCIhDb/AFpttDOUlJsI2wiNiIIWosphIRUVtsEYuH6sbs288J1vSu6kAOX997cmTPnnjuP4VBCOQ1UhiCpoIseFvAMpw8pLEdxBdWIjWMzyE4w9ij5gXf4FSQ9/EGteo+KQv40XuMJ5rGY5B1iP/ZvKahgJL4n0Ug6F6uDa3xHHb9D5T8PUkzhOAp38Apfg6CLFrYS8npa/CJuYQNnkfAzjP2EC1xGfB2f8RcH+FDCW6xgLooKdNHEBGaSWCluahdv8BLfYDmReI2rxOg0Xrynez/wEU+L7l8SI3Pm9pOch4DsdC+FBzmygqSDNmaTm67GUxnPsZck54iK460GyWhuABsZL3qZI7VQi+alfpL3kdQOo3Or2NtOJv8OmgNU5NbRoH+wirUY915Obh/OIqfrf+EGpb2JI6H5kPYAAAAASUVORK5CYII="
+    private static let scale2 = "iVBORw0KGgoAAAANSUhEUgAAACQAAAAkCAYAAADhAJiYAAAC2UlEQVR42u2XO2gVQRSGv01yfYKggoQoBAmo8dEoGDWFbxEERS0UEYWAUbER7QRBK23Uwk5S2KcJiliojYUK4gO1MlpEiJVXEfGR5O6OzT/hMOwmd+9db0By4DD7mJ355z/PhWkZl2aNkXTKZMoBpLECcAJ4ATwCFjUaaAS06LoVGACc0et619JoVnYCQwIxJq0AH4FSI1mZAVwxjIxpTKS/gLaiNm7SxlYtKxuA5wIQS12gI8CCIoA0TfC+Dbgmk1hWLLAfQBk45deM6vCLWNdrgW1ABzBHzxYCm4D5uk8M+Ngw2Au8AbYA64DjtYDxfrECuJNCv9WKwDjjMw54CVwEtgKf9Ox03rC3TnoQ+G7oD4HEARBnTDcAbAbuAu/0rAzsyeu0Xk6aTUY1fgUuK6x36d6lsFPRYYZTgI4CS7KYaBYIS+FM4KphwJtjCFhp5h3Ru0qKqYaAcwZAbIA6YONETHhZCpwx9PpF/LjdzO0xQJOUvHMB2KvrPwHo18BsC8Y6bZec7rGSVkivH+/pm27gfgoj4X27mLZAPsihjwEd1iSrgKPAPqAzYCmW+cLQ7QaWA316l2QUSR/2N4B+fdMFvAc+y+96gAMod9w0DupPNJYStva0X1QUXeAH1egz4KFxA58K5qKU/VuLjmSEscsIbZfiL5PlpXD9b8AtdQHjctbUFJdD4zrmDyriFgcRPp7G+01EVHJuVC07/tCXgHlBKYosKh/yff8AiAUzCKwPIjrKSoZeDgEPlCeSAsB4M70yflKqpm5FaqQAdgM/M2pSXjCJCmhr3jbVTzxsQCQFsBOrmOYC4x17hzlVvWB8ubidF0yTzNWuNiCpIZzT1CfXziDLVwUIZc6w1aw3qp6k1MpJwSTAflXtSkH/Rk7j01rYiYDzWqToP8dhA67qyFqmBtuZylyv+KBorqVhXwPMKpgZn89W1wKoDLwt2GS+/ymZ/mla/k/5C+fOz2V7nO1uAAAAAElFTkSuQmCC"
+    private static let scale3 = "iVBORw0KGgoAAAANSUhEUgAAADYAAAA2CAYAAACMRWrdAAAElklEQVR42u2aX6gVVRTGf2fOuXm7diMULz2IJWWUYmj2EpaQUqGiok9hgQ+FgQ+GST2Y9mA9iARGkYKEFBIXI1IEta6CIP6jhySRMkJJUUwLEf+W55yZXtaK5bjnzNxm35lzzA2LM3fO3D177W+tb3177wN3W2e1SoePPZDr5p0CSDX3A23WFKEQGAm8ADwMnBAEK52O0jLgdyAS+yzmeMfkUk2uHwK+NQ7VxSJgaidFYWDCa65BqS7haK8/l+dq7e5UzXyuMSg1zHUkjBhJnnW1M9sHJleeBA4aB8KYU5G5dwMY3Y65VomF0ZvANRNuUYKpY38LQ5biWMVhQcyh8cDuFqFnHaqLQ03gPDC8SNrXgafNYg/wLnDVQRBZ7J2iJJUtpvZ93ea9NeBB4CVgCfC4kUhJtB3J5yXgC+AeYC/wtRTtOnC5NoTFVPXbZGAe8AwwBuiNheFIE4pNuZfkVChWA7YD/cA5YBRwFHgMeAtYP5TCdJK8PEs41Q1tJ5n9/gTwIrAI+A24KPd/AB7wHYm2mL4N/BVL8oZJ9ptiWfNInfoemAA8DcwA3jDPHJOw9MqKgcmZzQ5GCzMg0sqpEDgJDAPek8mx3zfk3g7gfl+IaX7cZ3TcTYOEReQIsBp4VcJosyPMXGEaAi+LaZ+N2P/p9QofBKFOjQYOG6dsrQnl3hJHiHyUoQCrTRGCaCTUNr2/578QQ9UhMmcCpx0DtLM610xGj1zPyYCWfncamGiUSJiAbB0YGExxrTruPwd81UIh6N/vmwKsbbrUoWYKeWgfi+X/6wmO2Xd/mKbZ4mHTCzwvSvtHR7glJfy9BuUR4mi9xczHNeB5eXcV+FX6tiyrz/8BfAL0udCJIzNGkrwfOON4caNFwkciZHWylgJnHQNPQ2uXGc+qhHD9VIr0LGCl9cOi0we8DnxndJvtJK2Y6oCvC0IjgJ0OlstK86eAcYbCtwE/Ad8Ay0WGTRRJFcmYe6xefAT4WCB1sU1WQapobZEQOuooAVlNn78CHAfWAdOEsGbL3seu2PPbbE7NAy7ncMYVQpuAA4Og8zTnsrzzumjTfwv0erMKDXMMIk3j5XGuaSa7adZh+swhEdq3pNb4nCi1Gkzk2Sz6V4AvJTRv4wtlkDUO5dBOZmven8AHwNgEzXqbohhoU+dsWdlgNm0UmGraXkQvsG8Qa6QiTEPvuAgEK76DwSw9umXJ7TP58zq1VRaQ6lAlz7HSQuDnNnBqg69DFLu8HyZL8HMJmnCondro2ETNvXeh28VrhUyaBRPFHoNSxeeGTEVkUVQgUk2xC7ItV/GJlMZxfwnUr2i94vvkRDtaV6JTh32fc2lHr5VUpNWxBT7R0jh+QoRwo8C8srXylDBx7oOFIJZfG6VAF314pvv7A6Laq2aPPtdJSCgF+VlBq6xz3P2+99u7gF9S9jGKCMVpvogjkA5nyElFWBJagTkaIm8Y2g7nm9kro+l7u3zP1FM+q3wO8ujzRVw1ObcdFdOCRbeGfD7qk5G7ufXnO2XaDl/kUZMDugWyei67XbvTfqbHUP0Qs51+WHUXrf9l+wdvvk0J9Q8oUAAAAABJRU5ErkJggg=="
+}

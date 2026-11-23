@@ -136,9 +136,7 @@ private final class NativeMenuBarHost: NSObject, MenuBarHosting, NSPopoverDelega
         if statusItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
             statusItem = item
-            let image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Macarok")
-            image?.isTemplate = true
-            item.button?.image = image
+            item.button?.image = MenuBarIcon.image
             item.button?.imagePosition = .imageOnly
             item.button?.setAccessibilityLabel("Macarok mini player")
             item.button?.target = self
